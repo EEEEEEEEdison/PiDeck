@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
 import { useAtomValue } from "jotai";
 import { dshModuleHiddenAtom, imageGenModuleHiddenAtom, composerModesHiddenAtom, acpEnabledAtom, acpToolsAtom } from "../../atoms";
-import { AlertCircle, BrainCircuit, Check, ChevronDown, ChevronLeft, ChevronRight, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, ListChecks, Loader2, Paperclip, Plus, RefreshCw, Settings2, Sparkles, Star, Target, Terminal, Wrench, X } from "lucide-react";
+import { AlertCircle, BrainCircuit, Check, ChevronDown, ChevronLeft, ChevronRight, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, ListChecks, Loader2, Paperclip, Plus, RefreshCw, Settings2, Sparkles, Star, Target, Terminal, X, Zap } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import type { PromptEnhanceView } from "../../hooks/usePromptEnhance";
 import { PromptEnhanceControls } from "./PromptEnhanceControls";
@@ -39,12 +39,13 @@ const MODE_LABEL: Record<ComposerAgentMode, TranslationKey> = {
 	imagegen: "app.composerModeImagegen",
 };
 
-/** 模式图标：普通=扳手，规划=清单，目标=靶心，生图=图片（与旧 chip 图标一致）。 */
+/** 模式图标：普通=闪电（直接执行），规划=清单，目标=靶心，生图=图片。
+ * 普通模式原为扳手，2026-10 用户反馈不好看且与设置类扳手语义相近，改用闪电表达「直接执行」。 */
 function modeGlyph(mode: ComposerAgentMode) {
 	if (mode === "plan") return <ListChecks size={14} strokeWidth={2} aria-hidden="true" />;
 	if (mode === "imagegen") return <ImageIcon size={14} strokeWidth={2} aria-hidden="true" />;
 	if (mode === "goal") return <Target size={14} strokeWidth={2} aria-hidden="true" />;
-	return <Wrench size={14} strokeWidth={2} aria-hidden="true" />;
+	return <Zap size={14} strokeWidth={2} aria-hidden="true" />;
 }
 
 /** 渲染 widget 单行内容，将 ✓/☑ 完成标记高亮为绿色，让 todo/plan 扩展的完成态更醒目。 */
@@ -151,7 +152,7 @@ function AcpConfigControls(props: { options: import("../../../../shared/types/ac
 				<Select key={entry.option.id} value={String(entry.option.currentValue ?? "")} disabled={props.disabled} onValueChange={(value) => props.onSet(entry.option.id, value)}>
 					<SelectTrigger
 						size="sm"
-						className="composer-bar-btn backend h-7 gap-1 rounded-md border-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:border-transparent data-[state=open]:ring-0 max-w-44 [&_[data-slot='select-icon']]:hidden"
+						className="composer-bar-btn backend h-7 gap-1 rounded-md border-transparent bg-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:border-transparent data-[state=open]:bg-muted/60 data-[state=open]:ring-0 max-w-44 [&_[data-slot='select-icon']]:hidden"
 						title={`${entry.option.name}${entry.option.description ? ` — ${entry.option.description}` : ""}`}
 					>
 						{entry.option.category === "model" ? (
@@ -231,7 +232,7 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; acpToolId?
 		>
 			<SelectTrigger
 				size="sm"
-				className="composer-bar-btn backend h-7 gap-1 rounded-md border-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:border-transparent data-[state=open]:ring-0 [&_[data-slot='select-icon']]:hidden"
+				className="composer-bar-btn backend h-7 gap-1 rounded-md border-transparent bg-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:border-transparent data-[state=open]:bg-muted/60 data-[state=open]:ring-0 [&_[data-slot='select-icon']]:hidden"
 				title={t("session.backendPickerHint")}
 			>
 				{/* 不渲染 SelectValue：按当前后端手动渲染 logo，输入框只显示图标不带文字。
@@ -558,9 +559,12 @@ export function ComposerBottomBar(props: {
 						>
 							<SelectTrigger
 								size="sm"
-								className="composer-bar-btn h-7 gap-1 rounded-md border-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:border-transparent data-[state=open]:ring-0"
+								className="composer-bar-btn mode h-7 gap-1 rounded-md border-transparent bg-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:border-transparent data-[state=open]:bg-muted/60 data-[state=open]:ring-0 [&_[data-slot='select-icon']]:hidden"
 								/* normal 模式只显图标（默认态不需要读字，用户反馈过）；特殊模式（计划/目标/生图）显文本提醒非默认态。
-							    可访问性不降级：aria-label/title 始终携带当前模式全名，hover/读屏可读。菜单项保留文字便于扫读。 */
+							    可访问性不降级：aria-label/title 始终携带当前模式全名，hover/读屏可读。菜单项保留文字便于扫读。
+							    外观与「+」等 ghost 按钮同族（2026-10 用户反馈实心底不好看）：SelectTrigger 基底自带
+							    bg-bg-input，必须显式 bg-transparent；自带 chevron 也隐藏——与后端选择器同理，
+							    图标+箭头并排会破坏居中，且右侧「+」已证明无箭头也认得出来是下拉。 */
 								aria-label={t(MODE_LABEL[props.composerAgentMode])}
 								title={t(MODE_LABEL[props.composerAgentMode])}
 							>
