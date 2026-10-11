@@ -716,6 +716,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"browser.deviceTablet": "Tablet",
 	"browser.deviceLabel": "Device Type",
 	"browser.newTab": "New Tab",
+	"browser.tabsAriaLabel": "Built-in browser tabs",
 	"browser.closeTab": "Close Tab",
 	"browser.minimize": "Minimize",
 	"app.showSplit": "Split view",

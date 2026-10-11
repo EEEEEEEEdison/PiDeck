@@ -721,6 +721,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"browser.deviceTablet": "平板",
 	"browser.deviceLabel": "裝置型別",
 	"browser.newTab": "新建標籤頁",
+	"browser.tabsAriaLabel": "內建瀏覽器標籤頁",
 	"browser.closeTab": "關閉標籤頁",
 	"browser.minimize": "最小化",
 	"app.showSplit": "雙欄對比",
