@@ -359,7 +359,8 @@ export function App() {
 	}, [showToast]);
 	// ACP 工具表（settings.acpTools 快照）：挂载时拉一次供新建会话菜单/设置页共享；
 	// 后续变更由设置页保存后整表回写 acpToolsAtom，不做事件订阅（改动频率极低）。
-	// 同一次拉取顺带同步 acpEnabled 快照：菜单组仅在开关开启时渲染（主进程同规则门控注册）。
+	// 同一次拉取顺带同步 acpEnabled 快照：菜单组仅在开关开启时渲染（主进程在 create 边界同规则门控）。
+	// 开关的后续变更由设置页开关直接回写 acpEnabledAtom，无需重启应用。
 	useEffect(() => {
 		let cancelled = false;
 		void api.acp

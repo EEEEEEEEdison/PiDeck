@@ -774,6 +774,12 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		if (patch.backend !== undefined && patch.backend !== entry.backend && (entry.status === "active" || sessionRuntimeCoordinator.getTarget(sessionId))) {
 			throw new Error(mainCopy("session.backendLocked"));
 		}
+		// 草稿会话切到非 pi 后端时回收本项目的 standby 预热进程：它服务不了这个会话，
+		// 不主动丢就只能等 10min TTL 自然到期（用户反馈的「没用到还占着内存」）。
+		// 放在锁定判定之后：已锁定的会话会先报错，不改状态也不回收进程。
+		if (patch.backend !== undefined && patch.backend !== entry.backend && patch.backend !== "pi") {
+			agentManager.releaseStandbyAgent(entry.projectId);
+		}
 		// DSH agent 预设同样创建即固定：激活会话的 preset 由 host 会话 header 权威持有，
 		// 渲染层只读展示，拒绝任何运行时改写（草稿期预选不受限）。
 		if (patch.agentPreset !== undefined && patch.agentPreset !== entry.agentPreset && entry.backend === "dsh" && (entry.status === "active" || sessionRuntimeCoordinator.getTarget(sessionId))) {

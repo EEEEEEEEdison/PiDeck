@@ -30,7 +30,7 @@ test("picker 选项组:Agent CLI 组内直接列工具,选中即切后端+工具
 
 test("acp 后端隐藏 pi 模型/思考 chip(两套模型语义不混用)", () => {
 	const source = read("src/renderer/src/components/session/ComposerComponents.tsx");
-	assert.match(source, /isImageGenMode \|\| isVideoGenMode \|\| props\.backend === "acp" \? null : \(\s*<ModelThinkingChip/, "acp 后端必须隐藏 ModelThinkingChip");
+	assert.match(source, /isMediaComposer \|\| props\.backend === "acp" \? null : \(\s*<ModelThinkingChip/, "acp 后端必须隐藏 ModelThinkingChip");
 	assert.match(source, /focus-visible:ring-0/, "picker 不得有 focus 环闪");
 });
 

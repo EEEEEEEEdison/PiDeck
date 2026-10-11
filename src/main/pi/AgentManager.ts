@@ -984,6 +984,23 @@ export class AgentManager {
 	}
 
 	/**
+	 * 丢弃指定项目未被认领的 standby 进程（回收，不是消费）：草稿会话切到非 pi 后端
+	 * （生图/生视频/DSH/ACP）时调用——该进程已经服务不了这个会话，继续挂着只能等
+	 * 10min TTL 自然到期（用户反馈的「没用到的预加载进程占着内存」）。
+	 * 只丢项目匹配的条目：池是单槽位，同项目另一个新草稿仍可能认领它。
+	 * 返回是否真的丢掉了条目（调用方无需关心失败：没池子/项目不符都当无事发生）。
+	 */
+	releaseStandbyAgent(projectId: string): boolean {
+		if (this.standbyPool.status()?.projectId !== projectId) return false;
+		const agentId = this.standbyPool.clear();
+		if (!agentId) return false;
+		// 与 TTL 到期同一条回收路径（stop 会顺带从 agents map 移除，standby 标记进程对 UI 本就不可见）
+		void this.stop(agentId);
+		void this.appLogger?.info("agent", "Standby agent released", { agentId, projectId });
+		return true;
+	}
+
+	/**
 	 * 认领 standby：命中（项目一致 + spawn 指纹一致 + 进程仍 idle）则转正返回已握手 tab，
 	 * 调用方跳过 createAgent 直接绑定会话；任何不满足都返回 null 回退正常创建。
 	 * 会话级代理覆盖（on/off）与飞书绑定是 spawn 时注入的 env，池化进程按全局/未绑定 spawn，

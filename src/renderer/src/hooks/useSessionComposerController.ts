@@ -1995,13 +1995,18 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const upsertSession = useSetAtom(upsertSessionAtom);
 
 	/**
-	 * 切换后端（pi ↔ dsh）：仅草稿期可用。
-	 * 会话一旦激活（有 runtime 或 record 已 active）即锁定后端——pi 会话文件（JSONL）
-	 * 与 DSH 会话（host session log）格式不同，中途切换会导致时间线消息来源混乱、
-	 * 同步渲染不可靠。激活后 UI 不再渲染切换器（changeBackend 返回 undefined）。
-	 * imagegen 后端同样锁定：生图会话不可切回 pi/dsh（互不影响）。
+	 * 切换后端（pi ↔ dsh ↔ imagegen/videogen/acp）：仅「未开始对话」期可用。
+	 * 锁定判据是「会话已有真实内容」——catalog 抬 active（= 已发出第一条消息并落盘，
+	 * dsh/acp 由 prompt dispatch 显式 promoteToActive，pi/imagegen 由首次落盘触发）
+	 * 或消息缓存里已出现用户消息（覆盖落盘前的窗口）。
+	 * 一旦有内容即锁定：pi 会话文件（JSONL）、DSH host session log、生图/生视频历史
+	 * 格式互不相同，中途切换会导致时间线消息来源混乱、同步渲染不可靠。
+	 * 不再看 runtime 绑定：预热/认领出来的进程还没产生任何消息，此时切换是安全的
+	 * （旧实现把「Agent 已启动」当锁定条件，导致新建会话一切到生图/生视频就永久锁死，
+	 * 连生视频模式都无法退出）。
 	 */
-	const backendLocked = Boolean(runtime?.agentId) || record?.status === "active" || record?.backend === "imagegen" || record?.backend === "videogen";
+	const hasUserMessage = (messageCache?.messages ?? []).some((message) => message.role === "user");
+	const backendLocked = record?.status === "active" || hasUserMessage;
 	const changeBackend = useCallback(
 		async (next: AgentBackend, explicitAcpToolId?: string) => {
 			if (backendLocked) return;
@@ -2034,6 +2039,19 @@ export function useSessionComposerController(options: UseSessionComposerControll
 				}
 				return;
 			}
+			// 未开始对话的会话允许换后端：先把预热/认领出来的 runtime 停掉再改 record。
+			// 主进程边界防御要求「无绑定 runtime」才接受 backend 变更
+			// （sessionIpc 的 sessionsCatalogUpdate 守卫），且停掉没人用的进程正是用户诉求
+			// ——否则预热出来的 pi 进程会一直挂到会话被删。
+			// 停不掉不拦：交给主进程守卫给出与旧行为一致的报错。
+			const boundAgentId = runtime?.agentId;
+			if (boundAgentId) {
+				try {
+					await desktopApi.system.stopAgent(boundAgentId);
+				} catch {
+					// 忽略：主进程仍会以「后端已锁定」拒绝本次变更，用户能看到明确原因
+				}
+			}
 			try {
 				// ACP：切换时必须带上工具预选（激活链 spawn 按工具表取命令行），
 				// 默认沿用会话已选或登记表第一项；工具表为空（开关刚被关）不切换。
@@ -2064,7 +2082,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 				showNotice(error instanceof Error ? error.message : String(error), 4000);
 			}
 		},
-		[backendLocked, isGuideBootstrapSession, record, sessionId, store, upsertSession],
+		[backendLocked, isGuideBootstrapSession, record, runtime?.agentId, sessionId, store, upsertSession],
 	);
 
 	/**

@@ -4937,46 +4937,49 @@ app
 		ensurePiResourceMigration = ensureResourceMigration;
 		agentManager.configureResourceMigrationGate(ensureResourceMigration);
 		// 多后端网关装配：pi + dsh + acp（DSH 在窗口创建后后台预热，失败时按需重试）。
-		// ACP 是 opt-in（settings.acpEnabled，默认 false）：关闭时完全不创建 AcpAgentManager、
-		// 不注册进合成器——pi 用户零成本；开启后每次 create 即 spawn 对应 CLI，无预热。
-		// 变更开关重启生效，故只需启动时读一次。
-		if (settingsStore.get().acpEnabled === true) {
-			acpAgentManager = new AcpAgentManager({
-				piLocator,
-				getProject: (projectId) => projectStore.get(projectId),
-				getTools: () => settingsStore.get().acpTools ?? [],
-				// configOptions 变更推送：set_config_option 响应/config_option_update 通知都走同一事件,
-				// 渲染层按 agentId 隔离(旧 agent 迟到事件写旧 atom,不再被读)。
-				onConfigOptionsChanged: (tab, options) => {
-					if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ipcChannels.acpSessionConfigChanged, { agentId: tab.id, options });
-				},
-				// 图片物化落盘：ACP 消息里的 base64 图复用生图 blob 存储（ref 形态回填消息；
-				// imagegen 装配在另一段完成，经模块级 ref 延迟取实例）。
-				imageStore: {
-					put: (data, mimeType) => acpImageBlobStore?.put(data, mimeType) ?? Promise.resolve(null),
-				},
-				// ACP 会话标题（session_info_update）写回 catalog：ACP 无本地文件，标题在 agent 侧。
-				onTitleChanged: (deckSessionId, title) => {
-					const entry = sessionCatalog?.get(deckSessionId);
-					if (!entry || entry.title === title) return;
-					void sessionCatalog
-						.update(entry.id, { title })
-						.then(() => {
-							if (mainWindow && !mainWindow.isDestroyed()) {
-								mainWindow.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: entry.projectId });
-							}
-						})
-						.catch((error: unknown) => {
-							void appLogger.warn("session", "ACP title sync to catalog failed", { deckSessionId, title, error: error instanceof Error ? error.message : String(error) });
-						});
-				},
-				logger: appLogger,
-			});
-			quitCleanup.register("acp", async () => {
-				await acpAgentManager?.stopAll();
-			});
-		}
-		compositeAgentGateway = new CompositeAgentGateway(acpAgentManager ? [agentManager, dshAgentManager, acpAgentManager] : [agentManager, dshAgentManager]);
+		// ACP 是 opt-in（settings.acpEnabled，默认 false）：网关常驻注册，但开关是运行时读的
+		// （deps.isEnabled），关闭时 create 直接拒绝——既保证「关闭就不 spawn 任何 CLI」，
+		// 又让设置页开关立即生效（不必重启）。
+		// 不按启动时的开关决定是否注册：合成器的事件订阅（onOutput）与能力并集在启动时一次成形，
+		// 启动后才补注册的网关收不到事件转发，ACP 时间线会静默无输出；
+		// 而 AcpAgentManager 构造函数不 spawn 任何进程，常驻注册本身零运行时成本。
+		// 开启后每次 create 即 spawn 对应 CLI，无预热。
+		acpAgentManager = new AcpAgentManager({
+			piLocator,
+			getProject: (projectId) => projectStore.get(projectId),
+			getTools: () => settingsStore.get().acpTools ?? [],
+			isEnabled: () => settingsStore.get().acpEnabled === true,
+			// configOptions 变更推送：set_config_option 响应/config_option_update 通知都走同一事件,
+			// 渲染层按 agentId 隔离(旧 agent 迟到事件写旧 atom,不再被读)。
+			onConfigOptionsChanged: (tab, options) => {
+				if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ipcChannels.acpSessionConfigChanged, { agentId: tab.id, options });
+			},
+			// 图片物化落盘：ACP 消息里的 base64 图复用生图 blob 存储（ref 形态回填消息；
+			// imagegen 装配在另一段完成，经模块级 ref 延迟取实例）。
+			imageStore: {
+				put: (data, mimeType) => acpImageBlobStore?.put(data, mimeType) ?? Promise.resolve(null),
+			},
+			// ACP 会话标题（session_info_update）写回 catalog：ACP 无本地文件，标题在 agent 侧。
+			onTitleChanged: (deckSessionId, title) => {
+				const entry = sessionCatalog?.get(deckSessionId);
+				if (!entry || entry.title === title) return;
+				void sessionCatalog
+					.update(entry.id, { title })
+					.then(() => {
+						if (mainWindow && !mainWindow.isDestroyed()) {
+							mainWindow.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: entry.projectId });
+						}
+					})
+					.catch((error: unknown) => {
+						void appLogger.warn("session", "ACP title sync to catalog failed", { deckSessionId, title, error: error instanceof Error ? error.message : String(error) });
+					});
+			},
+			logger: appLogger,
+		});
+		quitCleanup.register("acp", async () => {
+			await acpAgentManager?.stopAll();
+		});
+		compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager, acpAgentManager]);
 		sessionRuntimeCoordinator = new SessionRuntimeCoordinator(sessionCatalog, compositeAgentGateway, sendAgentPromptWithIntegrations, appLogger);
 		// 终态惰性解绑（getAgentId → unbindTerminalAgent）发生在查询路径里，必须把解绑推给渲染层：
 		// 否则渲染层快照停在 error，红点常亮且「关闭 Agent」永远对不上存在的运行实例。
