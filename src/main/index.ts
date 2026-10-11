@@ -283,6 +283,7 @@ import { IdleAgentReleaser } from "./sessions/IdleAgentReleaser";
 import { StaleDraftReaper } from "./sessions/StaleDraftReaper";
 import { SessionCommandIpcError } from "./sessions/SessionCommandIpcError";
 import { appendSessionForkSuffix } from "./sessions/sessionForkTitle";
+import { createSessionForkCommands } from "./sessions/sessionForkCommands";
 import { CodexSessionImporter } from "./sessions/CodexSessionImporter";
 import { ClaudeSessionImporter } from "./sessions/ClaudeSessionImporter";
 import { QoderSessionImporter } from "./sessions/QoderSessionImporter";
@@ -1118,6 +1119,69 @@ async function replaceAgentSession(agentId: string, replace: () => Promise<unkno
 		onRestored: (binding) => emitReplacementState(binding, false),
 	});
 }
+
+// ── fork/clone 统一命令层（桌面 IPC 与 Web HTTP 共用；W1 重发/编辑 fork 化统一）──
+// DSH fork/clone：runtime 已原地换绑到新会话（agentId 不变，焦点会话 id 不变），
+// 只需把 catalog 的 dshSessionId 同步为新 fork 会话，重启后 attach 正确。
+const forkDshAgentSessionImpl = async (target: SessionRuntimeTarget, entryId: string) => {
+	const result = await dshAgentManager.forkSession(target.agentId, entryId);
+	const tab = dshAgentManager.list().find((candidate) => candidate.id === target.agentId);
+	if (tab?.sessionId) {
+		await sessionCatalog.attachRuntime({
+			sessionId: target.sessionId,
+			dshSessionId: tab.sessionId,
+			promoteToActive: true,
+		});
+	}
+	return { ...result };
+};
+// DSH clone：fork 无锚点（完整副本），runtime 换绑到新会话，语义同 fork。
+const cloneDshAgentSessionImpl = async (target: SessionRuntimeTarget) => {
+	const result = await dshAgentManager.cloneSession(target.agentId);
+	const tab = dshAgentManager.list().find((candidate) => candidate.id === target.agentId);
+	if (tab?.sessionId) {
+		await sessionCatalog.attachRuntime({
+			sessionId: target.sessionId,
+			dshSessionId: tab.sessionId,
+			promoteToActive: true,
+		});
+	}
+	return { ...result };
+};
+/** fork/clone 成功后推送 catalog 刷新：pi 新建了 catalog 条目、DSH 换绑了 dshSessionId，
+ * 侧栏只有收到 sessionsCatalogRefreshed 才会静默重拉列表（useProjectSync），否则
+ * 新建/换绑后的会话要等下次手动刷新才出现。Web 端由 /api/events SSE 快照 diff 兜底。 */
+const notifyForkCatalogRefreshed = (sessionId: string): void => {
+	const projectId = sessionCatalog.get(sessionId)?.projectId;
+	if (!projectId) return;
+	const window = mainWindow;
+	if (window && !window.isDestroyed()) {
+		window.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId });
+	}
+};
+// 惰性初始化：装配顺序上 registerIpc/WebServiceManager 都会先拿到引用，而
+// sessionRuntimeCoordinator/agentManager 在 whenReady 里才赋值；包一层闭门工厂避免顶层直用未赋值变量。
+let sessionForkCommandsInstance: ReturnType<typeof createSessionForkCommands> | undefined;
+const getSessionForkCommands = () => {
+	if (!sessionForkCommandsInstance) {
+		sessionForkCommandsInstance = createSessionForkCommands({
+			sessionRuntimeCoordinator,
+			agentManager,
+			replaceAgentSession,
+			isDshAgent: (agentId) => dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
+			forkDshAgentSession: forkDshAgentSessionImpl,
+			cloneDshAgentSession: cloneDshAgentSessionImpl,
+			logger: appLogger,
+			notifyForkCatalogRefreshed,
+		});
+	}
+	return sessionForkCommandsInstance;
+};
+/** 桌面/Web 共用的 fork/clone 命令层门面（延迟到首次调用才装配依赖）。 */
+const sessionForkCommands = {
+	forkRuntimeSession: (target: Parameters<ReturnType<typeof createSessionForkCommands>["forkRuntimeSession"]>[0], entryId: string, options?: { mutationFork?: boolean; branchMode?: boolean }) => getSessionForkCommands().forkRuntimeSession(target, entryId, options),
+	cloneRuntimeSession: (target: Parameters<ReturnType<typeof createSessionForkCommands>["cloneRuntimeSession"]>[0]) => getSessionForkCommands().cloneRuntimeSession(target),
+};
 
 function cancelUnboundUiRequest(payload: unknown): void {
 	if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
@@ -2850,6 +2914,8 @@ function registerIpc() {
 		copyCatalogSession,
 		exportCatalogSessionHtml,
 		replaceAgentSession,
+		// fork/clone 统一命令层：重发/编辑 fork 化（mutationFork/branchMode）与 Web HTTP 同源
+		sessionForkCommands,
 		// C1：DSH 后端专用 IPC 依赖按后端分组（注册表化铺路；未来新增后端各自提供一份）
 		dshBackend: {
 			listDshModels: () => dshHost.listModels(),
@@ -2999,33 +3065,7 @@ function registerIpc() {
 			stopDshPlugin: (input) => dshHost.stopDynamicPlugin(input),
 			uninstallDshPlugin: (input) => dshHost.uninstallDynamicPlugin(input),
 			isDshAgent: (agentId) => dshAgentManager?.list().some((tab) => tab.id === agentId) === true,
-			forkDshAgentSession: async (target, entryId) => {
-				// DSH fork：runtime 已原地换绑到新会话（agentId 不变，焦点会话 id 不变），
-				// 这里只需把 catalog 的 dshSessionId 同步为新 fork 会话，重启后 attach 正确。
-				const result = await dshAgentManager.forkSession(target.agentId, entryId);
-				const tab = dshAgentManager.list().find((candidate) => candidate.id === target.agentId);
-				if (tab?.sessionId) {
-					await sessionCatalog.attachRuntime({
-						sessionId: target.sessionId,
-						dshSessionId: tab.sessionId,
-						promoteToActive: true,
-					});
-				}
-				return { ...result };
-			},
-			cloneDshAgentSession: async (target) => {
-				// DSH clone：fork 无锚点（完整副本），runtime 换绑到新会话，语义同 fork。
-				const result = await dshAgentManager.cloneSession(target.agentId);
-				const tab = dshAgentManager.list().find((candidate) => candidate.id === target.agentId);
-				if (tab?.sessionId) {
-					await sessionCatalog.attachRuntime({
-						sessionId: target.sessionId,
-						dshSessionId: tab.sessionId,
-						promoteToActive: true,
-					});
-				}
-				return { ...result };
-			},
+			// fork/clone 已收口 sessionForkCommands（桌面/Web 共用），这里不再单独提供
 		},
 	});
 
@@ -4322,11 +4362,13 @@ app
 				return sessionScanner.list(project?.path);
 			},
 			listCatalogSessions: async (projectId) => {
+				// 与桌面 sessionsListCatalog 同规则：重发/编辑 fork 化后被替换的旧会话
+				// （supersededBy 已打标）从列表隐藏，否则 Web 端会出现「两个重复的会话」。
 				if (!projectId) {
 					return sessionCatalog
 						.listEntries()
 						.map((entry) => sessionCatalog.getRecord(entry.id))
-						.filter((record): record is SessionRecord => Boolean(record));
+						.filter((record): record is SessionRecord => Boolean(record) && !record?.supersededBy);
 				}
 				const project = projectStore.get(projectId);
 				if (!project) throw new Error(mainCopy("project.notFound"));
@@ -4337,7 +4379,9 @@ app
 				}
 				const summaries = await sessionScanner.list(projectPath);
 				const { wslEnabled, wslDistro, wslUser } = settings;
-				const records = await sessionCatalog.mergeScanned(projectId, summaries, wslEnabled ? { wslDistro, wslUser } : {});
+				const scanned = await sessionCatalog.mergeScanned(projectId, summaries, wslEnabled ? { wslDistro, wslUser } : {});
+				// 同上：supersededBy 隐藏规则与桌面列表一致（mergeScanned 可能重新接上被打标的旧会话）
+				const records = scanned.filter((record) => !record.supersededBy);
 				const bindings = sessionRuntimeCoordinator.attachCatalogRuntimes(records);
 				for (const binding of bindings) {
 					const tab = agentManager.list().find((candidate) => candidate.id === binding.agentId);
@@ -4478,26 +4522,14 @@ app
 			setSessionRuntimeModel: (target, provider, modelId, modelName) => sessionRuntimeCoordinator.setRuntimeModel(target, provider, modelId, modelName),
 			setSessionRuntimeThinking: (target, level) => sessionRuntimeCoordinator.setRuntimeThinking(target, level),
 			setSessionRuntimePermission: (target, preset) => sessionRuntimeCoordinator.setRuntimePermission(target, preset),
-			cloneSessionRuntime: async (target) => {
-				const validated = sessionRuntimeCoordinator.validateTarget(target);
-				if (!validated.ok) return validated;
-				try {
-					return {
-						ok: true as const,
-						value: await replaceAgentSession(target.agentId, () => agentManager.cloneSession(target.agentId), { markForked: true }),
-					};
-				} catch (error) {
-					return {
-						ok: false as const,
-						error: {
-							code: "SESSION_COMMAND_FAILED" as const,
-							debugDetails: error instanceof Error ? error.message : String(error),
-						},
-					};
-				}
-			},
+			// fork/clone 与桌面 IPC 同源（sessionForkCommands 统一命令层）：
+			// 重发/编辑 fork 化（mutationFork/branchMode）、supersededBy 隐藏、
+			// catalog 刷新广播都在那一层维护，两端行为必须一致。
+			cloneSessionRuntime: (target) => sessionForkCommands.cloneRuntimeSession(target),
 			getForkMessages: (target) => sessionRuntimeCoordinator.getRuntimeForkMessages(target),
-			forkRuntimeSession: (target, entryId) => sessionRuntimeCoordinator.forkRuntimeSession(target, entryId),
+			forkRuntimeSession: (target, entryId, options) => sessionForkCommands.forkRuntimeSession(target, entryId, options),
+			// Web 重发/编辑 fork 化：冷会话（无 runtime）先激活（与桌面 activateRuntime 同源）
+			activateSessionRuntime: (sessionId) => sessionRuntimeCoordinator.activateRuntime(sessionId),
 			// 会话活动监控（第二批 strips）：与桌面 sessionIpc.ts 同源同闸门
 			listSessionFileChanges: (sessionId) => {
 				const entry = sessionCatalog.get(sessionId);

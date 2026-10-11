@@ -39,6 +39,7 @@ import type {
 	WebServiceStatusInfo,
 } from "../../shared/types";
 import type { PendingUiRequestSnapshot } from "../sessions/SessionRuntimeCoordinator";
+import type { SessionForkResult } from "../sessions/sessionForkCommands";
 import { replaceExpandedRefBlocksWithLabels } from "../../shared/expandedRefBlocks";
 import { serializeWebClientDictionaries, webEnUS } from "./WebI18n";
 import { WebEventStreamRouter, serializeSseFrame, type PiEvent } from "./WebEventStream";
@@ -181,7 +182,11 @@ type WebServiceDependencies = {
 	>;
 	/** 从历史轮次分叉新会话（P3 分支条；BrowserApi 已映射，服务端此前缺席）。 */
 	getForkMessages: (target: SessionRuntimeTarget) => Promise<SessionCommandResult<SessionTargetedValue<Array<{ entryId: string; text: string }>>>>;
-	forkRuntimeSession: (target: SessionRuntimeTarget, entryId: string) => Promise<SessionCommandResult<SessionTargetedValue<unknown>>>;
+	/** fork（与桌面 IPC 同源）：options.mutationFork=尾部重发/编辑替换（旧会话打 supersededBy 隐藏），
+	 * options.branchMode=分支保留旧会话。服务端只认显式 true（边界校验）。 */
+	forkRuntimeSession: (target: SessionRuntimeTarget, entryId: string, options?: { mutationFork?: boolean; branchMode?: boolean }) => Promise<SessionForkResult>;
+	/** 冷会话激活（Web 重发/编辑 fork 化用；与桌面 sessionsRuntimeActivate 同源）。 */
+	activateSessionRuntime?: (sessionId: string) => Promise<SessionCommandResult<SessionRuntimeInfo>>;
 	/** 会话活动监控（第二批 strips）：文件变更/子代理/todo 快照，装配侧对齐桌面 IPC 语义（含 running 降级对账）。缺省时路由返回 503。 */
 	listSessionFileChanges?: (sessionId: string) => Promise<SessionFileChange[]>;
 	listSessionSubagents?: (sessionId: string) => Promise<PiSubagentEntry[]>;
@@ -910,7 +915,7 @@ export class WebServiceManager {
 			}
 			return;
 		}
-		const sessionRuntimeMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/runtime\/(stop|abort|restart|compact|state|commands|export-html|edit-message|delete-message|prepare-resend|models|model|thinking|permission|clone|fork|get-fork-messages|rewind-list|rewind-diff|rewind-restore)$/);
+		const sessionRuntimeMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/runtime\/(activate|stop|abort|restart|compact|state|commands|export-html|edit-message|delete-message|prepare-resend|models|model|thinking|permission|clone|fork|get-fork-messages|rewind-list|rewind-diff|rewind-restore)$/);
 		if (sessionRuntimeMatch && request.method === "POST") {
 			const sessionId = decodeURIComponent(sessionRuntimeMatch[1]);
 			const action = sessionRuntimeMatch[2];
@@ -931,8 +936,21 @@ export class WebServiceManager {
 				beforeTimestamp?: number;
 				/** fork：从哪个历史轮次分叉（entryId 来自 get-fork-messages）。 */
 				entryId?: string;
+				/** fork 化重试标记（重发/编辑迁移用）：只认显式 true。mutationFork+非 branchMode = 尾部替换（旧会话隐藏）。 */
+				mutationFork?: boolean;
+				/** 分支模式：fork 锚点不是最后一条用户消息 → 旧会话保留可见。 */
+				branchMode?: boolean;
 			}>(request);
 			const target = body.target;
+			// activate 是唯一不要求 runtime target 的动作：冷会话（无 runtime）激活正是它的用途
+			if (action === "activate") {
+				if (!this.deps.activateSessionRuntime) {
+					this.sendError(response, 503, "webError.runtimeUnavailable", "Session runtime activation is not available");
+					return;
+				}
+				this.sendJson(response, { result: await this.deps.activateSessionRuntime(sessionId) });
+				return;
+			}
 			if (!target || target.sessionId !== sessionId) {
 				this.sendError(response, 400, "webError.runtimeTargetRequired", "A matching Session runtime target is required");
 				return;
@@ -989,7 +1007,11 @@ export class WebServiceManager {
 					result = await this.deps.cloneSessionRuntime(target);
 					break;
 				case "fork":
-					result = await this.deps.forkRuntimeSession(target, typeof body.entryId === "string" ? body.entryId : "");
+					result = await this.deps.forkRuntimeSession(target, typeof body.entryId === "string" ? body.entryId : "", {
+						// 边界校验：只认显式 true，其余值（含恶意载荷）一律按 false 处理
+						mutationFork: body.mutationFork === true,
+						branchMode: body.branchMode === true,
+					});
 					break;
 				case "get-fork-messages":
 					result = await this.deps.getForkMessages(target);

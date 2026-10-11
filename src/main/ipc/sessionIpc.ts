@@ -41,6 +41,7 @@ import type {
 } from "../../shared/types";
 import type { BridgeEventInput, BridgeResyncInput } from "../../shared/types/bridge";
 import { parseSessionProcessEventsFromFile } from "../sessions/sessionProcessEventsFile";
+import type { SessionForkCommands } from "../sessions/sessionForkCommands";
 import { dshUnavailablePageFor } from "../dsh/dshManualStop";
 import { validateNpmSpec } from "../dsh/dshPluginNpmRunner";
 import { validateSearchKeyword } from "../dsh/dshPluginMarket";
@@ -303,10 +304,6 @@ export type DshBackendIpcDeps = {
 	uninstallDshPlugin?: (input: import("../../shared/types").DshPluginLifecycleInput) => Promise<unknown>;
 	/** 判断 agentId 是否属于 DSH 后端（fork 等 pi 专属命令按 backend 分流）。 */
 	isDshAgent: (agentId: string) => boolean;
-	/** DSH fork：session.fork 裁剪 + runtime 换绑 + catalog dshSessionId 回写。 */
-	forkDshAgentSession?: (target: SessionRuntimeTarget, entryId: string) => Promise<Record<string, unknown> & { targetSessionId?: string }>;
-	/** DSH clone：fork 无锚点（完整副本）+ runtime 换绑 + catalog dshSessionId 回写。 */
-	cloneDshAgentSession?: (target: SessionRuntimeTarget) => Promise<Record<string, unknown> & { targetSessionId?: string }>;
 };
 
 export type SessionIpcDeps = {
@@ -349,6 +346,8 @@ export type SessionIpcDeps = {
 	copyCatalogSession: (sessionId: string) => Promise<{ cancelled: boolean; targetSessionId?: string }>;
 	exportCatalogSessionHtml: (sessionId: string) => Promise<Record<string, unknown> & { path: string }>;
 	replaceAgentSession: (agentId: string, fn: () => Promise<unknown>, options?: { markForked?: boolean; markSuperseded?: boolean }) => Promise<unknown>;
+	/** fork/clone 统一命令层（与 Web HTTP 共用）：重发/编辑 fork 化语义只在这一处维护。 */
+	sessionForkCommands: SessionForkCommands;
 	/** DSH 后端专用 IPC 依赖（C1 分组；未装配 = 无 DSH 后端）。 */
 	dshBackend?: DshBackendIpcDeps;
 };
@@ -479,8 +478,6 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		stopDshPlugin,
 		uninstallDshPlugin,
 		isDshAgent = () => false,
-		forkDshAgentSession,
-		cloneDshAgentSession,
 	} = dshBackend ?? {};
 
 	/**
@@ -1808,107 +1805,13 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		}
 		return sessionRuntimeCoordinator.setRuntimePermission(target, preset);
 	});
-	ipcMain.handle(ipcChannels.sessionsRuntimeClone, async (_event, target: SessionRuntimeTarget) => {
-		const validated = sessionRuntimeCoordinator.validateTarget(target);
-		if (!validated.ok) return validated;
-		try {
-			// DSH 后端：clone = fork 无锚点（完整副本）+ runtime 换绑新会话
-			// （catalog 的 dshSessionId 同步更新，重启后 attach 到 clone 结果）。
-			// D3/C10：与 fork 同约束——withRuntimeReservation（lease 检查 + replacement 预留）。
-			if (isDshAgent(target.agentId)) {
-				if (!cloneDshAgentSession) {
-					throw new Error("dsh clone is not available");
-				}
-				const value = await sessionRuntimeCoordinator.withRuntimeReservation(target.sessionId, target.agentId, () => cloneDshAgentSession(target));
-				void appLogger.info("session", "Session cloned (dsh)", {
-					sessionId: target.sessionId,
-				});
-				notifyForkCatalogRefreshed(target.sessionId);
-				return { ok: true as const, value };
-			}
-			const value = await replaceAgentSession(target.agentId, () => agentManager.cloneSession(target.agentId), { markForked: true });
-			void appLogger.info("session", "Session cloned", { sessionId: target.sessionId });
-			notifyForkCatalogRefreshed(target.sessionId);
-			return {
-				ok: true as const,
-				value,
-			};
-		} catch (error) {
-			return {
-				ok: false as const,
-				error: {
-					code: "SESSION_COMMAND_FAILED" as const,
-					debugDetails: error instanceof Error ? error.message : String(error),
-				},
-			};
-		}
-	});
-	// fork 与 clone 共用 replaceAgentSession：RPC 成功后刷新 sessionPath / 消息投影
-	/** fork/clone 成功后推送 catalog 刷新：pi 新建了 catalog 条目、DSH 换绑了 dshSessionId，
-	 * 侧栏只有收到 sessionsCatalogRefreshed 才会静默重拉列表（useProjectSync），
-	 * 否则新建/换绑后的会话要等下次手动刷新才出现。 */
-	function notifyForkCatalogRefreshed(sessionId: string): void {
-		const projectId = sessionCatalog.get(sessionId)?.projectId;
-		if (!projectId) return;
-		const window = getMainWindow();
-		if (window && !window.isDestroyed()) {
-			window.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId });
-		}
-	}
+	// fork/clone 命令链已收口到 sessionForkCommands（与 Web HTTP 同源）：重发/编辑
+	// fork 化（mutationFork/branchMode）、supersededBy 隐藏、DSH 分流、catalog 刷新广播
+	// 都在那一层维护，两端行为必须一致（Web 重发后出现两个重复会话的教训）。
+	ipcMain.handle(ipcChannels.sessionsRuntimeClone, (_event, target: SessionRuntimeTarget) => deps.sessionForkCommands.cloneRuntimeSession(target));
 	ipcMain.handle(ipcChannels.sessionsRuntimeGetForkMessages, (_event, target: SessionRuntimeTarget) => sessionRuntimeCoordinator.getRuntimeForkMessages(target));
-	ipcMain.handle(ipcChannels.sessionsRuntimeFork, async (_event, target: SessionRuntimeTarget, entryId: string, options?: { mutationFork?: boolean; branchMode?: boolean }) => {
-		const validated = sessionRuntimeCoordinator.validateTarget(target);
-		if (!validated.ok) return validated;
-		// fork 化重试标记（重发/编辑迁移用）：只认显式 true，其余值按 false 处理（边界校验）。
-		// branchMode：fork 锚点不是最后一条用户消息 → 旧会话保留可见（带 (fork) 后缀），
-		// 只有尾部替换才隐藏旧会话（supersededBy）。
-		const mutationFork = options?.mutationFork === true;
-		const branchMode = options?.branchMode === true;
-		try {
-			// DSH 后端：fork = session.fork 裁剪 + runtime 换绑新会话（catalog 的
-			// dshSessionId 同步更新，重启后 attach 到 fork 结果）。
-			// D3/C10：withRuntimeReservation 提供完整保护——dispatch lease 检查
-			// （在途发送拒绝，防 RPC 响应落到已废弃 mux）+ replacement 预留
-			// （fork 期间阻止并发 restart 等命令交错）。
-			if (isDshAgent(target.agentId)) {
-				// 重发/编辑 fork 化迁移明确不覆盖 DSH：mutation fork 只服务 pi 后端
-				if (mutationFork) {
-					throw new Error("dsh does not support fork-mutation retry");
-				}
-				if (!forkDshAgentSession) {
-					throw new Error("dsh fork is not available");
-				}
-				const value = await sessionRuntimeCoordinator.withRuntimeReservation(target.sessionId, target.agentId, () => forkDshAgentSession(target, entryId));
-				void appLogger.info("session", "Session forked (dsh)", {
-					sessionId: target.sessionId,
-					entryId,
-				});
-				notifyForkCatalogRefreshed(target.sessionId);
-				return { ok: true as const, value };
-			}
-			const value = await replaceAgentSession(
-				target.agentId,
-				() => agentManager.forkSession(target.agentId, entryId),
-				// 显式分支 fork 与非尾部重试分支：子会话带 (fork) 后缀、新旧都在列表；
-				// 尾部重发/编辑 fork 化：子会话继承原标题，旧会话打 supersededBy 从列表隐藏（文件保留）
-				mutationFork && !branchMode ? { markForked: false, markSuperseded: true } : { markForked: true },
-			);
-			void appLogger.info("session", "Session forked", { sessionId: target.sessionId, entryId, mutationFork, branchMode });
-			notifyForkCatalogRefreshed(target.sessionId);
-			return {
-				ok: true as const,
-				value,
-			};
-		} catch (error) {
-			return {
-				ok: false as const,
-				error: {
-					code: "SESSION_COMMAND_FAILED" as const,
-					debugDetails: error instanceof Error ? error.message : String(error),
-				},
-			};
-		}
-	});
+	ipcMain.handle(ipcChannels.sessionsRuntimeFork, (_event, target: SessionRuntimeTarget, entryId: string, options?: { mutationFork?: boolean; branchMode?: boolean }) =>
+		deps.sessionForkCommands.forkRuntimeSession(target, entryId, options));
 	ipcMain.handle(ipcChannels.codexSessionsScan, async (_event, projectId: string) => {
 		const project = projectStore.get(projectId);
 		if (!project) throw new Error(`Project not found: ${projectId}`);
