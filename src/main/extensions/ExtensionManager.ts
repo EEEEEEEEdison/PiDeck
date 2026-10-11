@@ -11,7 +11,7 @@ import type { PiLocator } from "../pi/PiLocator";
 import { PiProcess } from "../pi/PiProcess";
 import { toWslLinuxPath, toWindowsHostPath, type WslEnvironment } from "../wsl/WslPaths";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
-import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, isBuiltInExtensionName, isDefaultDisabledBuiltInExtension, readEffectiveBuiltInExtensionsVersion, resolveBuiltInExtensionPath, type BuiltInExtensionPathRoots } from "./builtInExtensions";
+import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, isBuiltInExtensionName, isDefaultDisabledBuiltInExtension, isHiddenBuiltInExtension, readEffectiveBuiltInExtensionsVersion, resolveBuiltInExtensionPath, type BuiltInExtensionPathRoots } from "./builtInExtensions";
 import { MIN_PI_VERSION_FOR_EXTENSION_WHITELIST, piVersionAtLeast } from "./extensionVersionGate";
 // 版本查询快路：registry HTTP 优先，失败逐包回退 npm view 子进程（传输层优化，展示语义不变）。
 import { createNpmRegistryVersionResolver } from "./npmRegistryVersion";
@@ -261,8 +261,10 @@ export class ExtensionManager {
 		}
 
 		// 补充：将已禁用/文件缺失的内置扩展也纳入列表，确保用户可在 UI 中重新启用。
+		// 已隐藏的内置扩展（HIDDEN_BUILT_IN_EXTENSIONS）除外：它们不上扩展页，也没法在这里重新开启。
 		const existingSources = new Set(merged.map((ext) => ext.source));
 		for (const builtIn of BUILT_IN_EXTENSIONS) {
+			if (isHiddenBuiltInExtension(builtIn)) continue;
 			if (!existingSources.has(builtIn)) {
 				// 内置扩展经 -e 从应用资源目录注入；提供 builtInRoots 时补真实磁盘路径，
 				// 让「打开目录」按钮可用（否则 path 为 undefined，UI 无法定位）。

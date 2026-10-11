@@ -2,14 +2,13 @@ import { Button } from "../components/ui-shadcn/button";
 import { Input } from "../components/ui-shadcn/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui-shadcn/table";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Loader2, Search, ShoppingBag, ToggleLeft, ToggleRight, Hammer } from "lucide-react";
+import { Loader2, Search, ShoppingBag, ToggleLeft, ToggleRight } from "lucide-react";
 import type { PiCliUpdateResult, PiExtensionListResult, PiExtensionSummary, ProjectResourceOverrides } from "../../../shared/types";
 import { t } from "../i18n";
 import { showNotice } from "../utils/notice";
 import { writeClipboard } from "../utils/clipboard";
 import { extensionShortName, filterExtensionsByQuery } from "../utils/extensionFilter";
 import { ExtensionStoreTab } from "./ExtensionStoreTab";
-import { PluginDevSection } from "./PluginDevSection";
 import { ContentTabs } from "./ContentTabs";
 import { isProjectDiscoverySource, projectInstalledExtensionSources, type ResourceScope } from "./resourceScopeModel";
 import { buildProjectOverrideKeyIndex, matchesProjectOverride, type ProjectOverrideKeyIndex } from "./projectOverrideKeys";
@@ -83,7 +82,8 @@ export function ExtensionsTab(props: {
 	onShowInFolder: (extension: PiExtensionSummary) => void;
 }) {
 	// 一级 tab：已安装 / 扩展商店（与 SkillsTab 的「本地/商店」结构对齐）
-	const [extTab, setExtTab] = useState<"local" | "store" | "dev">("local");
+	// 「插件开发」页签已下线（宿主插件系统接替）：PluginDevSection 源文件保留但不再有入口。
+	const [extTab, setExtTab] = useState<"local" | "store">("local");
 	// 已安装列表搜索词：只服务本页渲染的局部 state（不过 IPC、不建全局 atom）
 	const [extensionQuery, setExtensionQuery] = useState("");
 	const [removingBuiltIn, setRemovingBuiltIn] = useState<string | null>(null);
@@ -286,19 +286,20 @@ export function ExtensionsTab(props: {
 				<ContentTabs
 					value={extTab}
 					onValueChange={(v) => {
-						if (v !== "local" && v !== "store" && v !== "dev") return;
+						if (v !== "local" && v !== "store") return;
 						setExtTab(v);
 						// 切回本地时刷新列表（原 TabsTrigger onClick 行为迁到 onValueChange 统一处理）
 						if (v === "local") props.onRefresh();
 					}}
-					items={[{ value: "local", label: t("config.nav.extensions") }, { value: "store", label: t("config.extensionStoreTab"), icon: <ShoppingBag size={14} strokeWidth={1.8} /> }, ...(props.scope === "global" ? [{ value: "dev", label: t("config.pluginDevTab"), icon: <Hammer size={14} strokeWidth={1.8} /> }] : [])]}
+					items={[
+						{ value: "local", label: t("config.nav.extensions") },
+						{ value: "store", label: t("config.extensionStoreTab"), icon: <ShoppingBag size={14} strokeWidth={1.8} /> },
+					]}
 				/>
 				{/* 全局下拉：商店 tab 右侧、Tabs 行内（不进 Table） */}
 				<div className="shrink-0">{props.scopeSelector}</div>
 			</div>
-			{extTab === "dev" ? (
-				<PluginDevSection />
-			) : extTab === "store" ? (
+			{extTab === "store" ? (
 				<ExtensionStoreTab installedSources={storeInstalledSources} projectId={props.scope === "project" ? props.projectId : undefined} onInstalled={() => props.onRefresh()} />
 			) : (
 				<>
