@@ -5288,8 +5288,6 @@ app
 		// 🆕 自动连接：如果已有 Bot 配置，自动启动飞书连接
 		autoConnectFeishu();
 
-		sendTelemetryHeartbeat();
-
 		// 内存分析模式（PIDECK_MEMORY_PROFILE=1）：尽早开始采样，覆盖窗口创建/加载全过程。
 		// 采样失败不阻塞启动（诊断工具降级为不可用）。
 		if (isMemoryProfileEnabled()) {
@@ -5316,6 +5314,10 @@ app
 		// 已收录目录也会被当成新目录弹「添加为项目」（实测右键打开两次都走了 add 链路）。
 		const projectStoreLoadPromise = projectStore.load();
 		projectStoreReady = projectStoreLoadPromise.catch(() => undefined);
+		// 心跳快照里的 projects_total 取自 projectStore.list()，必须等项目表加载结束再发，
+		// 否则恒为空表、projects_total 恒为 0（2026-10 线上 389 条快照全部为 0 即此因）。
+		// projectStoreReady 已吞掉加载失败，失败时也照发（快照按空表上报）。
+		void projectStoreReady.then(() => sendTelemetryHeartbeat());
 		void projectStoreLoadPromise
 			.then(async () => {
 				// load() 已丢掉 e2e 临时项目；对应 catalog 映射一并清掉，侧栏会话不会再挂回来。
