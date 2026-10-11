@@ -176,12 +176,14 @@ export type AgentRuntimeState = {
 	contextPercent?: number | null;
 	/** 最近一次请求因上下文窗口超限而失败；即使当前占用快照缺失也要保留这个恢复入口。 */
 	contextOverflow?: boolean;
-	/** 对话消息估算 token：主进程按会话文件消息文本字符数 ÷ 4 粗估，
-	 *  用于 UI 展示「对话 vs 系统+工具」两段占比（pi 不返回 prompt 构成）。 */
+	/** 对话段 token：优先「总占用 − 系统 − 工具」差值（提供商上报的 prompt 即三段之和），
+	 *  差值不可用时为会话文件里的消息文本估算。UI 用它展示「对话 vs 系统/工具」占比。 */
 	contextMessageTokens?: number;
-	/** DSH host contextBreakdown 投影：系统提示 token 估算（缺失 = 无投影；0 表示确实为 0）。 */
+	/** 系统提示词 token 估算（pi：会话文件里重放出的提示词 sections；DSH：host contextBreakdown 投影。
+	 *  缺失 = 无测量值；0 表示确实为 0）。 */
 	contextSystemTokens?: number;
-	/** DSH host contextBreakdown 投影：工具 schema token 估算（缺失 = 无投影；0 表示确实为 0）。 */
+	/** 工具定义/schema token 估算（pi：会话文件里重放出的工具声明；DSH：host contextBreakdown 投影。
+	 *  缺失 = 无测量值；0 表示确实为 0）。 */
 	contextToolsTokens?: number;
 	/** DSH 会话统计（host sessionStats 投影：整段日志回合/步骤计数与墙钟汇总；
 	 *  dsh-web StatsLine 同源；pi 无此概念，pi 用「上次回复」性能组）。 */

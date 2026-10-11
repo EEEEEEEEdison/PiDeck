@@ -2762,6 +2762,7 @@ export class AgentManager {
 	 * 全部 assistant 消息的平均值（average，即「当前会话平均缓存率」）。
 	 * 口径与 pi CLI footer 的 latestCacheHitRate 一致：
 	 * cacheRead / (input + cacheRead + cacheWrite) * 100
+	 * 同一次扫描还顺带产出提示词装载（系统提示词/工具声明）与对话估算，见 cacheHitStats。
 	 */
 	private getSessionCacheHitStats(sessionPath: string): Promise<CacheHitStats> {
 		return this.cacheHitStatsReader(this.toSessionHostPath(sessionPath));
@@ -2779,11 +2780,11 @@ export class AgentManager {
 			process.client.request({ type: "get_session_stats" }).catch(() => ({ data: undefined })),
 			sessionPath
 				? this.getSessionCacheHitStats(sessionPath)
-				: Promise.resolve({
-						latest: undefined as number | undefined,
-						average: undefined as number | undefined,
+				: Promise.resolve<CacheHitStats>({
+						latest: undefined,
+						average: undefined,
 						sampleCount: 0,
-						conversationTokens: undefined as number | undefined,
+						conversationTokens: undefined,
 					}),
 		]);
 		// 不能把旧进程的模型/用量与新绑定的本地状态拼成一份有效快照。
@@ -2810,6 +2811,19 @@ export class AgentManager {
 		const cacheHitPercent = clampPercent(directCacheHitPercent ?? fileHitStats.latest);
 		const cacheHitAveragePercent = clampPercent(fileHitStats.average);
 		const perf = this.messagePerf.getLast(agentId);
+		const contextTokens = pickNumber(contextUsage?.tokens);
+		/**
+		 * 上下文构成三段：
+		 * - 系统 / 工具：从会话文件重放出的提示词装载直接测量（promptLoadout），
+		 *   不再用「总占用 − 对话估算」反推——反推值会被估算误差与各供应商 usage 口径
+		 *   差异打到 0（用户看到「系统 + 工具 ~0」）或反向放大；
+		 * - 对话：有总占用与两段测量值时取差值（提供商上报的 prompt 就是这三段之和，
+		 *   差值自动包含 thinking/图片/末尾回答等没被文本估算覆盖的部分），
+		 *   差值不可用（无 usage / 装载缺失 / 差为负）时回退到消息文本估算。
+		 */
+		const loadoutMeasured = fileHitStats.systemTokens != null && fileHitStats.toolsTokens != null;
+		const conversationResidual = loadoutMeasured && contextTokens != null && contextTokens > 0 ? Math.round(contextTokens - (fileHitStats.systemTokens ?? 0) - (fileHitStats.toolsTokens ?? 0)) : undefined;
+		const contextMessageTokens = conversationResidual != null && conversationResidual > 0 ? conversationResidual : fileHitStats.conversationTokens;
 		return {
 			modelName: normalizedRuntimeName(model?.name) ?? normalizedRuntimeName(model?.id),
 			provider: normalizedRuntimeName(model?.provider),
@@ -2822,12 +2836,13 @@ export class AgentManager {
 			isExecutingTool: !!this.toolExecutingByAgent.get(agentId),
 			executingToolName: this.toolExecutingByAgent.get(agentId) ?? undefined,
 			toolStateSequence: this.toolStateSequenceByAgent.get(agentId) ?? 0,
-			contextTokens: pickNumber(contextUsage?.tokens),
+			contextTokens,
 			contextWindow: pickNumber(contextUsage?.contextWindow) ?? pickNumber(model?.contextWindow),
 			contextPercent: pickNumber(contextUsage?.percent),
 			contextOverflow: this.contextOverflowByAgent.get(agentId) === true,
-			/** 对话消息估算 token：CJK 加权估算（中文 1.5 字/token、其余 4 字符/token），含工具调用/结果文本，遇压缩重置 */
-			contextMessageTokens: fileHitStats.conversationTokens,
+			/** 对话段 token：优先「总占用 − 系统 − 工具」差值，否则消息文本估算（CJK 加权，含工具调用/结果文本，遇压缩重置） */
+			contextMessageTokens,
+			...(loadoutMeasured ? { contextSystemTokens: fileHitStats.systemTokens, contextToolsTokens: fileHitStats.toolsTokens } : {}),
 			inputTokens,
 			outputTokens,
 			cacheRead,
