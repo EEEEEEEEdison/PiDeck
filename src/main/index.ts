@@ -3044,6 +3044,12 @@ function registerIpc() {
 		// 内部已吞错记日志，此处再兜一层同步异常，失败绝不会影响启动与 catalog 预热。
 		try {
 			void extensionManager?.warmPiVersionProbe();
+			// 扩展列表预热：把首次 `pi list` 子进程与磁盘扫描移出用户打开扩展页的关键路径。
+			// 与版本探测一样尽力而为（失败只记日志，不影响启动）；列表缓存自身的 in-flight
+			// 去重保证用户随后真正发起的 extensions:list 不会重复起进程。
+			void extensionManager?.list(false).catch((error) => {
+				void appLogger.warn("extension", "extension list prewarm failed", { error: error instanceof Error ? error.message : String(error) });
+			});
 		} catch (error) {
 			void appLogger.warn("extension", "pi version prewarm failed", { error: error instanceof Error ? error.message : String(error) });
 		}
