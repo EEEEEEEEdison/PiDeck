@@ -476,8 +476,13 @@ export function ComposerBottomBar(props: {
 		disabled: props.disabled,
 		onChange: props.onChangeMode,
 	});
-	// 设置 → 外观 → 功能模块可隐藏模式选择器；进行中的特殊模式仍由退出×兜底，不会锁死在 plan/goal。
+	// 设置 → 外观 → 功能模块可隐藏模式选择器；此时特殊模式由退出×兜底，不会锁死在 plan/goal。
 	const modesHidden = useAtomValue(composerModesHiddenAtom);
+	// 模式 chip 是否可用：可用时它自己就是开关（下拉里选「普通模式」退出，与 ComposerArea
+	// 的 onCancelPlan 是同一条 setMode("normal")），不重复摆第二个按钮（2026-10 用户反馈
+	// 「竖线 + 一堆东西」）；chip 缺席（生图会话 / 设置里隐藏了选择器 / 只剩 normal 一项）
+	// 才保留独立退出，避免无路可退。
+	const modeSwitcherVisible = visibleModes.length > 1 && !modesHidden;
 	const modelDisplay = computeModelDisplay(liveModel.modelId ? liveModel : undefined, props.modelPending);
 	const modelFrom = modelDisplay.from;
 	const modelTo = modelDisplay.to;
@@ -525,9 +530,11 @@ export function ComposerBottomBar(props: {
 							)}
 						</button>
 					) : null}
-					{/* 特殊模式退出×：模式选择器已常驻底栏，这里是进行中模式的快捷退出
-					    （imagegen 同样可退出；imageGenLocked 时无法切走故不显示；选择器被隐藏时它也是唯一逃生口）。 */}
-					{isSpecialMode && !props.imageGenLocked && (
+					{/* 特殊模式退出×：只在模式 chip 缺席时渲染（生图会话 / 设置里隐藏了选择器 /
+					    只剩 normal 一项）——chip 在场时它自己就是开关，下拉里选「普通模式」即可退出，
+					    与这里的 setMode("normal") 同一条路径，不再重复摆第二个按钮。
+					    imageGenLocked 时无法切走，故一律不显示。 */}
+					{isSpecialMode && !props.imageGenLocked && !modeSwitcherVisible && (
 						<div className="composer-mode-cluster inline-flex h-7 min-w-0 items-center rounded-md bg-bg-hover pr-0.5">
 							<button
 								type="button"
@@ -547,7 +554,7 @@ export function ComposerBottomBar(props: {
 					    打开时刷新扩展开关可用性（设置页可能刚改过 plan/goal 扩展）。 */}
 					{/* 只剩 normal 一项（ACP 会话无 pi 扩展 / plan+goal 都被关）不渲染单选项下拉——
 					    没有意义还占位；ACP 的模式等价物是 configOptions 的 mode 类选项（已由 AcpConfigControls 渲染）。打开时刷新扩展开关可用性（设置页可能刚改过 plan/goal 扩展）。 */}
-					{visibleModes.length > 1 && !modesHidden ? (
+					{modeSwitcherVisible ? (
 						<Select
 							value={props.composerAgentMode}
 							disabled={props.disabled}
