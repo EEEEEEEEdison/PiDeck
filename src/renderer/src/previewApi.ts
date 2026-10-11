@@ -277,6 +277,11 @@ export function createPreviewApi(): PiDesktopApi {
 		return tab;
 	};
 	return {
+		piDeckMcp: {
+			getState: async () => ({ ok: false, code: "desktop-only" }),
+			setAccess: async () => ({ ok: false, code: "desktop-only" }),
+			connection: async () => ({ ok: false, code: "desktop-only" }),
+		},
 		hostPlugins: {
 			list: async () => ({ ok: false, code: "desktop-only" }),
 			rescan: async () => ({ ok: false, code: "desktop-only" }),

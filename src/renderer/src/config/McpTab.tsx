@@ -26,6 +26,8 @@ import type { McpCliListResult, McpConfigFile, McpConfigScope, McpConfigSnapshot
 import { ResourceImportDialog } from "./ResourceImportDialog";
 import { McpSmartAdd, type SmartAddEntry } from "./McpSmartAdd";
 import { McpServiceTemplateForm } from "./McpServiceTemplateForm";
+import { PiDeckMcpPanel } from "./PiDeckMcpPanel";
+import { addPiDeckMcpDefinition } from "./piDeckMcpConfigMerge";
 import { MCP_SERVICE_CATALOG } from "./mcpServiceCatalog";
 
 const api = (
@@ -575,6 +577,19 @@ export const McpTab = forwardRef<
 		[applyWritable, persistServers, runStatusCheck, writable],
 	);
 
+	/** Host handoff is insert-only and does not probe unrelated enabled servers. */
+	const handlePiDeckAdd = useCallback(
+		async (definition: McpServerDefinition): Promise<boolean> => {
+			const next = addPiDeckMcpDefinition(writable, new Set(displayServers.map((item) => item.name)), definition);
+			if (!next) {
+				setError(t("config.mcp.nameDuplicate"));
+				return false;
+			}
+			return persistServers(next);
+		},
+		[writable, displayServers, persistServers],
+	);
+
 	const handleTemplateConnect = useCallback(
 		async (entry: SmartAddEntry) => {
 			const saved = await handleSmartAdd([entry]);
@@ -720,7 +735,9 @@ export const McpTab = forwardRef<
 				</div>
 
 				<div className="flex min-h-0 flex-col gap-3 overflow-auto rounded-md border border-border-subtle bg-bg-panel p-3">
-					{selectedTemplateDefinition ? (
+					{selectedTemplateDefinition?.id === "pideck" ? (
+						<PiDeckMcpPanel key={projectId ?? "global"} existingNames={new Set(displayServers.map((item) => item.name))} disabled={saving || loading} onAdd={handlePiDeckAdd} />
+					) : selectedTemplateDefinition ? (
 						<McpServiceTemplateForm key={selectedTemplateDefinition.id} entry={selectedTemplateDefinition} existingNames={new Set(displayServers.map((item) => item.name))} disabled={saving || loading} saving={saving} onConnect={handleTemplateConnect} onCustom={openSmartAdd} />
 					) : !selected && !creating ? (
 						<McpSmartAdd existingNames={new Set(displayServers.map((item) => item.name))} disabled={saving} onAdd={handleSmartAdd} onManual={startCreate} onInstallAiSetupSkill={async () => (await api.config.installMcpSetupSkill()).success} />

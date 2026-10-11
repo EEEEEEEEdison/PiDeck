@@ -909,6 +909,9 @@ export const ipcChannels = {
 	// ===== 插件开发（~/.pi/agent/extensions/ 目录） =====
 	/** 插件开发支持状态：目录路径 + demo/指南是否已就位 */
 	// Independent desktop plugins use their own capability broker, never pi RPC.
+	piDeckMcpState: "pideck-mcp:state",
+	piDeckMcpSetAccess: "pideck-mcp:set-access",
+	piDeckMcpConnection: "pideck-mcp:connection",
 	hostPluginsList: "host-plugins:list",
 	hostPluginsRescan: "host-plugins:rescan",
 	hostPluginsInstall: "host-plugins:install",

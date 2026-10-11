@@ -1,6 +1,7 @@
 import { t } from "../i18n";
 import { AppWindow, BookOpen, CircleDot, CreditCard, Database, Flame, GitBranch, Globe, LogIn, LogOut, Map, MapPin, MessageSquare, Notebook, Bell, PenTool, RefreshCw, Search, ShieldAlert, TrainFront, Boxes } from "lucide-react";
 import { Button } from "../components/ui-shadcn/button";
+import { LogoMark } from "../components/app/LogoMark";
 import { McpCatalogConfiguredMark, McpCatalogGroupTitle } from "./McpServiceTemplateForm";
 import { MCP_SERVICE_CATALOG, type McpServiceCatalogEntry } from "./mcpServiceCatalog";
 import { MCP_BRAND_ICONS, McpBrandIconSvg } from "./mcpServiceBrandIcons";
@@ -138,7 +139,7 @@ export function McpServerListPane(props: {
 						const configured = props.servers.some((item) => item.name === entry.defaultName);
 						return (
 							<Button key={entry.id} variant="ghost" size="sm" className={`w-full justify-start gap-2 px-2 ${props.selectedTemplate === entry.id ? "bg-accent/40" : ""}`} aria-pressed={props.selectedTemplate === entry.id} disabled={props.creating} onClick={() => props.onSelectTemplate(entry.id)}>
-								{brand ? <McpBrandIconSvg icon={brand} size={14} /> : <Icon size={14} className="shrink-0" aria-hidden="true" />}
+								{entry.id === "pideck" ? <LogoMark size={14} /> : brand ? <McpBrandIconSvg icon={brand} size={14} /> : <Icon size={14} className="shrink-0" aria-hidden="true" />}
 								<span className="min-w-0 flex-1 truncate text-left">{t(entry.titleKey)}</span>
 								{configured ? <McpCatalogConfiguredMark /> : null}
 							</Button>

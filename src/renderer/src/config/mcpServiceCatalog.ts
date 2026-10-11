@@ -21,6 +21,8 @@ export type McpCatalogCredentialField = {
 
 /** 文案 key 窄联合：t() 拿到字面量类型，双语漏加直接 typecheck 红灯。 */
 export type McpCatalogTextKey =
+	| "config.mcp.catalog.pideck"
+	| "config.mcp.catalog.pideckHint"
 	| "config.mcp.catalog.context7"
 	| "config.mcp.catalog.playwright"
 	| "config.mcp.catalog.chromeDevtools"
@@ -89,6 +91,18 @@ export type McpServiceCatalogEntry = {
 };
 
 export const MCP_SERVICE_CATALOG: readonly McpServiceCatalogEntry[] = [
+	{
+		id: "pideck",
+		defaultName: "pideck",
+		titleKey: "config.mcp.catalog.pideck",
+		hintKey: "config.mcp.catalog.pideckHint",
+		category: "dev",
+		endpointDisplay: "127.0.0.1",
+		docsUrl: "https://github.com/ayuayue/PiDeck/blob/main/docs/pideck-mcp.md",
+		auth: "header-key",
+		// PiDeckMcpPanel obtains the actual endpoint/credential only after explicit host consent.
+		base: { enabled: false },
+	},
 	{
 		id: "context7",
 		defaultName: "context7",

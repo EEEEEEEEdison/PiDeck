@@ -8,7 +8,7 @@ const byId = Object.fromEntries(MCP_SERVICE_CATALOG.map((entry) => [entry.id, en
 
 test("MCP service catalog ships the verified batches (intl + CN) with categories and unique ids", () => {
 	const ids = Array.from(MCP_SERVICE_CATALOG, (entry) => entry.id);
-	assert.deepEqual(ids, ["context7", "modelscope", "playwright", "chrome-devtools", "github", "sentry", "supabase", "linear", "notion", "lark", "dingtalk", "alipay", "amap", "tencent-map", "rail12306", "brave-search", "firecrawl", "figma"]);
+	assert.deepEqual(ids, ["pideck", "context7", "modelscope", "playwright", "chrome-devtools", "github", "sentry", "supabase", "linear", "notion", "lark", "dingtalk", "alipay", "amap", "tencent-map", "rail12306", "brave-search", "firecrawl", "figma"]);
 	assert.equal(new Set(ids).size, ids.length);
 	for (const entry of MCP_SERVICE_CATALOG) {
 		assert.ok(["dev", "work", "maps", "search", "design"].includes(entry.category), `${entry.id} category`);
@@ -100,7 +100,7 @@ test("brand icons cover every catalog entry except the documented fallbacks", ()
 	for (const id of branded) assert.ok(ids.has(id), `orphan brand icon: ${id}`);
 	// simple-icons 未收录的服务回退 lucide（官方未收录则不硬造 logo）；钉钉/飞书用 ant-design / 飞书官方 CDN 图形
 	const fallbacks = [...ids].filter((id) => !branded.has(id)).sort();
-	assert.deepEqual(fallbacks, ["amap", "context7", "firecrawl", "rail12306", "tencent-map"]);
+	assert.deepEqual(fallbacks, ["amap", "context7", "firecrawl", "pideck", "rail12306", "tencent-map"]);
 	for (const [id, icon] of Object.entries(MCP_BRAND_ICONS)) {
 		assert.match(icon.hex, /^#[0-9A-Fa-f]{6}$/, `${id} hex`);
 		if (icon.multiPaths) {

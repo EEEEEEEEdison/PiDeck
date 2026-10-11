@@ -338,6 +338,9 @@ import { registerBackgroundImageProtocol, registerBackgroundsIpc } from "./ipc/b
 import { registerThemesIpc } from "./ipc/themesIpc";
 import { registerPluginDevIpc } from "./ipc/pluginDevIpc";
 import { registerHostPluginsIpc } from "./ipc/hostPluginsIpc";
+import { registerPiDeckMcpIpc } from "./ipc/piDeckMcpIpc";
+import { PiDeckMcpService } from "./mcp/PiDeckMcpService";
+import { HostPluginSessions } from "./plugins/HostPluginSessions";
 import { HostPluginService } from "./plugins/HostPluginService";
 import { HOST_PLUGIN_SCHEME } from "./plugins/hostPluginPolicy";
 import { hostPluginPartitionId, hostPluginWebviewBridge } from "./plugins/hostPluginWebviewPolicy";
@@ -2543,6 +2546,20 @@ function registerIpc() {
 	// 项目显示名闭包在面板挂载时才求值：此处 projectStore 尚未装配。
 	const hostPlugins = new HostPluginService(app.getPath("userData"), sessionCatalog, join(__dirname, "../preload/hostPlugin.js"), (projectId) => projectStore?.get(projectId)?.name);
 	const unregisterHostPlugins = registerHostPluginsIpc(hostPlugins, () => mainWindow);
+	const mcpWarning = (code: string) => {
+		void appLogger.warn("pideck-mcp", "Optional MCP operation rejected", { code });
+	};
+	const piDeckMcp = new PiDeckMcpService({
+		configPath: join(app.getPath("userData"), "pideck-mcp.json"),
+		projects: () => projectStore.list().map(({ id, name }) => ({ id, name })),
+		sessions: new HostPluginSessions(sessionCatalog),
+		warn: mcpWarning,
+	});
+	const unregisterPiDeckMcp = registerPiDeckMcpIpc(piDeckMcp, () => mainWindow, mcpWarning);
+	quitCleanup.register("pideck-mcp", async () => {
+		unregisterPiDeckMcp();
+		await piDeckMcp.dispose();
+	});
 	quitCleanup.register("host-plugins", () => {
 		unregisterHostPlugins();
 		hostPlugins.dispose();

@@ -4,6 +4,7 @@ import type { TokendanceAuthMode, TokendancePaymentSessionResult } from "../shar
 import type { AcpToolConfig, AcpToolInput, AcpToolValidation } from "../shared/types/acp";
 import type { AnnouncementState } from "../shared/types/announcement";
 import type { HostPluginContext, HostPluginDesktopApi } from "../shared/types/hostPlugin";
+import type { PiDeckMcpDesktopApi } from "../shared/types/piDeckMcp";
 import type { RpcLogBatch, RpcLogEntry } from "../shared/types/rpcLog";
 import type { ModelTraceRecord } from "../shared/types/bridge";
 import type { DshRuntimeStatus, DshRuntimeInstallProgress } from "../shared/types/dshRuntime";
@@ -229,7 +230,14 @@ const hostPlugins: HostPluginDesktopApi = {
 	onNavigate: (callback) => subscribe(ipcChannels.hostPluginNavigate, callback),
 };
 
+const piDeckMcp: PiDeckMcpDesktopApi = {
+	getState: () => ipcRenderer.invoke(ipcChannels.piDeckMcpState),
+	setAccess: (input) => ipcRenderer.invoke(ipcChannels.piDeckMcpSetAccess, input),
+	connection: () => ipcRenderer.invoke(ipcChannels.piDeckMcpConnection),
+};
+
 const api = {
+	piDeckMcp,
 	hostPlugins,
 	clipboard: {
 		// 同步读取必须走主进程 sendSync：Electron 38 已废弃渲染进程/preload 直连 clipboard。
