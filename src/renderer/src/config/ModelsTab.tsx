@@ -168,12 +168,8 @@ export function ModelsTab(props: {
 			props.onUpdateModel(providerName, index, field, value);
 		}
 		if (updates.length > 0) {
-			showNotice(
-				t("config.modelSpecAutoFilled", {
-					model: spec?.matchedId ?? trimmed,
-				}),
-				3000,
-			);
+			// 命中目录才报「已按目录填充」；未命中时只补了默认思考档位，据实说明而不是谎报名录值。
+			showNotice(spec?.matchedId ? t("config.modelSpecAutoFilled", { model: spec.matchedId }) : t("config.modelSpecUnmatched", { model: trimmed }), 3000);
 		}
 	};
 
