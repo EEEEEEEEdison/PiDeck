@@ -94,6 +94,78 @@ test("resolvePiSdkEntry 穿透 node_modules/.bin 符号链接（POSIX）", { ski
 	});
 });
 
+/** 造一个官方安装器（managed install）的 agent 目录：bin 垫片 + install 标记 + releases/<ver>。 */
+function writeManagedInstall(agentDir, { versions, currentVersion }) {
+	mkdirSync(join(agentDir, "bin"), { recursive: true });
+	// 官方安装器生成的垫片只是转发到 pi-launcher.js，不含 npm 垫片的 node_modules 相对路径形态。
+	writeFileSync(join(agentDir, "bin", "pi.cmd"), '@echo off\nnode "%~dp0pi-launcher.js" %*\n');
+	writeFileSync(join(agentDir, "bin", "pi"), '#!/bin/sh\nexec node pi-launcher.js "$@"\n');
+	const installRoot = join(agentDir, "install");
+	mkdirSync(installRoot, { recursive: true });
+	writeFileSync(join(installRoot, "managed-install.json"), JSON.stringify({ kind: "pi-managed-install", schemaVersion: 1, layout: "releases-v1" }));
+	for (const version of versions) writePiPackage(join(installRoot, "releases", version, "node_modules", "@earendil-works", "pi-coding-agent"));
+	if (currentVersion !== undefined) writeFileSync(join(installRoot, "current-version"), `${currentVersion}\n`);
+	return installRoot;
+}
+
+test("resolvePiAuthHostLaunch: 官方 managed 安装按 install/current-version 取 releases 内的 SDK 入口", () => {
+	withTempDir((dir) => {
+		const appPath = writeAppDir(dir);
+		const agentDir = join(dir, ".pi", "agent");
+		writeManagedInstall(agentDir, { versions: ["1.2.3", "1.3.0"], currentVersion: "1.2.3" });
+		const launch = resolvePiAuthHostLaunch({
+			settings: { ...BASE_SETTINGS, customPiPath: join(agentDir, "bin", "pi.cmd") },
+			locator: fakeLocator({ command: join(agentDir, "bin", "pi.cmd"), windowsLaunch: { channel: "cmd-shim", reason: "unrecognized" } }),
+			userDataPath: join(dir, "userData"),
+			appPath,
+			resourcesPath: join(dir, "unused"),
+			isPackaged: false,
+		});
+		// 垫片还原失败 + 向上找不到 node_modules 时，必须退到 managed 布局而不是报 no-pi-entry。
+		assert.equal(launch.ok, true);
+		assert.equal(launch.sdkEntry, join(agentDir, "install", "releases", "1.2.3", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js"));
+		assert.equal(launch.env.PIDECK_PI_SDK_ENTRY, launch.sdkEntry);
+	});
+});
+
+test("resolvePiAuthHostLaunch: current-version 缺失时退到 releases 下版本号最大的完整 release", () => {
+	withTempDir((dir) => {
+		const appPath = writeAppDir(dir);
+		const agentDir = join(dir, ".pi", "agent");
+		writeManagedInstall(agentDir, { versions: ["1.2.3", "1.10.0", "not-a-version"] });
+		const launch = resolvePiAuthHostLaunch({
+			settings: BASE_SETTINGS,
+			locator: fakeLocator({ command: join(agentDir, "bin", "pi") }),
+			userDataPath: join(dir, "userData"),
+			appPath,
+			resourcesPath: join(dir, "unused"),
+			isPackaged: false,
+		});
+		assert.equal(launch.ok, true);
+		// 1.10.0 > 1.2.3（数值比较，不是字符串序）；not-a-version 目录被忽略。
+		assert.equal(launch.sdkEntry, join(agentDir, "install", "releases", "1.10.0", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js"));
+	});
+});
+
+test("resolvePiAuthHostLaunch: 目录形态像 managed 但没有合法标记/包时仍报 no-pi-entry", () => {
+	withTempDir((dir) => {
+		const appPath = writeAppDir(dir);
+		const agentDir = join(dir, ".pi", "agent");
+		mkdirSync(join(agentDir, "bin"), { recursive: true });
+		writeFileSync(join(agentDir, "bin", "pi.cmd"), '@echo off\nnode "%~dp0pi-launcher.js" %*\n');
+		const launch = resolvePiAuthHostLaunch({
+			settings: BASE_SETTINGS,
+			locator: fakeLocator({ command: join(agentDir, "bin", "pi.cmd"), windowsLaunch: { channel: "cmd-shim", reason: "unrecognized" } }),
+			userDataPath: join(dir, "userData"),
+			appPath,
+			resourcesPath: join(dir, "unused"),
+			isPackaged: false,
+		});
+		assert.equal(launch.ok, false);
+		assert.equal(launch.reason, "no-pi-entry");
+	});
+});
+
 test("resolvePiAuthHostLaunch: node-direct 通道直接用垫片还原出的入口与同一 node", () => {
 	withTempDir((dir) => {
 		const appPath = writeAppDir(dir);
