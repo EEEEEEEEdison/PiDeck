@@ -842,7 +842,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"app.projectNewAgent": "New Agent",
 	"app.projectMissing": "Directory missing",
 	"app.projectMissingHint": "The project directory was deleted, moved, or is temporarily unreachable (e.g. unmounted disk or stopped WSL). Restore the directory, or remove the project from its context menu.",
-	"app.projectRunningHint": "A session is running in this workspace (agent process is still alive).",
+	"app.projectRunningHint": "A session is running in this workspace.",
 	"app.chatProjectSettings": "Change chat save directory",
 	"app.modelRestartTitle": "Restart agent to apply",
 	"app.modelRestartBody": "Model {model} is configured in local models.json but the running agent has not loaded it yet. Restart the agent to use it. Restart now?",

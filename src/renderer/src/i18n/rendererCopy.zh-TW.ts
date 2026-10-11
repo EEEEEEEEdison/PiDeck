@@ -845,7 +845,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.projectNewAgent": "新建 Agent",
 	"app.projectMissing": "目錄不存在",
 	"app.projectMissingHint": "專案目錄已被刪除、移動或暫時不可達（如未掛載的磁碟/未啟動的 WSL）。可恢復目錄，或在專案右鍵選單中移除該專案。",
-	"app.projectRunningHint": "該工作區有會話正在執行（Agent 程序未退出）。",
+	"app.projectRunningHint": "該工作區有會話正在執行。",
 	"app.chatProjectSettings": "修改聊天記錄儲存目錄",
 	"app.modelRestartTitle": "重啟 Agent 生效",
 	"app.modelRestartBody": "模型 {model} 已在本地 models.json 中配置，但當前執行的 Agent 尚未載入新配置。重啟 Agent 後即可使用，是否重啟？",
