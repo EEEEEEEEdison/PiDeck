@@ -39,26 +39,10 @@ function prettyToolValue(value: unknown, maxChars = 4000): string {
 	return text.length > maxChars ? `${text.slice(0, maxChars)}\n… (${text.length} chars)` : text;
 }
 
-/** 从 UIMessage 提取纯文本（复制/重发用）。 */
-export function uiMessageText(message: UIMessage): string {
-	return message.parts
-		.filter((part) => part.type === "text")
-		.map((part) => (part.type === "text" ? part.text : ""))
-		.join("")
-		.trim();
-}
-
-/** 提取消息中的图片 data URL（用户气泡缩略图 / 重发附件）。 */
-export function uiMessageImages(message: UIMessage): string[] {
-	const urls: string[] = [];
-	for (const part of message.parts) {
-		if (part.type !== "file") continue;
-		const filePart = part as { mediaType?: string; data?: string; url?: string };
-		const src = typeof filePart.data === "string" ? filePart.data : typeof filePart.url === "string" ? filePart.url : "";
-		if (src && (!filePart.mediaType || filePart.mediaType.startsWith("image/"))) urls.push(src);
-	}
-	return urls;
-}
+// 纯函数已抽到 webMessageParts（叶子模块，vm 沙箱单测可用）；re-export 保持既有导入路径不破，
+// 本模块内部也直接使用（WebUserBubble 渲染）
+import { uiMessageText, uiMessageImages } from "./webMessageParts";
+export { uiMessageText, uiMessageImages } from "./webMessageParts";
 
 type WebToolPart = {
 	type: string;
@@ -170,13 +154,15 @@ export function groupTimelineEntries(messages: UIMessage[]): TimelineEntry[] {
 /** 用户消息右对齐气泡（结构与桌面 UserBubble 一致；P1/P2 增加图片与 hover 操作）。 */
 export const WebUserBubble = memo(function WebUserBubble(props: {
 	message: UIMessage;
-	/** runtime 存活且非流式时才允许编辑/删除/重发（历史静态会话不提供） */
+	/** 编辑/重发可用（pi 会话 fork 化后冷会话也可用；DSH 需 runtime 存活） */
 	canManage?: boolean;
+	/** 删除可用（delete-message 是 runtime 命令，必须 runtime 存活） */
+	canDelete?: boolean;
 	onEdit?: (messageId: string, newText: string) => void;
 	onDelete?: (messageId: string) => void;
 	onResend?: (messageId: string) => void;
-	/** 乐观更新进行中：编辑=等待服务端确认（操作行换成转圈+文案），删除=即将退场 */
-	pendingAction?: "edit" | "delete" | null;
+	/** 乐观更新进行中：编辑=等待服务端确认，删除=即将退场，重发=fork 化迁移中 */
+	pendingAction?: "edit" | "delete" | "resend" | null;
 	/** 编辑保存成功的确认反馈：气泡闪一拍品牌色环 */
 	flash?: boolean;
 }) {
@@ -185,7 +171,8 @@ export const WebUserBubble = memo(function WebUserBubble(props: {
 	const [editing, setEditing] = useState(false);
 	const [editDraft, setEditDraft] = useState("");
 	if (!text.trim() && images.length === 0) return null;
-	const manage = Boolean(props.canManage && props.onEdit && props.onDelete && props.onResend);
+	const manage = Boolean(props.canManage && props.onEdit && props.onResend);
+	const canDelete = Boolean(props.canDelete && props.onDelete);
 	return (
 		<article className="user-turn group/user mb-4 flex w-full min-w-0 max-w-full flex-col items-end">
 			{images.length > 0 ? (
@@ -246,7 +233,7 @@ export const WebUserBubble = memo(function WebUserBubble(props: {
 					{props.pendingAction ? (
 						<div className="mt-1 flex items-center gap-1.5 text-xs text-text-tertiary" role="status">
 							<Loader2 className="size-3.5 animate-pideck-spin" aria-hidden="true" />
-							{props.pendingAction === "edit" ? t("web.msgSaving") : t("web.msgDeleting")}
+							{props.pendingAction === "edit" ? t("web.msgSaving") : props.pendingAction === "resend" ? t("web.msgResending") : t("web.msgDeleting")}
 						</div>
 					) : (
 						<div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/user:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100">
@@ -267,9 +254,11 @@ export const WebUserBubble = memo(function WebUserBubble(props: {
 									<ActionButton label={t("web.msgResend")} onClick={() => props.onResend?.(props.message.id)}>
 										<RefreshCw className="size-3.5" aria-hidden="true" />
 									</ActionButton>
-									<ActionButton label={t("web.msgDelete")} danger onClick={() => props.onDelete?.(props.message.id)}>
-										<Trash2 className="size-3.5" aria-hidden="true" />
-									</ActionButton>
+									{canDelete ? (
+										<ActionButton label={t("web.msgDelete")} danger onClick={() => props.onDelete?.(props.message.id)}>
+											<Trash2 className="size-3.5" aria-hidden="true" />
+										</ActionButton>
+									) : null}
 								</>
 							) : null}
 						</div>
@@ -700,14 +689,16 @@ export function WebTimeline(props: {
 	uiResponding?: boolean;
 	onRespondUi?: (response: AgentUiResponse) => void;
 	onLoadMore: () => void;
-	/** 乐观更新：进行中编辑/删除的消息（气泡操作行换成状态指示） */
-	pendingMessageAction?: { kind: "edit" | "delete"; id: string } | null;
+	/** 乐观更新：进行中编辑/删除/重发 fork 化的消息（气泡操作行换成状态指示） */
+	pendingMessageAction?: { kind: "edit" | "delete" | "resend"; id: string } | null;
 	/** 删除退场动画进行中的消息 id（动画播完才从列表摘除） */
 	exitingMessageIds?: ReadonlySet<string>;
 	/** 编辑保存成功的确认反馈：气泡闪一拍品牌色环 */
 	flashMessageId?: string | null;
-	/** P1：消息操作（runtime 存活时可用） */
+	/** P1：编辑/重发（pi 会话 fork 化后冷会话也可用；DSH 需 runtime 存活） */
 	canManageMessages?: boolean;
+	/** P1：删除（delete-message 是 runtime 命令，必须 runtime 存活） */
+	canDeleteMessage?: boolean;
 	onEditMessage?: (messageId: string, newText: string) => void;
 	onDeleteMessage?: (messageId: string) => void;
 	onResendMessage?: (messageId: string) => void;
@@ -789,6 +780,7 @@ export function WebTimeline(props: {
 										<WebUserBubble
 											message={entry.message}
 											canManage={props.canManageMessages}
+											canDelete={props.canDeleteMessage ?? props.canManageMessages}
 											onEdit={props.onEditMessage}
 											onDelete={props.onDeleteMessage}
 											onResend={props.onResendMessage}

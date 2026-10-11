@@ -8,7 +8,7 @@
  * - 发送消息走 useChat（/api/chat 流式），不在此处重复实现
  */
 import type { UIMessage } from "ai";
-import type { AvailableModel, AgentBackend, ChatMessage, SessionCommandResult, SessionFileChange, SessionLaunchPreferences, SessionMessagePage, SessionRuntimeTarget, SessionTargetedValue, SessionTodoSnapshot, UpdateSessionRecordInput } from "../../../shared/types";
+import type { AvailableModel, AgentBackend, ChatMessage, SessionCommandResult, SessionFileChange, SessionLaunchPreferences, SessionMessagePage, SessionRuntimeInfo, SessionRuntimeTarget, SessionTargetedValue, SessionTodoSnapshot, UpdateSessionRecordInput } from "../../../shared/types";
 import type { CommitEntry, GitBranchInfo, GitResourceGroups, ImageContent, PiExtensionSummary, PiSkillLocation, PiSkillSummary, PiSubagentEntry, YaoPromptCategory } from "../../../shared/types";
 import type { AgentUiResponse } from "../../../shared/types";
 import type { WebContextUsage, WebFileNodeLite, WebState } from "./webTypes";
@@ -121,6 +121,25 @@ async function callRuntimeCommand<T>(sessionId: string, target: SessionRuntimeTa
 	return result.value.value;
 }
 
+/** fork/clone 专用命令：服务端返回 SessionForkResult（单层 value，非 SessionTargetedValue 双层），
+ * 不能用 callRuntimeCommand 解包（会拿到 undefined）。与桌面 preload sessionsRuntimeFork 同形。 */
+export type WebForkResult = { cancelled?: boolean; text?: string; targetSessionId?: string; [key: string]: unknown };
+
+async function callForkCommand(sessionId: string, target: SessionRuntimeTarget | null, action: string, body: Record<string, unknown> = {}): Promise<WebForkResult> {
+	const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/runtime/${action}`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ target, ...body }),
+	});
+	if (!res.ok) throw new Error(`runtime ${action} ${res.status}`);
+	const payload = (await res.json()) as { result?: SessionCommandResult<WebForkResult> };
+	const result = payload.result;
+	if (!result || !result.ok) {
+		throw new Error(result?.error.code ?? `runtime ${action} failed`);
+	}
+	return result.value ?? {};
+}
+
 /** 运行中的模型切换会立即发送给 pi，并由主进程同步会话记录。 */
 export function setRuntimeModel(target: SessionRuntimeTarget, provider: string, modelId: string, modelName?: string): Promise<unknown> {
 	return callRuntimeCommand(target.sessionId, target, "model", { provider, modelId, modelName });
@@ -195,7 +214,8 @@ export function chatMessagesToUiMessages(messages: ChatMessage[]): UIMessage[] {
 			} else if (message.text) {
 				parts.push({ type: "text", text: message.text });
 			}
-			result.push({ id: message.id ?? `hist-${message.timestamp ?? Math.random()}`, role: "assistant", parts });
+			// meta 携带 entryId/toolName 等，fork 化重发需要 metadata.entryId 解析 fork 锚点
+			result.push({ id: message.id ?? `hist-${message.timestamp ?? Math.random()}`, role: "assistant", parts, metadata: message.meta as UIMessage["metadata"] });
 			continue;
 		}
 		if (message.thinking) {
@@ -217,6 +237,8 @@ export function chatMessagesToUiMessages(messages: ChatMessage[]): UIMessage[] {
 			id: message.id ?? `hist-${message.timestamp ?? Math.random()}`,
 			role,
 			parts,
+			// metadata 透传 meta（含 entryId）：fork 化重发/编辑的锚点解析依赖它
+			metadata: message.meta as UIMessage["metadata"],
 		});
 	}
 	return result;
@@ -361,9 +383,9 @@ export function compactRuntime(sessionId: string, target: SessionRuntimeTarget, 
 	return callRuntimeCommand<unknown>(sessionId, target, "compact", prompt ? { prompt } : {});
 }
 
-/** P1：克隆会话（fork 标记；返回新会话记录，切换由调用方决定）。 */
-export async function cloneRuntime(sessionId: string, target: SessionRuntimeTarget): Promise<{ session?: { id?: string } }> {
-	return callRuntimeCommand<{ session?: { id?: string } }>(sessionId, target, "clone");
+/** P1：克隆会话（fork 标记；返回 WebForkResult，含 targetSessionId；切换由调用方决定）。 */
+export function cloneRuntime(sessionId: string, target: SessionRuntimeTarget): Promise<WebForkResult> {
+	return callForkCommand(sessionId, target, "clone");
 }
 
 /** P1：重命名会话（走 catalog update，不需要 runtime）。 */
@@ -405,19 +427,46 @@ export async function downloadSessionHtml(sessionId: string): Promise<void> {
 	URL.revokeObjectURL(url);
 }
 
-/** P1：编辑历史用户消息（runtime 必须存活）。 */
+/** P1：编辑历史用户消息——pi 走 fork 化（见 WebChatApp runForkMutation），此处仅供 DSH（runtime 必须存活）。 */
 export function editRuntimeMessage(sessionId: string, target: SessionRuntimeTarget, messageId: string, newText: string): Promise<void> {
 	return callRuntimeCommand<void>(sessionId, target, "edit-message", { messageId, newText });
 }
 
-/** P1：删除单条历史消息。 */
+/** P1：删除单条历史消息（两端共用，非 fork 化路径）。 */
 export function deleteRuntimeMessage(sessionId: string, target: SessionRuntimeTarget, messageId: string): Promise<void> {
 	return callRuntimeCommand<void>(sessionId, target, "delete-message", { messageId });
 }
 
-/** P1：准备重发——取回该消息文本（+图片），由调用方填入 composer。 */
+/** P1：准备重发——取回该消息文本（+图片）；fork 化路径用它作 entryId 文本回退与重投递内容。 */
 export function prepareResend(sessionId: string, target: SessionRuntimeTarget, messageId: string): Promise<{ text: string; images?: ImageContent[] }> {
 	return callRuntimeCommand<{ text: string; images?: ImageContent[] }>(sessionId, target, "prepare-resend", { messageId });
+}
+
+/** P1：冷会话激活（与桌面 sessionsRuntimeActivate 同源）——Web 重发/编辑 fork 化的前置：无 runtime 的历史会话先激活再 fork。 */
+export async function activateRuntime(sessionId: string): Promise<SessionRuntimeTarget> {
+	const res = await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/runtime/activate`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({}),
+	});
+	if (!res.ok) throw new Error(`runtime activate ${res.status}`);
+	const payload = (await res.json()) as { result?: SessionCommandResult<SessionRuntimeInfo> };
+	const result = payload.result;
+	if (!result || !result.ok) {
+		throw new Error(result?.error.code ?? "runtime activate failed");
+	}
+	return { sessionId, agentId: result.value.agentId, runtimeGeneration: result.value.runtimeGeneration };
+}
+
+/** P1：列出可 fork 的历史轮次（entryId + 文本），供 fork 化重发/编辑的 entryId 解析。 */
+export function getForkMessages(sessionId: string, target: SessionRuntimeTarget): Promise<Array<{ entryId: string; text: string }>> {
+	return callRuntimeCommand<Array<{ entryId: string; text: string }>>(sessionId, target, "get-fork-messages");
+}
+
+/** P1：fork 会话（与桌面 sessionsRuntimeFork 同源同参）。mutationFork=true 且非 branchMode =
+ * 尾部重发/编辑替换：旧会话打 supersededBy 从列表隐藏，新会话继承原标题；否则分支模式新旧并存。 */
+export function forkRuntimeSession(sessionId: string, target: SessionRuntimeTarget, entryId: string, options: { mutationFork?: boolean; branchMode?: boolean } = {}): Promise<WebForkResult> {
+	return callForkCommand(sessionId, target, "fork", { entryId, ...options });
 }
 
 /** P2：上下文用量（runtime state 子集，供头部圆环轮询）。 */
