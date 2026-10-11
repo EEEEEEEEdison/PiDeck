@@ -48,7 +48,7 @@ import { createNetDownloader, fetchDshRunnerNodeIndex } from "../dsh/runtime/dsh
 import { refreshShortcutBindings } from "../appShortcuts";
 import type { ConfigProxyMode } from "../../shared/types/fetchedModel";
 import type { SkillManager } from "../skills/SkillManager";
-import { fetchModelList, getCachedModelList, invalidateModelListCache, modelsFromPiConfig, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
+import { fetchModelList, invalidateModelListCache, modelsFromPiConfig, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
 import { TokendanceCatalogStore } from "../config/tokendanceCatalog";
 import type { TokendanceInstallResult } from "../config/tokendanceInstaller";
 import type { TokendanceAuthMode, TokendanceAuthStore } from "../config/tokendanceAuth";
@@ -700,7 +700,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		}
 	});
 
-	// ── 模型规格（官方目录 + 当前 Pi 完整目录；第三方 provider 按模型本体匹配）──
+	// ── 模型规格（官方 pi-ai 目录；第三方 provider 按模型本体匹配）──
 
 	ipcMain.handle(ipcChannels.projectsGetModelSpec, async (_event, providerName: unknown, modelId: unknown, modelName: unknown) => {
 		// 边界校验：渲染层输入不可信，拒绝非字符串/超长输入。
@@ -708,11 +708,10 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			return null;
 		}
 		try {
-			// 配置阶段模板优先读运行中 pi 的模型列表（pi --list-models 已含内置目录 +
-			// auth.json/models.json 覆盖后的解析容量），bundled pi-ai catalog 兜底。
-			// 只读缓存不触发新 fork：启动预取（index.ts refreshModelList）已填充，
-			// 保存 models.json/auth.json 后也由 invalidateModelListCache 置空并重取。
-			const runtimeModels = getCachedModelList() ?? undefined;
+			// 模板只读官方 pi-ai 目录（端点 /models 实报字段由渲染层优先合并）。
+			// 不读运行中 pi 的模型列表：那是它对 models.json 的解析后视图，会把
+			// `?? 128000 / ?? 16384 / ?? false / ?? ["text"]` 兜底值回显成事实
+			// （见 modelCapabilityResolver 顶部注释）。
 			return resolveModelSpecFromCatalogs(
 				{
 					providerName,
@@ -720,7 +719,6 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 					...(typeof modelName === "string" && modelName.trim() ? { modelName } : {}),
 				},
 				getPiAiCatalogIndex(),
-				runtimeModels,
 			);
 		} catch (error) {
 			void appLogger.warn("models", "Model spec lookup failed", {

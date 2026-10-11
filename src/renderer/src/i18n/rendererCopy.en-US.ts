@@ -3260,6 +3260,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"config.modelId": "ID",
 	"config.modelList": "Model list",
 	"config.modelSpecAutoFilled": "Auto-filled specs for {model} from the model capability catalog",
+	"config.modelSpecUnmatched": "{model} not found in the model capability catalog; capacity left empty and thinking levels left at the default open set",
 	"config.modelUserAgent": "User-Agent",
 	"config.modelUserAgentInherit": "Leave empty to inherit the provider-level UA",
 	"config.modelUserAgentClear": "Clear override",

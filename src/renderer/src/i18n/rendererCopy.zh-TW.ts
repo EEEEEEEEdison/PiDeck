@@ -3249,6 +3249,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.modelId": "ID",
 	"config.modelList": "模型列表",
 	"config.modelSpecAutoFilled": "已按模型能力目錄填充 {model} 的規格",
+	"config.modelSpecUnmatched": "未在模型能力目錄中找到 {model}，容量已留空、思考檔位按預設開放",
 	"config.modelUserAgent": "User-Agent",
 	"config.modelUserAgentInherit": "留空時繼承該供應商的 UA",
 	"config.modelUserAgentClear": "清除覆蓋",

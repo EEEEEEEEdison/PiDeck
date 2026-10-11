@@ -3244,6 +3244,7 @@ export const zhCN = {
 	"config.modelId": "ID",
 	"config.modelList": "模型列表",
 	"config.modelSpecAutoFilled": "已按模型能力目录填充 {model} 的规格",
+	"config.modelSpecUnmatched": "未在模型能力目录中找到 {model}，容量已留空、思考档位按默认开放",
 	"config.modelUserAgent": "User-Agent",
 	"config.modelUserAgentInherit": "留空时继承该供应商的 UA",
 	"config.modelUserAgentClear": "清除覆盖",

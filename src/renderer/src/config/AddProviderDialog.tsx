@@ -222,7 +222,8 @@ export function AddProviderDialog(props: {
 		const updates = computeModelSpecPatches(model, spec);
 		if (updates.length === 0) return;
 		setModels((prev) => prev.map((m, j) => (j === index ? applyModelPatches(m, updates) : m)));
-		showNotice(t("config.modelSpecAutoFilled", { model: spec?.matchedId ?? trimmed }), 3000);
+		// 命中目录才报「已按目录填充」；未命中时只补了默认思考档位（见 ConfigModal 同名路径）。
+		showNotice(spec?.matchedId ? t("config.modelSpecAutoFilled", { model: spec.matchedId }) : t("config.modelSpecUnmatched", { model: trimmed }), 3000);
 	};
 
 	/** 手加一行空模型（能力字段留空，由失焦补全/重置为自适应补齐，不写猜测值）。 */
