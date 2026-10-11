@@ -716,6 +716,7 @@ export const zhCN = {
 	"browser.deviceTablet": "平板",
 	"browser.deviceLabel": "设备类型",
 	"browser.newTab": "新建标签页",
+	"browser.tabsAriaLabel": "内置浏览器标签页",
 	"browser.closeTab": "关闭标签页",
 	"browser.minimize": "最小化",
 	"app.showSplit": "双栏对比",
