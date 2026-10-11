@@ -277,6 +277,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.agentClosed": "Agent 已關閉",
 	"app.agentRestarted": "Agent 已重啟",
 	"app.sessionStarted": "會話已啟動",
+	"app.runtimeAlreadyGone": "該會話的執行例項已不存在，已同步執行狀態",
 	"app.modelSwitched": "已切換到 {name}",
 	"app.modelCycled": "已切換到 {name}",
 	"app.modelFavorited": "已收藏 {name}",

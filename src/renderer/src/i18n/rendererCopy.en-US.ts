@@ -272,6 +272,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"app.agentClosed": "Agent closed",
 	"app.agentRestarted": "Agent restarted",
 	"app.sessionStarted": "Session started",
+	"app.runtimeAlreadyGone": "This session's runtime is already gone; the runtime state was synced",
 	"app.modelSwitched": "Switched to {name}",
 	"app.modelCycled": "Switched to {name}",
 	"app.modelFavorited": "Favorited {name}",

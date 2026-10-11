@@ -271,6 +271,7 @@ export const zhCN = {
 	"app.agentClosed": "Agent 已关闭",
 	"app.agentRestarted": "Agent 已重启",
 	"app.sessionStarted": "会话已启动",
+	"app.runtimeAlreadyGone": "该会话的运行实例已不存在，已同步运行状态",
 	"app.modelSwitched": "已切换到 {name}",
 	"app.modelCycled": "已切换到 {name}",
 	"app.modelFavorited": "已收藏 {name}",
