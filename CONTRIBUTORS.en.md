@@ -31,6 +31,8 @@ And everyone who filed issues, shared feedback, and helped spread the word.
 ## 💖 Special Support
 
 - **微时佬友** ([@weishiair](https://github.com/weishiair)) — Provides the Grok model service used for PiDeck development 🎉
+- **橙子** — Provides the subscription service used for PiDeck development 🎉
+- **罪** — Provides the model service used for PiDeck development 🎉
 
 ---
 

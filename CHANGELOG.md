@@ -49,6 +49,10 @@ This is a major feature update: PiDeck expands beyond the pi / DSH workbench wit
 - **Extension version checks keep local versions when the registry fails** — The version column used to collapse to "Current: - · Latest: -" with a red "Failed to check extension versions" line whenever the npm registry was unreachable (a mirror that cannot be reached makes npm retry for ~85s, past PiDeck's 30s subprocess timeout). Reading the installed `package.json` and querying the registry are now settled separately, so a network failure only leaves "Latest" unknown — "Current" still shows and `hasUpdate` stays false while the latest version is unknown. npm timeouts are labelled `(timeout 30s)` in the error so the log distinguishes a slow registry from a bad npm invocation, and registry fallbacks log their reason.
 - **The Settings pet preview respects reduced motion** — The Settings pet preview was the last continuously animating sprite loop running at full frame rate; under `prefers-reduced-motion` it now stretches its frame interval 4× (near-freeze rather than a static frame, which would make shape evaluation unreliable), matching the overlay's behaviour.
 
+### 🙏 Acknowledgements
+
+Special thanks to **罪** for providing the model service used in our software development 🎉
+
 ## v0.8.0 (2026-10-07)
 
 ### 🚀 New Features
