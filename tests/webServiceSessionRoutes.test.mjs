@@ -792,7 +792,21 @@ test("SSE /stream endpoint forwards pi agent events as AI SDK UI message frames"
 			assert.equal(frames[4].type, "text-end");
 			assert.equal(frames[5].type, "finish");
 			// 第二轮帧里必须出现新的 start（messageId=m2）：同连接跨轮重置生效。
-			const round2Start = wire2.split("\n\n").filter((line) => line.startsWith("data: ")).map((line) => line.slice(6)).find((body) => body.startsWith("{") && (() => { try { return JSON.parse(body).type === "start" && JSON.parse(body).messageId === "m2"; } catch { return false; } })());
+			const round2Start = wire2
+				.split("\n\n")
+				.filter((line) => line.startsWith("data: "))
+				.map((line) => line.slice(6))
+				.find(
+					(body) =>
+						body.startsWith("{") &&
+						(() => {
+							try {
+								return JSON.parse(body).type === "start" && JSON.parse(body).messageId === "m2";
+							} catch {
+								return false;
+							}
+						})(),
+				);
 			assert.ok(round2Start, "second turn must open with a fresh start frame (messageId m2) on the same connection");
 			controller.abort();
 		},
