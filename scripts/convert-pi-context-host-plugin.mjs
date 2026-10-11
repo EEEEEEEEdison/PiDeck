@@ -1,6 +1,6 @@
 /** One-time local conversion of pi-context's viewer. Third-party code is not vendored or auto-enabled. */
 import { lstat, mkdir, open, realpath, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
 
@@ -115,11 +115,33 @@ function compileModel(source) {
 	return result.outputText;
 }
 
+/** 与 source 同形态的包含检查基准：路径可能尚不存在，先试整体 realpath，失败则回退到
+ *  最近存在祖先归一后把缺失尾段接回。Windows 8.3 短名（CI runner 的 RUNNER~1 tmpdir）
+ *  与 junction 链接会让 resolve 与 realpath 形态漂移；只归一一侧会把 inside 误判成 outside（2026-10 CI 红）。 */
+async function normalizeForContainment(input) {
+	const resolved = resolve(input);
+	try {
+		return await realpath(resolved);
+	} catch {
+		let ancestor = dirname(resolved);
+		const tail = [basename(resolved)];
+		for (;;) {
+			try {
+				return join(await realpath(ancestor), ...tail);
+			} catch {
+				if (ancestor === dirname(ancestor)) return resolved;
+				tail.unshift(basename(ancestor));
+				ancestor = dirname(ancestor);
+			}
+		}
+	}
+}
+
 /** Destination must be new, preserving existing plugin packages and their consent identity. */
 export async function convertPiContext(sourceDirectory, outputDirectory) {
 	const source = await realpath(resolve(sourceDirectory));
 	const output = resolve(outputDirectory);
-	const rel = relative(source, output);
+	const rel = relative(source, await normalizeForContainment(outputDirectory));
 	if (!rel || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`))) throw new Error("Output must be outside the pi-context source directory");
 	const files = new Map();
 	const pkg = JSON.parse(await boundedSource(source, "package.json"));
