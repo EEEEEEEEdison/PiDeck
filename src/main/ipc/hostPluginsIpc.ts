@@ -118,7 +118,13 @@ export function registerHostPluginsIpc(service: HostPluginService, getWindow: ()
 			service.update(instanceId(id), parsePluginContext(context));
 		}),
 	);
-	ipcMain.handle(ipcChannels.hostPluginsUnmount, (event, id: unknown) => result(() => service.unmount(instanceId(id))));
+	ipcMain.handle(ipcChannels.hostPluginsUnmount, (event, id: unknown) =>
+		result(() => {
+			// 与其余管理入口同一信任边界：卸载是生命周期操作，不允许 guest 帧。
+			trustedWindow(event);
+			return service.unmount(instanceId(id));
+		}),
+	);
 	ipcMain.handle(ipcChannels.hostPluginRequest, (event, request: unknown) => service.broker.request(event.sender.id, event.senderFrame === event.sender.mainFrame, request));
 	const unsubscribe = service.manager.onChanged(() => {
 		const window = getWindow();
