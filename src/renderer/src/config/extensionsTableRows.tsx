@@ -204,7 +204,7 @@ export function DiscoveredExtensionRow(props: {
 						{/* 整包更新 = `pi upgrade <source>`：与已装行同一回路（updateOne），仅项目包行提供。 */}
 						{actionable && props.onUpdate && (
 							<Button variant="ghost" size="icon-sm" className="size-7" disabled={props.updating || props.uninstalling} onClick={() => props.onUpdate?.(item)} title={props.updating ? t("config.extensionUpdatingOne") : t("config.extensionUpdateOne")}>
-								<RefreshCw size={14} strokeWidth={1.8} className={props.updating ? "animate-spin" : undefined} />
+								<RefreshCw size={14} strokeWidth={1.8} className={props.updating ? "animate-pideck-spin" : undefined} />
 							</Button>
 						)}
 						{actionable && (

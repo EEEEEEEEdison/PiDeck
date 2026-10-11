@@ -431,8 +431,6 @@ src/
   <a href="docs/images/gpt-recharge-price.png"><img src="docs/images/gpt-recharge-price.png" alt="GPT 充值价目表" width="420" /></a>
 </p>
 
-价格跟着时价波动，以最新这张图为准（点开看大图）。改价 / 重新出图：`cd video-series/poster && node price.mjs`，说明见 [video-series/poster/README.md](video-series/poster/README.md)。
-
 ---
 
 ## ☕ 赞助
