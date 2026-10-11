@@ -359,6 +359,14 @@ import { ImageSessionStore } from "./imagegen/ImageSessionStore";
 import { ImageBlobStore } from "./imagegen/ImageBlobStore";
 import { registerImageGenImageProtocol } from "./imagegen/ImageGenImageProtocol";
 import { ImageGenConfigStore } from "./imagegen/ImageGenConfigStore";
+import { registerVideoGenIpc } from "./ipc/videogenIpc";
+import { VideoGenConfigStore } from "./videogen/VideoGenConfigStore";
+import { VideoBlobStore } from "./videogen/VideoBlobStore";
+import { VideoSessionStore } from "./videogen/VideoSessionStore";
+import { VideoJobStore } from "./videogen/VideoJobStore";
+import { VideoJobRunner } from "./videogen/VideoJobRunner";
+import { registerVideoGenProtocol } from "./videogen/VideoGenProtocol";
+import type { VideoGenJobSnapshot } from "../shared/types/videogen";
 import { registerVoiceTranscriptionIpc } from "./ipc/voiceTranscriptionIpc";
 import { VoiceTranscriptionConfigStore } from "./voice/VoiceTranscriptionConfigStore";
 import { VoiceTranscriptionService } from "./voice/VoiceTranscriptionService";
@@ -996,6 +1004,15 @@ async function copyCatalogSession(sessionId: string) {
 function resolveImageGenStorageRoots(): { sessions: string; blobs: string } {
 	const root = join(app.getPath("userData"), "imagegen");
 	return { sessions: join(root, "sessions"), blobs: join(root, "blobs") };
+}
+
+/**
+ * 生视频独立存储的磁盘根：与生图同构（sessions + blobs），根目录 userData/videogen。
+ * 同样统一在此解析，避免读写漂移；任务表 jobs.json 单独放根目录（高频重写，不入 sessions）。
+ */
+function resolveVideoGenStorageRoots(): { sessions: string; blobs: string; jobs: string } {
+	const root = join(app.getPath("userData"), "videogen");
+	return { sessions: join(root, "sessions"), blobs: join(root, "blobs"), jobs: join(root, "jobs.json") };
 }
 
 async function exportCatalogSessionHtml(sessionId: string): Promise<{ path: string }> {
@@ -2884,6 +2901,72 @@ function registerIpc() {
 		},
 	});
 
+	// ── 生视频域：与生图平行的独立信任域（userData/videogen.json），异步任务生命周期在 VideoJobRunner ──
+	const videoGenConfigStore = new VideoGenConfigStore({
+		getConfigPath: () => join(app.getPath("userData"), "videogen.json"),
+		log: (message, ...args) => appLogger.info("videogen", message, ...args),
+	});
+	const videoGenRoots = resolveVideoGenStorageRoots();
+	const videoBlobStore = new VideoBlobStore({ getBlobsPath: () => videoGenRoots.blobs });
+	void videoBlobStore.ensureDir();
+	const videoSessionStore = new VideoSessionStore({
+		getStorePath: () => videoGenRoots.sessions,
+		blobs: videoBlobStore,
+	});
+	const videoJobStore = new VideoJobStore({
+		getJobsPath: () => videoGenRoots.jobs,
+		log: (message, ...args) => appLogger.info("videogen", message, ...args),
+	});
+	// pideck-video:// 必须在 app ready 后注册；视频产物只经协议流式吐给 <video>，不进 IPC
+	registerVideoGenProtocol(videoBlobStore);
+	const sendVideoGenEvent = (snapshot: VideoGenJobSnapshot) => {
+		const window = mainWindow;
+		if (window && !window.isDestroyed()) {
+			window.webContents.send(ipcChannels.videogenEvent, snapshot);
+		}
+	};
+	const videoJobRunner = new VideoJobRunner({
+		loadJobs: () => videoJobStore.load(),
+		saveJobs: (jobs) => videoJobStore.save(jobs),
+		getCredentials: async (providerId) => {
+			const creds = await videoGenConfigStore.getCredentials(providerId);
+			if (!creds) return null;
+			return { baseUrl: creds.baseUrl, apiKey: creds.apiKey, protocol: creds.protocol, name: creds.provider.name };
+		},
+		putVideo: (response) => videoBlobStore.putFromResponse(response),
+		persistMessages: (sessionId, messages) => videoSessionStore.append(sessionId, messages),
+		emit: sendVideoGenEvent,
+		log: (message, ...args) => appLogger.info("videogen", message, ...args),
+	});
+	registerVideoGenIpc({
+		submit: async (request) => {
+			const result = await videoJobRunner.submit(request);
+			// 与生图同策略：任务受理即把会话提升为 active + 首行命名，防 staleDrafts 清理丢入口
+			if (result.ok && request.sessionId) {
+				const entry = sessionCatalog?.get(request.sessionId);
+				if (entry) {
+					const project = projectStore.get(entry.projectId);
+					if (project && isDefaultAgentTitle(entry.title, project, mainCopy as never)) {
+						const firstLine = request.prompt.split(/\r?\n/, 1)[0]?.trim() ?? "";
+						if (firstLine) {
+							await sessionCatalog.applyAutomaticTitle(request.sessionId, firstLine, "fallback");
+							mainWindow?.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: entry.projectId });
+						}
+					}
+					await sessionCatalog.promoteToActive(request.sessionId);
+				}
+			}
+			return result;
+		},
+		cancel: (jobId) => videoJobRunner.cancel(jobId),
+		getConfig: () => videoGenConfigStore.getConfig(),
+		saveConfig: (input) => videoGenConfigStore.saveConfig(input),
+		listJobs: (sessionId) => videoJobRunner.listJobsForSession(sessionId),
+		log: (message, ...args) => appLogger.info("videogen", message, ...args),
+	});
+	// 重启恢复：24h 窗口内未终态的任务继续轮询（终态立即结清旧任务）
+	void videoJobRunner.resume();
+
 	registerSessionIpc({
 		projectStore,
 		settingsStore,
@@ -2915,6 +2998,8 @@ function registerIpc() {
 		readCatalogSessionReferenceMessages,
 		// 无 pi 会话文件（纯生图草稿）历史读取回退：ImageSession 独立存储
 		readImageSessionMessages: (sessionId) => imageSessionStore.readMessages(sessionId),
+		// videogen 后端会话历史回退：VideoSession 独立存储（同生图策略）
+		readVideoSessionMessages: (sessionId) => videoSessionStore.readMessages(sessionId),
 		copyCatalogSession,
 		exportCatalogSessionHtml,
 		replaceAgentSession,

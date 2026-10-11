@@ -7,6 +7,7 @@ export * from "./pi-thinking-atoms";
 export * from "./project-atoms";
 export * from "./app-ui-atoms";
 export * from "./imagegen-atoms";
+export * from "./videogen-atoms";
 export * from "./git-atoms";
 export * from "./dsh-atoms";
 export * from "./acp-atoms";

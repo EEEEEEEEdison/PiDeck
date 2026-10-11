@@ -25,7 +25,7 @@ export const logoStyleAtom = atom<"classic" | "pi-tui">("pi-tui");
 export const activeEditorFileAtom = atom<string | null>(null);
 
 /** 与 SettingsModal 侧栏 tab 对齐；深链/焦点目标用同一套 id，避免 Git 去设置落到上次记住的非「常用」页。 */
-export type SettingsTabId = "common" | "shortcuts" | "appearance" | "terminal" | "proxy" | "web" | "editors" | "git" | "dev" | "im" | "pet" | "notification" | "storage" | "backup" | "usage" | "process" | "vision" | "imagegen" | "acp" | "hostplugins";
+export type SettingsTabId = "common" | "shortcuts" | "appearance" | "terminal" | "proxy" | "web" | "editors" | "git" | "dev" | "im" | "pet" | "notification" | "storage" | "backup" | "usage" | "process" | "vision" | "imagegen" | "videogen" | "acp" | "hostplugins";
 
 /**
  * 设置页内可直达的锚点 slug（对应 DOM 上的 `id="settings-section-<slug>"`）。
@@ -108,6 +108,9 @@ export const dshModuleHiddenAtom = atom((get) => isModuleHidden(get(hiddenModule
 
 /** 生图入口是否隐藏：输入框后端下拉里的生图选项。 */
 export const imageGenModuleHiddenAtom = atom((get) => isModuleHidden(get(hiddenModulesAtom), "imagegen"));
+
+/** 生视频入口是否隐藏：输入框后端下拉里的生视频选项 + 生视频设置页。 */
+export const videoGenModuleHiddenAtom = atom((get) => isModuleHidden(get(hiddenModulesAtom), "videogen"));
 
 /** 输入框底栏模式选择器是否被隐藏（设置 → 外观 → 功能模块）。 */
 export const composerModesHiddenAtom = atom((get) => isModuleHidden(get(hiddenModulesAtom), "composerModes"));

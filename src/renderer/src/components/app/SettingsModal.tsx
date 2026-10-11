@@ -3,7 +3,7 @@ import { getDefaultStore, useAtom, useAtomValue } from "jotai";
 import { settingsFocusAtom, type SettingsPaneId, type SettingsTabId } from "../../atoms";
 import { hasPendingUpdateAtom } from "../../atoms/update-atoms";
 import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
-import { Settings2, Network, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, Loader2, SlidersHorizontal, MonitorCog, Keyboard, TerminalSquare, X, Bot, Puzzle } from "lucide-react";
+import { Settings2, Network, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, Loader2, SlidersHorizontal, MonitorCog, Keyboard, TerminalSquare, X, Bot, Puzzle, Clapperboard } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import { applyAppearanceAttributes, type AppearanceSettings } from "../../themeAppearance";
 import { applyCustomThemeTokens, applyFontSizeAttributes } from "../../hooks/appearance/useAppAppearance";
@@ -45,6 +45,7 @@ const ProcessMetricsTab = lazy(() => import("./settings/ProcessMetricsTab").then
 const UsageStatsTab = lazy(() => import("./settings/UsageStatsTab").then((m) => ({ default: m.UsageStatsTab })));
 const VisionBridgeSettingsTab = lazy(() => import("./settings/VisionBridgeSettingsTab").then((m) => ({ default: m.VisionBridgeSettingsTab })));
 const ImageGenSettingsTab = lazy(() => import("./settings/ImageGenSettingsTab").then((m) => ({ default: m.ImageGenSettingsTab })));
+const VideoGenSettingsTab = lazy(() => import("./settings/VideoGenSettingsTab").then((m) => ({ default: m.VideoGenSettingsTab })));
 const AcpToolsTab = lazy(() => import("./settings/AcpToolsTab").then((m) => ({ default: m.AcpToolsTab })));
 const HostPluginsTab = lazy(() => import("../../config/HostPluginsTab").then((m) => ({ default: m.HostPluginsTab })));
 const TerminalTab = lazy(() => import("./settings/TerminalTab").then((m) => ({ default: m.TerminalTab })));
@@ -260,6 +261,7 @@ const TAB_META: Record<SettingsTabId, { labelKey: TranslationKey; icon: ReactNod
 	process: { labelKey: SETTINGS_TAB_LABEL_KEYS.process, icon: <Activity size={16} /> },
 	vision: { labelKey: SETTINGS_TAB_LABEL_KEYS.vision, icon: <Eye size={16} /> },
 	imagegen: { labelKey: SETTINGS_TAB_LABEL_KEYS.imagegen, icon: <ImageIcon size={16} /> },
+	videogen: { labelKey: SETTINGS_TAB_LABEL_KEYS.videogen, icon: <Clapperboard size={16} /> },
 	acp: { labelKey: SETTINGS_TAB_LABEL_KEYS.acp, icon: <Bot size={16} /> },
 	hostplugins: { labelKey: SETTINGS_TAB_LABEL_KEYS.hostplugins, icon: <Puzzle size={16} /> },
 };
@@ -336,6 +338,10 @@ function SettingsModalContent(props: SettingsModalProps) {
 	const imageGenRef = useRef<{ save: () => Promise<boolean> } | null>(null);
 	const [imageGenDirty, setImageGenDirty] = useState(false);
 	const handleImageGenDirtyChange = useCallback((dirty: boolean) => setImageGenDirty(dirty), []);
+	// ── 生视频草稿：独立文件 userData/videogen.json，保存链与生图一致（ref.save + 脏标记） ──
+	const videoGenRef = useRef<{ save: () => Promise<boolean> } | null>(null);
+	const [videoGenDirty, setVideoGenDirty] = useState(false);
+	const handleVideoGenDirtyChange = useCallback((dirty: boolean) => setVideoGenDirty(dirty), []);
 	// ── ACP 工具表：独立 settings.acpTools 字段，保存链与生图一致（ref.save + 脏标记） ──
 	const acpToolsRef = useRef<{ save: () => Promise<boolean> } | null>(null);
 	const [acpDirty, setAcpDirty] = useState(false);
@@ -447,6 +453,11 @@ function SettingsModalContent(props: SettingsModalProps) {
 			const imageGenOk = (await imageGenRef.current?.save()) ?? false;
 			ok = ok && imageGenOk;
 			// 保存成功后脏标记由子组件通过 onDirtyChange 自动清掉
+		}
+		if (videoGenDirty) {
+			// 校验失败（必填缺失）时子组件返回 false，保留脏标记供用户修正后重试
+			const videoGenOk = (await videoGenRef.current?.save()) ?? false;
+			ok = ok && videoGenOk;
 		}
 		if (acpDirty) {
 			// 校验失败（必填/重名）时子组件返回 false，保留脏标记供用户修正后重试
@@ -592,7 +603,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 	const hasDirtyChanges = dirtyFields.size > 0;
 	// 视觉桥/生图草稿有未保存改动时，头部保存/取消按钮同样点亮（与全局设置脏标记合并判定）
-	const hasAnyDirtyChanges = hasDirtyChanges || visionDraft.dirty || imageGenDirty || acpDirty;
+	const hasAnyDirtyChanges = hasDirtyChanges || visionDraft.dirty || imageGenDirty || videoGenDirty || acpDirty;
 	// 关闭确认：列出全部变更项（不再只点第一条），多项按设置页 tab/字段顺序逐条展示。
 	const unsavedSummary = useMemo(
 		() =>
@@ -939,6 +950,12 @@ function SettingsModalContent(props: SettingsModalProps) {
 							<TabsContent value="imagegen" className="settings-panel min-w-0" hidden={activeTab !== "imagegen"}>
 								<Suspense fallback={<SettingsTabLoading />}>
 									<ImageGenSettingsTab ref={imageGenRef} onDirtyChange={handleImageGenDirtyChange} />
+								</Suspense>
+							</TabsContent>
+							{/* ── 生视频 tab：独立 videogen.json，草稿/脏标记/保存链与生图同构（hidden 保挂载）。 ── */}
+							<TabsContent value="videogen" className="settings-panel min-w-0" hidden={activeTab !== "videogen"}>
+								<Suspense fallback={<SettingsTabLoading />}>
+									<VideoGenSettingsTab ref={videoGenRef} onDirtyChange={handleVideoGenDirtyChange} />
 								</Suspense>
 							</TabsContent>
 							{/* ── ACP 工具 tab：独立 settings.acpTools 字段；草稿自持，切换 tab 保持挂载（hidden）以免丢失未保存行 ── */}

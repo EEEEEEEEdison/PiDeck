@@ -959,6 +959,20 @@ export const ipcChannels = {
 	 */
 	imagegenReadImageBlob: "imagegen:read-image-blob",
 
+	// ===== 生视频（VideoGen）：提交-轮询-下载异步协议 =====
+	/** 提交生视频任务：受理后返回 jobId，产物经轮询事件推送 */
+	videogenSubmit: "videogen:submit",
+	/** 取消进行中的任务（停止轮询并标记 cancelled；上游可能继续执行与计费） */
+	videogenCancel: "videogen:cancel",
+	/** 读取独立生视频配置（userData/videogen.json） */
+	videogenGetConfig: "videogen:get-config",
+	/** 保存独立生视频配置（白名单校验后落盘） */
+	videogenSaveConfig: "videogen:save-config",
+	/** 某会话的全部任务快照（重启后渲染层恢复进行中占位用） */
+	videogenListJobs: "videogen:list-jobs",
+	/** 任务状态事件（主进程 → 渲染层单通道推送，按 sessionId 过滤消费） */
+	videogenEvent: "videogen:event",
+
 	// ===== 提示词增强（输入框草稿 → 模型改写 → 回填） =====
 	/** 发起增强：受理后流式事件经 enhance:event 推送（按 runId 配对） */
 	enhanceRun: "enhance:run",

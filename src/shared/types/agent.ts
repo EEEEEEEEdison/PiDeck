@@ -55,13 +55,14 @@ export type DshTeamState = {
 export type AgentStatus = "starting" | "idle" | "running" | "error" | "closed";
 
 /**
- * 运行时后端：pi（stdio JSON-RPC，现有）、dsh（DeepSeek Harness，无 web 内嵌形态）
- * 或 imagegen（生图，无 LLM agent、无 pi/DSH 会话文件，历史独立存 ImageSessionStore）。
+ * 运行时后端：pi（stdio JSON-RPC，现有）、dsh（DeepSeek Harness，无 web 内嵌形态）、
+ * imagegen（生图，无 LLM agent、无 pi/DSH 会话文件，历史独立存 ImageSessionStore）
+ * 或 videogen（生视频，同为直连供应商 API 的无 agent 后端，历史独立存 VideoSessionStore）。
  * 与 `SessionSource`（历史导入来源）是两个维度：source 描述会话文件从哪来，
  * backend 描述会话由哪个引擎驱动。缺省视为 "pi"，旧数据天然兼容。
- * 生图是后端维度的独立第三类（不等价于 pi 的一种模式），互不影响。
+ * 生图/生视频是后端维度的独立类型（不等价于 pi 的一种模式），互不影响。
  */
-export type AgentBackend = "pi" | "dsh" | "imagegen" | "acp";
+export type AgentBackend = "pi" | "dsh" | "imagegen" | "videogen" | "acp";
 
 /**
  * 后端可选能力（核心接口方法之外的可选扩展）。
@@ -392,5 +393,5 @@ export type ThinkingUpdate = {
 	done: boolean;
 };
 
-/** 输入框发送模式：普通执行 / 只读计划 / 生图 / 目标自动推进。 */
-export type ComposerAgentMode = "normal" | "plan" | "imagegen" | "goal";
+/** 输入框发送模式：普通执行 / 只读计划 / 生图 / 生视频 / 目标自动推进。 */
+export type ComposerAgentMode = "normal" | "plan" | "imagegen" | "videogen" | "goal";

@@ -343,6 +343,11 @@ export type SessionIpcDeps = {
 	 * 未装配（单测/无生图域）时 undefined；调用处 `?? []` 兜底空页。
 	 */
 	readImageSessionMessages?: (sessionId: string) => Promise<import("../../shared/types").ChatMessage[]>;
+	/**
+	 * 无 pi 会话文件的会话（生视频后端）历史读取：回退 VideoSession 独立存储。
+	 * 未装配（单测/无生视频域）时 undefined；调用处 `?? []` 兜底空页。
+	 */
+	readVideoSessionMessages?: (sessionId: string) => Promise<import("../../shared/types").ChatMessage[]>;
 	copyCatalogSession: (sessionId: string) => Promise<{ cancelled: boolean; targetSessionId?: string }>;
 	exportCatalogSessionHtml: (sessionId: string) => Promise<Record<string, unknown> & { path: string }>;
 	replaceAgentSession: (agentId: string, fn: () => Promise<unknown>, options?: { markForked?: boolean; markSuperseded?: boolean }) => Promise<unknown>;
@@ -417,6 +422,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		readCatalogSessionReferenceMessages,
 		// 无 pi 会话文件（纯生图草稿）历史读取回退：ImageSession 独立存储
 		readImageSessionMessages,
+		// 生视频后端会话历史读取回退：VideoSession 独立存储
+		readVideoSessionMessages,
 		copyCatalogSession,
 		exportCatalogSessionHtml,
 		replaceAgentSession,
@@ -793,12 +800,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		return sessionCatalog.update(sessionId, {
 			...patch,
 			title: title || undefined,
-			// 切到生图后端时甩开 pi 会话文件引用：生图历史独立存 ImageSessionStore，
-			// 残留 filePath 会让生图/重发/历史加载误落到不存在的 pi 文件（ENOENT 根因）。
-			// 切到生图/ACP 后端时甩开 pi 会话文件引用：生图历史独立存 ImageSessionStore，
-			// ACP 会话由 agent CLI 自持（session/new 在远端）；残留 filePath 会让历史加载
-			// 误落到不存在的 pi 文件（ENOENT 根因，imagegen 同款）。
-			...(patch.backend === "imagegen" || patch.backend === "acp" ? { filePath: null, piSessionId: null } : {}),
+			// 切到生图/生视频/ACP 后端时甩开 pi 会话文件引用：生图历史独立存 ImageSessionStore，
+			// 生视频独立存 VideoSessionStore，ACP 会话由 agent CLI 自持（session/new 在远端）；
+			// 残留 filePath 会让历史加载误落到不存在的 pi 文件（ENOENT 根因，imagegen 同款）。
+			...(patch.backend === "imagegen" || patch.backend === "videogen" || patch.backend === "acp" ? { filePath: null, piSessionId: null } : {}),
 		});
 	});
 	ipcMain.handle(ipcChannels.sessionsCatalogDelete, async (_event, sessionId: string) => {
@@ -909,6 +914,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			// imagegen 后端会话：历史独立存 ImageSessionStore，不走 pi 文件
 			return (await readImageSessionMessages?.(sessionId)) ?? [];
 		}
+		if (entry?.backend === "videogen") {
+			// videogen 后端会话：历史独立存 VideoSessionStore（任务占位/终态按消息 id 折叠）
+			return (await readVideoSessionMessages?.(sessionId)) ?? [];
+		}
 		if (!entry?.filePath) return [];
 		// 有界「加载窗口」（9 轮 + 条目预算），不是全量历史：整量读出在大会话上
 		// 会同时顶爆主进程与渲染层（#213）；需要更早历史走 readRecordMessagePage。
@@ -922,8 +931,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	ipcMain.handle(ipcChannels.sessionsGetBranchTree, async (_event, sessionId: unknown): Promise<SessionBranchTree | null> => {
 		if (typeof sessionId !== "string" || !sessionId.trim()) throw new Error("Invalid branch-tree request");
 		const entry = sessionCatalog.get(sessionId);
-		// DSH / imagegen 会话没有 pi JSONL：面板按空态处理，不报错。
-		if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen" || entry.backend === "acp") return null;
+		// DSH / imagegen / videogen 会话没有 pi JSONL：面板按空态处理，不报错。
+		if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen" || entry.backend === "videogen" || entry.backend === "acp") return null;
 		return agentManager.readSessionBranchTree(entry.filePath);
 	});
 	/** 子代理列表：从会话文件 subagents:record + catalog 子会话回填合成。 */
@@ -977,16 +986,16 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	ipcMain.handle(ipcChannels.sessionsListFileChanges, async (_event, sessionId: string) => {
 		if (typeof sessionId !== "string" || !sessionId) return [];
 		const entry = sessionCatalog.get(sessionId);
-		// DSH/生图会话无 pi 会话文件，文件汇总无意义
-		if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen") return [];
+		// DSH/生图/生视频会话无 pi 会话文件，文件汇总无意义
+		if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen" || entry.backend === "videogen") return [];
 		return agentManager.readSessionFileChanges(entry.filePath);
 	});
 	/** 会话级 todo 快照：从会话文件 pi-deck-todo custom 条目重建最新计划（历史会话任务 tab）。 */
 	ipcMain.handle(ipcChannels.sessionsListSessionTodo, async (_event, sessionId: string) => {
 		if (typeof sessionId !== "string" || !sessionId) return undefined;
 		const entry = sessionCatalog.get(sessionId);
-		// DSH/生图会话无 pi 会话文件，无 todo 快照
-		if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen") return undefined;
+		// DSH/生图/生视频会话无 pi 会话文件，无 todo 快照
+		if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen" || entry.backend === "videogen") return undefined;
 		return agentManager.readSessionTodo(entry.filePath);
 	});
 
@@ -1008,14 +1017,14 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				throw error;
 			}
 		}
-		if (entry?.backend === "imagegen" || !entry?.filePath) {
-			// imagegen 后端会话（可能残留无意义 pi filePath）或纯生图草稿：
-			// 走 ImageSession 独立存储恢复生图历史，避免落到不存在的 pi 文件
-			const imageSessionMessages = (await readImageSessionMessages?.(sessionId)) ?? [];
-			if (imageSessionMessages.length > 0) {
+		if (entry?.backend === "imagegen" || entry?.backend === "videogen" || !entry?.filePath) {
+			// imagegen/videogen 后端会话（可能残留无意义 pi filePath）或纯生图草稿：
+			// 走独立存储恢复历史（生图 ImageSession / 生视频 VideoSession），避免落到不存在的 pi 文件
+			const independentMessages = entry?.backend === "videogen" ? ((await readVideoSessionMessages?.(sessionId)) ?? []) : ((await readImageSessionMessages?.(sessionId)) ?? []);
+			if (independentMessages.length > 0) {
 				return {
-					messages: imageSessionMessages,
-					total: imageSessionMessages.length,
+					messages: independentMessages,
+					total: independentMessages.length,
 					nextBefore: null,
 				};
 			}

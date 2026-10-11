@@ -1,6 +1,7 @@
 import type { PiDesktopApi } from "../../preload";
 import { createDefaultExternalEditorSettings, createDefaultSecurityConfig, createDefaultSoundAlertSettings, DEFAULT_PET_SCALE, DEFAULT_TOAST_DURATION_MS, emptyRemoteAccessState } from "../../shared/types";
 import { DEFAULT_VOICE_TRANSCRIPTION_CONFIG } from "../../shared/voiceTranscriptionConfig";
+import { EMPTY_VIDEO_GEN_CONFIG } from "../../shared/videoGenConfig";
 import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import { ACP_TOOL_PRESETS } from "../../shared/acpToolPresets";
 import type { AppSettings, FileTreeNode, Project, SessionRecord, SessionSummary, TerminalDataEvent, TerminalExitEvent, TerminalTab } from "../../shared/types";
@@ -1832,6 +1833,15 @@ export function createPreviewApi(): PiDesktopApi {
 			getConfig: async () => ({ providers: [], activeProviderId: "", activeModel: "" }),
 			saveConfig: async (config) => ({ ok: true, config }),
 			readImageBlob: async () => null,
+		},
+		// 生视频预览桩：与生图同策略（LAN web 模式继承此桩，远程暂不支持生视频任务）
+		videogen: {
+			submit: async () => ({ ok: false, error: "notConfigured" }),
+			cancel: async () => ({ ok: false }),
+			getConfig: async () => ({ ...EMPTY_VIDEO_GEN_CONFIG, providers: [] }),
+			saveConfig: async (config) => ({ ok: true, config }),
+			listJobs: async () => [],
+			onEvent: () => () => {},
 		},
 		enhance: {
 			run: async () => ({ ok: false, errorKind: "sdk-unavailable", message: "preview mode" }),
