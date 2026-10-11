@@ -37,6 +37,15 @@ function supportsPiSelfUpdate(version: string | undefined): boolean {
 	return comparison > 0 || (comparison === 0 && !normalized.includes("-"));
 }
 
+/** 主进程日志用的错误摘要：只取 message，不把堆栈和对象形态丢进日志 detail。 */
+function describeError(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+/** `npm view` 子进程超时：registry 慢或不可达时 npm 自己会在 30s 内重试并可能回答缓存值，
+ * 超过这个时间就是真的拖住了扩展页刷新（超时被杀时 stderr 为空，必须自己补标记，见 npmViewVersion）。 */
+const NPM_VIEW_TIMEOUT_MS = 30_000;
+
 export { BUILT_IN_EXTENSIONS } from "./builtInExtensions";
 
 /** pi 的 npm 包名。pi.dev 版本接口在包改名迁移期可返回不同 packageName，见 fetchPiLatestVersion。 */
@@ -233,6 +242,11 @@ export class ExtensionManager {
 			const versionResolver = createNpmRegistryVersionResolver({
 				resolveRegistryBase: () => this.resolveNpmRegistryBase(),
 				npmViewFallback: (packageName) => this.npmViewVersion(packageName),
+				// 快路为什么失败必须留痕：这正是「检查不到版本」唯一能事后定位的证据
+				//（npm 回退失败的日志只说明子进程被杀，不说明 registry 网络本身是否可达）。
+				onFallback: ({ packageName, reason }) => {
+					getAppLogger()?.warn("extensions", "npm registry fast path failed, falling back to npm view", { packageName, reason });
+				},
 			});
 			piInstalled = await Promise.all(parsed.map((extension) => this.enrichExtensionVersion(extension, versionResolver.resolveLatestVersion)));
 		}
@@ -666,24 +680,51 @@ export class ExtensionManager {
 		}
 	}
 
+	/**
+	 * 补全一个 npm 扩展的版本信息：当前版本读本地 package.json，最新版本查 registry。
+	 *
+	 * 两条查询互不依赖，必须各自结算：任意一条失败只该让对应那一列缺失，不能把另一条
+	 * 已经拿到的值一起吞掉。旧实现把两者串在同一个 Promise.all 里，registry 不可达时
+	 * 连本地已装版本也一起变成「-」，用户看到的就是整列「检查扩展版本失败」
+	 * （2026-10 用户反馈：npm registry 慢/断时连「当前」都查不到）。
+	 */
 	private async enrichExtensionVersion(extension: PiExtensionSummary, resolveLatestVersion: (packageName: string) => Promise<string | null>): Promise<PiExtensionSummary> {
 		if (!extension.source.toLowerCase().startsWith("npm:")) return extension;
 		const packageName = extension.source.replace(/^npm:/i, "");
-		try {
-			const [currentVersion, latestVersion] = await Promise.all([this.readInstalledVersion(extension.path), resolveLatestVersion(packageName)]);
-			return {
-				...extension,
-				currentVersion,
-				// 快路与回退都以 null 表示「没查到」，投影到 PiExtensionSummary 的 undefined 语义
-				latestVersion: latestVersion ?? undefined,
-				hasUpdate: Boolean(currentVersion && latestVersion && compareVersions(latestVersion, currentVersion) > 0),
-			};
-		} catch (error) {
+		const [installed, latest] = await Promise.all([this.settleQuery(this.readInstalledVersion(extension.path)), this.settleQuery(resolveLatestVersion(packageName))]);
+		const currentVersion = installed.value;
+		const latestVersion = latest.value ?? undefined;
+		if (installed.error) {
+			// 本地读盘失败（package.json 缺失/损坏）仍保留 pi list 给出的 path，UI 可据此定位。
+			getAppLogger()?.warn("extensions", "Installed extension version unreadable", { source: extension.source, path: extension.path, error: describeError(installed.error) });
+		}
+		let updateError: string | undefined;
+		if (latest.error) {
 			// 日志走主进程 logging 模块：console.error 会绕过统一分级与文件落盘（日志纪律）
 			getAppLogger()?.error("extensions", "Extension version check failed", {
-				error: error instanceof Error ? error.message : String(error),
+				source: extension.source,
+				error: describeError(latest.error),
 			});
-			return { ...extension, updateError: this.translate("mainExtension.versionCheckFailed") };
+			updateError = this.translate("mainExtension.versionCheckFailed");
+		}
+		return {
+			...extension,
+			currentVersion,
+			latestVersion,
+			hasUpdate: Boolean(currentVersion && latestVersion && compareVersions(latestVersion, currentVersion) > 0),
+			...(updateError ? { updateError } : {}),
+		};
+	}
+
+	/**
+	 * 结算一次「可失败查询」：成功给值，失败给原因（不抛出）。
+	 * 版本补全的两条查询都不该让另一条的结果作废，调用方据此分别决定展示与日志。
+	 */
+	private async settleQuery<T>(query: Promise<T>): Promise<{ value: T | undefined; error: unknown }> {
+		try {
+			return { value: await query, error: undefined };
+		} catch (error) {
+			return { value: undefined, error };
 		}
 	}
 
@@ -743,14 +784,18 @@ export class ExtensionManager {
 					env: this.locator.createProcessEnv(this.getSettings(), invocation.pathPrefix),
 					shell: invocation.shell,
 					windowsHide: true,
-					timeout: 30_000,
+					timeout: NPM_VIEW_TIMEOUT_MS,
 					encoding: "utf8",
 					windowsVerbatimArguments: invocation.windowsVerbatimArguments,
 				},
 				(error, stdout, stderr) => {
 					if (error) {
 						// Electron 启动环境经常缺少用户 shell PATH；通过 PiLocator 补齐 PATH 后仍失败时，把 stderr 透出给设置页。
-						reject(new Error((stderr || error.message).trim()));
+						// npm 失败时一般会写 stderr，但被 timeout 杀掉时 stderr 为空、error.message 只剩
+						// 「Command failed: npm view <pkg> version」——必须自己补上超时标记，否则日志里
+						// 「registry 慢」与「npm 不存在/参数错」完全无法区分（2026-10 实测）。
+						const detail = (stderr || error.message).trim();
+						reject(new Error(error.killed ? `${detail} (timeout ${Math.round(NPM_VIEW_TIMEOUT_MS / 1000)}s)` : detail));
 						return;
 					}
 					resolve(stdout.trim());
