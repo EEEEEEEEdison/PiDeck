@@ -12,7 +12,7 @@ const sendHook = readFileSync("src/renderer/src/hooks/useSessionSend.ts", "utf8"
 const timelineCss = readFileSync("src/renderer/src/styles/timeline.css", "utf8");
 
 test("goal mode is a first-class ComposerAgentMode", () => {
-	assert.match(agentTypes, /ComposerAgentMode = "normal" \| "plan" \| "imagegen" \| "goal"/);
+	assert.match(agentTypes, /ComposerAgentMode = "normal" \| "plan" \| "imagegen" \| "videogen" \| "goal"/);
 	assert.equal(existsSync("resources/extensions/pi-deck-goal-mode.ts"), true);
 	assert.match(builtIns, /"pi-deck-goal-mode.ts"/);
 });

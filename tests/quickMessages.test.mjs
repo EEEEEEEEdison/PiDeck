@@ -292,7 +292,7 @@ test("底栏接线：安全控制位右侧渲染 props.quickMessagesControl，�
 	const source = readSource("src/renderer/src/components/session/ComposerComponents.tsx");
 	assert.match(source, /quickMessagesControl\?: ReactNode/);
 	// 生图模式没有对话 runtime，两个控制位都不该出现；分开判断是为了防止将来只屏蔽一个。
-	assert.match(source, /isImageGenMode \? null : \(\s*<>\s*\{props\.securityControl\}\s*\{props\.quickMessagesControl\}/);
+	assert.match(source, /isImageGenMode \|\| isVideoGenMode \? null : \(\s*<>\s*\{props\.securityControl\}\s*\{props\.quickMessagesControl\}/);
 });
 
 test("ComposerArea：把 controller 的 pickers/delivery 接进快捷消息入口", () => {

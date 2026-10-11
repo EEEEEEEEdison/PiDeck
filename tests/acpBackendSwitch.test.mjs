@@ -30,7 +30,7 @@ test("picker 选项组:Agent CLI 组内直接列工具,选中即切后端+工具
 
 test("acp 后端隐藏 pi 模型/思考 chip(两套模型语义不混用)", () => {
 	const source = read("src/renderer/src/components/session/ComposerComponents.tsx");
-	assert.match(source, /isImageGenMode \|\| props\.backend === "acp" \? null : \(\s*<ModelThinkingChip/, "acp 后端必须隐藏 ModelThinkingChip");
+	assert.match(source, /isImageGenMode \|\| isVideoGenMode \|\| props\.backend === "acp" \? null : \(\s*<ModelThinkingChip/, "acp 后端必须隐藏 ModelThinkingChip");
 	assert.match(source, /focus-visible:ring-0/, "picker 不得有 focus 环闪");
 });
 
@@ -48,7 +48,7 @@ test("controller：切 acp 必须带工具预选，空表不切换", () => {
 
 test("主进程：切到 acp 与 imagegen 同款甩开 pi 会话文件引用", () => {
 	const source = read("src/main/ipc/sessionIpc.ts");
-	assert.match(source, /patch\.backend === "imagegen" \|\| patch\.backend === "acp" \? \{ filePath: null, piSessionId: null \}/, "acp 切换必须清 filePath/piSessionId");
+	assert.match(source, /patch\.backend === "imagegen" \|\| patch\.backend === "videogen" \|\| patch\.backend === "acp" \? \{ filePath: null, piSessionId: null \}/, "acp 切换必须清 filePath/piSessionId");
 });
 
 test("契约类型：UpdateSessionRecordInput 暴露 acpToolId 草稿期预选", () => {
