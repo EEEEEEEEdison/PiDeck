@@ -65,7 +65,10 @@ test("buildLanes：全部步骤脚本真实存在（脚本改名/删除时这里
 
 test("buildLanes：release 泳道覆盖全部 --check 型脚本", () => {
 	const release = buildLanes({ testConcurrency: 4, e2e: false }).find((lane) => lane.id === "release");
-	const commands = release.steps.map((step) => `${step.file} ${step.args.join(" ")}`).join(" ");
+	const commands = release.steps
+		.filter((step) => !step.skipReason)
+		.map((step) => `${step.file} ${step.args.join(" ")}`)
+		.join(" ");
 	for (const expected of [
 		"check-release-consistency.mjs",
 		"sync-workflow-choices.js --check",

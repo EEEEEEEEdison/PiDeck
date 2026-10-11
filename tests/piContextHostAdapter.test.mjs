@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -233,6 +234,23 @@ test("pi-context conversion creates a browser-only consent package without execu
 		await assert.rejects(convertPiContext(source, output), /EEXIST/);
 		assert.equal(await readFile(join(output, "app.js"), "utf8"), code);
 		await assert.rejects(convertPiContext(source, join(source, "plugin")), /outside/);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("output-inside-source 拒绝不受路径形态漂移影响（junction / 8.3 短名同源）", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pideck-context-shape-"));
+	const sourceReal = join(root, "real-source");
+	const sourceLink = join(root, "junction-source");
+	await mkdir(sourceReal, { recursive: true });
+	// junction 在 Windows 无需特权；POSIX 忽略 type 退化为普通符号链接，行为一致。
+	// realpath(source) 展开链接形态后输出仍在源内：旧实现只归一 source 一侧，
+	// relative 误判为 outside 而放行——CI runner 的 RUNNER~1 8.3 短名 tmpdir 是同一机制的实证。
+	symlinkSync(sourceReal, sourceLink, "junction");
+	try {
+		await sourceAt(sourceReal);
+		await assert.rejects(convertPiContext(sourceLink, join(sourceLink, "plugin")), /outside/);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
