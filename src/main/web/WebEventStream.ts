@@ -87,9 +87,10 @@ export class PiEventToUiMessageStream {
 
 		// agent_end 只是本轮 LLM 步结束：后面常接 tool_execution / 下一轮 message_start。
 		// 这里关流会让手机端工具卡在 input-available，useChat 标成失败且后续正文丢失。
-		// 真失败才收尾；正常结束等 agent_settled。
+		// 真失败才收尾；正常结束等 agent_settled。pi 部分路径会带 error: null（无错的
+		// 显式空值），与 undefined 同样视为无错，否则整轮工具循环会在第一步就断流。
 		if (type === "agent_end") {
-			if (event.error !== undefined) return this.finishMessage(event);
+			if (event.error !== undefined && event.error !== null) return this.finishMessage(event);
 			return frames;
 		}
 
@@ -296,6 +297,10 @@ export const SSE_DONE = "data: [DONE]\n\n";
 /**
  * 每个 session 一条活跃流的连接状态。
  * 持有翻译器 + 写出函数，连接关闭后标记 dead 并停止写出。
+ * keepAlive：外部流（GET /stream，EventSource 常驻订阅）在一轮 finish+[DONE] 后
+ * 不关连接，而是换一个全新翻译器等待下一轮——消除轮与轮之间的重连空窗
+ * （Ask 续答/桌面发起的下一轮若落在重连窗口内，事件金部落盒、前端只能等磁盘追赶）。
+ * /api/chat（useChat 一次性 fetch）不用 keepAlive：AI SDK 语义要求流随 [DONE] 结束。
  */
 export type SessionStreamEntry = {
 	sessionId: string;
@@ -303,6 +308,8 @@ export type SessionStreamEntry = {
 	/** 写出原始 wire 文本（含 data: 前缀）；返回是否成功。 */
 	writeRaw: (wire: string) => boolean;
 	closed: boolean;
+	/** 一轮结束后保活重置（外部流），不结束响应。 */
+	keepAlive?: boolean;
 	onFinish?: () => void;
 };
 
@@ -320,12 +327,13 @@ export class WebEventStreamRouter {
 	constructor(private readonly resolveSession: AgentToSessionRouter) {}
 
 	/** 注册一个 session 的 SSE 连接。返回关闭函数。 */
-	add(sessionId: string, writeRaw: (wire: string) => boolean, onClose: () => void, onFinish?: () => void): () => void {
+	add(sessionId: string, writeRaw: (wire: string) => boolean, onClose: () => void, onFinish?: () => void, options?: { keepAlive?: boolean }): () => void {
 		const entry: SessionStreamEntry = {
 			sessionId,
 			adapter: new PiEventToUiMessageStream(),
 			writeRaw,
 			closed: false,
+			keepAlive: options?.keepAlive === true,
 			onFinish,
 		};
 		let set = this.sessionStreams.get(sessionId);
@@ -385,8 +393,13 @@ export class WebEventStreamRouter {
 						set.delete(entry);
 						break;
 					}
-					// [DONE] 是协议终止标记，但 Node response 仍需显式 end，
+					// keepAlive（外部流）：连接保留，换新翻译器等下一轮；客户端在下一轮的
+					// start 帧上自行重置合并器。非 keepAlive（/api/chat）：[DONE] 后显式 end，
 					// 否则 useChat 可能继续等待 HTTP body 关闭，界面会一直显示运行中。
+					if (entry.keepAlive) {
+						entry.adapter = new PiEventToUiMessageStream();
+						break;
+					}
 					entry.closed = true;
 					set.delete(entry);
 					entry.onFinish?.();

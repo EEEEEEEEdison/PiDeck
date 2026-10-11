@@ -44,112 +44,11 @@ function prettyToolValue(value: unknown, maxChars = 4000): string {
 import { uiMessageText, uiMessageImages } from "./webMessageParts";
 export { uiMessageText, uiMessageImages } from "./webMessageParts";
 
-type WebToolPart = {
-	type: string;
-	toolName?: string;
-	toolCallId?: string;
-	state?: string;
-	input?: unknown;
-	output?: unknown;
-	errorText?: string;
-};
-
-/** 回合内一段过程内容：合并后的思考块 / 工具调用 / 中间回复。思考块 running 取块内最后一个 reasoning part 的流式状态（AI SDK state 字段），不再用整轮流式标志。 */
-export type TurnSegment = { kind: "thinking"; id: string; texts: string[]; running?: boolean } | { kind: "tool"; id: string; part: WebToolPart } | { kind: "interim"; id: string; text: string };
-
-/** 一轮助手回合：用户消息之后的连续 assistant 消息聚合（对齐桌面 run 语义）。 */
-export interface AssistantTurn {
-	/** 回合内首条消息 id（容器 key/锚点） */
-	id: string;
-	/** 回合内全部消息 id（含首条；锚点补偿用） */
-	messageIds: string[];
-	/** 过程内容（不含常驻正文），按原始顺序 */
-	segments: TurnSegment[];
-	/** 最后一段非空正文：常驻折叠容器外；流式中即正在生成的文本 */
-	finalText: string;
-	toolCount: number;
-	/** 思考段数（合并后块内 texts 总数，对齐桌面「N 次思考」） */
-	thinkingCount: number;
-	/** 中间回复段数（不含 final） */
-	interimCount: number;
-}
-
-export type TimelineEntry = { kind: "user"; id: string; message: UIMessage } | { kind: "turn"; id: string; turn: AssistantTurn };
-
-/** 把扁平 messages 聚合成「用户气泡 / 助手回合」交替序列（桌面 groupAgentRuns 的 Web 版）。
- *
- * - 连续 assistant 消息归为一个回合，跨消息的连续 reasoning part 合并成同一思考块
- *   （修复：一轮里被拆成多个思考卡片）；
- * - 回合内最后一段非空 text 剔出过程组作为常驻正文（对齐桌面「最终回答永不折叠」）；
- * - 纯函数，行为由 tests/webLayout.test.mjs 锁定。 */
-export function groupTimelineEntries(messages: UIMessage[]): TimelineEntry[] {
-	const entries: TimelineEntry[] = [];
-	let messageIds: string[] = [];
-	let segments: TurnSegment[] = [];
-	let finalText = "";
-	let finalId = "";
-	let turnId = "";
-	const flush = () => {
-		if (!turnId) return;
-		// 把 final 对应的最后一个 interim 从过程组剔除（只剔除一次，同 id 不会重复）
-		const processSegments = finalId ? segments.filter((segment) => !(segment.kind === "interim" && segment.id === finalId)) : segments;
-		entries.push({
-			kind: "turn",
-			id: turnId,
-			turn: {
-				id: turnId,
-				messageIds,
-				segments: processSegments,
-				finalText,
-				toolCount: processSegments.filter((segment) => segment.kind === "tool").length,
-				thinkingCount: processSegments.reduce((sum, segment) => sum + (segment.kind === "thinking" ? segment.texts.length : 0), 0),
-				interimCount: processSegments.filter((segment) => segment.kind === "interim").length,
-			},
-		});
-		messageIds = [];
-		segments = [];
-		finalText = "";
-		finalId = "";
-		turnId = "";
-	};
-	for (const message of messages) {
-		if (message.role !== "assistant") {
-			flush();
-			entries.push({ kind: "user", id: message.id, message });
-			continue;
-		}
-		if (!turnId) turnId = message.id;
-		messageIds.push(message.id);
-		for (let index = 0; index < message.parts.length; index += 1) {
-			const part = message.parts[index];
-			if (part.type === "reasoning") {
-				const text = part.text ?? "";
-				if (!text.trim()) continue;
-				const running = (part as { state?: "streaming" | "done" }).state === "streaming";
-				const last = segments.at(-1);
-				if (last && last.kind === "thinking") {
-					last.texts.push(text);
-					// 合并块的流式状态以最后一个 part 为准：新 part 还在流 → 块继续 sweep；新 part 已 done → 块停
-					last.running = running;
-				} else {
-					segments.push({ kind: "thinking", id: `${message.id}:p${index}`, texts: [text], running });
-				}
-			} else if (part.type === "dynamic-tool" || (typeof part.type === "string" && part.type.startsWith("tool-"))) {
-				const toolPart = part as unknown as WebToolPart;
-				segments.push({ kind: "tool", id: toolPart.toolCallId ?? `${message.id}:p${index}`, part: toolPart });
-			} else if (part.type === "text") {
-				const text = part.text ?? "";
-				if (!text.trim()) continue;
-				const id = `${message.id}:p${index}`;
-				segments.push({ kind: "interim", id, text });
-				finalText = text;
-				finalId = id;
-			}
-		}
-	}
-	flush();
-	return entries;
-}
+// 分组纯函数已抽到 webTimelineGrouping（叶子模块，vm 沙箱单测可用）；re-export 保持既有导入路径不破
+import { groupTimelineEntries } from "./webTimelineGrouping";
+import type { AssistantTurn, TimelineEntry, TurnSegment, WebToolPart } from "./webTimelineGrouping";
+export { groupTimelineEntries } from "./webTimelineGrouping";
+export type { AssistantTurn, TimelineEntry, TurnSegment, WebToolPart } from "./webTimelineGrouping";
 
 /** 用户消息右对齐气泡（结构与桌面 UserBubble 一致；P1/P2 增加图片与 hover 操作）。 */
 export const WebUserBubble = memo(function WebUserBubble(props: {
@@ -412,6 +311,10 @@ export const WebAssistantTurn = memo(function WebAssistantTurn(props: { turn: As
 	const [manualOpen, setManualOpen] = useState<boolean | null>(null);
 	const processOpen = manualOpen ?? props.isStreaming;
 	const hasProcess = turn.segments.length > 0;
+	// 流式中的末段正文挂折叠容器外常显（打字机，桌面 liveInterimId 同款）：它仍在 segments
+	// 里参与计数，但容器内不再重复渲染；收尾后重分组提升为 finalText，此处自然消失。
+	const liveTextSegment = props.isStreaming && turn.liveTextId ? turn.segments.find((segment) => segment.kind === "interim" && segment.id === turn.liveTextId) : undefined;
+	const liveTextString = liveTextSegment && liveTextSegment.kind === "interim" ? liveTextSegment.text : undefined;
 	return (
 		<div className="group/assistant flex w-full min-w-0 flex-col gap-2">
 			{hasProcess ? (
@@ -450,6 +353,7 @@ export const WebAssistantTurn = memo(function WebAssistantTurn(props: { turn: As
 					{processOpen ? (
 						<div className="execution-fold-details mt-0.5 flex flex-col">
 							{turn.segments.map((segment) => {
+								if (props.isStreaming && segment.id === turn.liveTextId) return null; // 已挂容器外，容器内不双显
 								if (segment.kind === "thinking") {
 									// 按段流式状态驱动 sweep：只有真正还在流的思考块转圈，已完成的块即使本轮仍在流式也不闪
 									return <WebThinkingBlock key={segment.id} text={segment.texts.join("\n\n")} running={segment.running ?? false} />;
@@ -478,6 +382,11 @@ export const WebAssistantTurn = memo(function WebAssistantTurn(props: { turn: As
 			{turn.finalText ? (
 				<div className="timeline-inline-text">
 					<WebAssistantText text={turn.finalText} isStreaming={props.isStreaming} onOpenFile={props.onOpenFile} />
+				</div>
+			) : liveTextString !== undefined ? (
+				// 流式打字机：回合未结束不提升 final，末段正文常驻容器外（见 groupTimelineEntries 注释）
+				<div className="timeline-inline-text">
+					<WebAssistantText text={liveTextString} isStreaming onOpenFile={props.onOpenFile} />
 				</div>
 			) : null}
 			{!props.isStreaming && turn.finalText ? (
@@ -740,7 +649,9 @@ export function WebTimeline(props: {
 	}, [messages, streaming]);
 
 	// 回合聚合：连续 assistant 消息合并成「过程组 + 常驻正文」（桌面 TurnRow 语义）。
-	const timelineEntries = useMemo(() => groupTimelineEntries(messages), [messages]);
+	// 流式中的末尾回合不提升 final（对齐桌面 isRunTail 门控，见 groupTimelineEntries 注释）。
+	// streaming 仅指「正在收流」，与 useChat 的 status 无关，由调用方在收流期间置真。
+	const timelineEntries = useMemo(() => groupTimelineEntries(messages, { isStreaming: props.streaming }), [messages, props.streaming]);
 	const lastEntryId = timelineEntries.length > 0 ? timelineEntries[timelineEntries.length - 1].id : "";
 
 	return (
