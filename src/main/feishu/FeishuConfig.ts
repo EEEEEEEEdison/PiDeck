@@ -8,7 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { app } from "electron";
+import { app, safeStorage } from "electron";
 import type { FeishuBotConfig } from "../../shared/types";
 
 let defaultBotName = "Feishu bot";
@@ -128,9 +128,12 @@ export function updateBot(botId: string, patch: Partial<FeishuBotConfig>): Feish
 	const index = config.bots.findIndex((b) => b.id === botId);
 	if (index === -1) return undefined;
 
-	// 如果 patch.appSecret 是明文（不是 base64），加密后存储
-	if (patch.appSecret && !isBase64(patch.appSecret)) {
-		patch.appSecret = encryptSecret(patch.appSecret);
+	// App Secret 只接受明文：非空一律重加密入库（列表查询返回的 secret 恒为空串，
+	// 渲染层不可能回传密文）。旧实现用 isBase64 启发式跳过「已加密」值，但飞书
+	// Secret 恰好多为 32 位纯字母数字（长度 %4==0 且落入 base64 字符集），会被
+	// 误判成已加密而明文入库，重启后又被误解码成垃圾导致认证失败。
+	if (patch.appSecret) {
+		patch = { ...patch, appSecret: encryptSecret(patch.appSecret) };
 	}
 
 	config.bots[index] = { ...config.bots[index], ...patch };
@@ -270,24 +273,53 @@ export function saveBindings(botId: string, bindings: FeishuChatBindingPersist[]
 	writeFileSync(path, JSON.stringify(bindings, null, 2), "utf-8");
 }
 
-// ===== 加密/解密（简化版，用 Electron safeStorage） =====
+// ===== 加密/解密 =====
+// 历史包袖：Phase 1 用 base64「加密」——只是混淆，拿到配置文件即可还原。
+// v2 起 App Secret 用 Electron safeStorage（Windows DPAPI / macOS Keychain /
+// Linux libsecret）加密，带 "v2:" 前缀标记；旧数据（纯 base64，无前缀）读取时
+// 走 legacy 分支保持兼容。safeStorage 不可用（部分 Linux 无 keyring）时新写入
+// 仍落 legacy base64，功能不阻断。
+// 注意：v2 解密失败必须返回 ""（触发配置缺失错误），不能把密文当明文外发。
+
+/** safeStorage 可用性探测结果缓存（每会话只探测一次） */
+let safeStorageAvailable: boolean | null = null;
+
+function isSafeStorageUsable(): boolean {
+	if (safeStorageAvailable === null) {
+		try {
+			safeStorageAvailable = safeStorage.isEncryptionAvailable();
+		} catch {
+			safeStorageAvailable = false;
+		}
+	}
+	return safeStorageAvailable;
+}
 
 function encryptSecret(plainSecret: string): string {
-	// Phase 1: 简单 base64，后续可升级为 Electron safeStorage
-	return Buffer.from(plainSecret, "utf-8").toString("base64");
-}
-
-function decryptSecret(encryptedSecret: string): string {
-	if (!encryptedSecret) return "";
-	try {
-		return Buffer.from(encryptedSecret, "base64").toString("utf-8");
-	} catch {
-		return encryptedSecret; // 降级：返回原始值
+	const trimmed = plainSecret.trim();
+	if (!trimmed) return "";
+	if (isSafeStorageUsable()) {
+		try {
+			const encrypted = safeStorage.encryptString(trimmed);
+			return `v2:${Buffer.from(encrypted).toString("base64")}`;
+		} catch {
+			// 加密失败不阻断配置保存：落到 legacy 分支
+		}
 	}
+	return Buffer.from(trimmed, "utf-8").toString("base64");
 }
 
-function isBase64(str: string): boolean {
-	// Base64 只包含 A-Za-z0-9+/= 字符，且长度是 4 的倍数
-	if (!str || str.length % 4 !== 0) return false;
-	return /^[A-Za-z0-9+/]*={0,2}$/.test(str);
+function decryptSecret(stored: string): string {
+	if (!stored) return "";
+	if (stored.startsWith("v2:")) {
+		try {
+			return safeStorage.decryptString(Buffer.from(stored.slice(3), "base64"));
+		} catch {
+			// v2 解密失败（换机器/系统凭据变化）：宁可判定配置缺失，也不把密文当明文外发
+			return "";
+		}
+	}
+	// legacy base64（Phase 1 数据）：原样兼容。老数据全部由 encryptSecret 写入，
+	// 必为合法 base64；此处不再回退返回原文（那等于把垃圾当密钥外发）。
+	return Buffer.from(stored, "base64").toString("utf-8");
 }

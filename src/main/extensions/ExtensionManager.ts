@@ -679,7 +679,10 @@ export class ExtensionManager {
 				hasUpdate: Boolean(currentVersion && latestVersion && compareVersions(latestVersion, currentVersion) > 0),
 			};
 		} catch (error) {
-			console.error("[ExtensionManager] Extension version check failed", error);
+			// 日志走主进程 logging 模块：console.error 会绕过统一分级与文件落盘（日志纪律）
+			getAppLogger()?.error("extensions", "Extension version check failed", {
+				error: error instanceof Error ? error.message : String(error),
+			});
 			return { ...extension, updateError: this.translate("mainExtension.versionCheckFailed") };
 		}
 	}

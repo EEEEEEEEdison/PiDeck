@@ -80,7 +80,7 @@ test.describe("设置页切换", () => {
 		await openDrawer(window);
 		await expect(statusSection(window)).toBeVisible();
 
-		await window.getByRole("button", { name: "设置", exact: true }).click();
+		await window.getByRole("button", { name: /^设置/ }).click();
 		const modal = window.locator(".settings-modal");
 		await expect(modal).toBeVisible();
 		await modal.getByText("外观设置").click();

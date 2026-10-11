@@ -36,6 +36,8 @@ export interface SessionRunControlDeps {
 	setPendingAgents: (updater: PendingAgentTab[] | ((current: PendingAgentTab[]) => PendingAgentTab[])) => void;
 	queueFlushBySessionRef: MutableRefObject<Set<string>>;
 	queuedPromptsRef: MutableRefObject<Record<string, QueuedPrompt[]>>;
+	/** 「停止响应」时抑制排队消息的自动投递（App 注入 queue.suppressSessionQueueAutoDrain；可选以便测试装配）。 */
+	suppressQueueAutoDrain?: (sessionId: string) => void;
 }
 
 /**
@@ -45,7 +47,23 @@ export interface SessionRunControlDeps {
  * - runSessionControl 是全状态统一入口（start/abort/restart/reload 按能力分派）；
  * - pendingAgents 状态留在 App（创建流程与重启流程共享），经 ref+setter 注入。
  */
-export function useSessionRunControl({ agents, activeAgent, activeAgentId, activeProjectId, showToast, overlays, refreshProjectSessions, selectSessionCommand, registerOpenSession, getSessionRecord, pendingAgentsRef, setPendingAgents, queueFlushBySessionRef, queuedPromptsRef }: SessionRunControlDeps) {
+export function useSessionRunControl({
+	agents,
+	activeAgent,
+	activeAgentId,
+	activeProjectId,
+	showToast,
+	overlays,
+	refreshProjectSessions,
+	selectSessionCommand,
+	registerOpenSession,
+	getSessionRecord,
+	pendingAgentsRef,
+	setPendingAgents,
+	queueFlushBySessionRef,
+	queuedPromptsRef,
+	suppressQueueAutoDrain,
+}: SessionRunControlDeps) {
 	const store = useStore();
 	const applyRuntimeEvent = useSetAtom(applySessionRuntimeEventAtom);
 	const setMutationOverlay = useSetAtom(setSessionHistoryMutationOverlayAtom);
@@ -292,6 +310,9 @@ export function useSessionRunControl({ agents, activeAgent, activeAgentId, activ
 		if (previous) {
 			applyAgentRuntimeState(agentId, { ...previous, isStreaming: false });
 		}
+		// 用户意图先落地（先于 IPC）：abort 结算后队列不得自动续发，也风掉等待期间到达的 tool-end steer drain；
+		// 会话再次变忙（用户直发/重发新回合）时由 useQueuedPrompt 自动解除抑制。
+		suppressQueueAutoDrain?.(target.sessionId);
 		try {
 			requireSessionCommand(await api.sessions.abortRuntime(target));
 		} catch (error) {

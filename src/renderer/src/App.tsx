@@ -77,6 +77,7 @@ import { resolveTerminalOwner, terminalOwnerKey } from "./terminalDockState";
 import { useImportFlow } from "./hooks/useImportFlow";
 import { useDirectoryImport } from "./hooks/useDirectoryImport";
 import { useQueuedPrompt } from "./hooks/useQueuedPrompt";
+import { useComposerStateSessionPrune } from "./hooks/useComposerStateSessionPrune";
 import { activeAgentIdAtom } from "./hooks/useSessionRuntimeController";
 import { useSessionHistoryMutations } from "./hooks/useSessionHistoryMutations";
 import { useUserMessageEditReplay } from "./hooks/useUserMessageEditReplay";
@@ -873,6 +874,9 @@ export function App() {
 		unknownDeliveryMessage: t("app.queuedUnknown"),
 		dispatchPromptSnapshot,
 	});
+	// composer 域 per-session 状态（草稿/引用全文仓/发送态等）的外部删除清理，
+	// 与 queue 同一所有权模式：records+runtime 双双消失才回收，引导页虚拟会话豁免。
+	useComposerStateSessionPrune(store);
 	useSessionRuntimeBridge({
 		onRuntimeCapabilityChanged: ({ sessionId, previous, current, patch }) => {
 			if (previous?.isExecutingTool && !current.isExecutingTool && (patch.toolStateSequence == null || previous.toolStateSequence == null || patch.toolStateSequence >= previous.toolStateSequence) && queue.isSessionRuntimeBusy(sessionId)) {
@@ -1182,6 +1186,7 @@ export function App() {
 		setPendingAgents,
 		queueFlushBySessionRef,
 		queuedPromptsRef: queue.queuedPromptsRef,
+		suppressQueueAutoDrain: queue.suppressSessionQueueAutoDrain,
 	});
 
 	// 终端 IPC 目标：Agent 会话优先绑定当前 runtime；未启动或已停止时回退到项目 cwd。
@@ -2467,6 +2472,7 @@ export function App() {
 			queueRetract: queue.retractQueuedPromptForEdit,
 			queueDiscard: queue.discardQueuedPrompt,
 			queueChangeBehavior: queue.setQueuedPromptBehavior,
+			queueSuppressAutoDrain: queue.suppressSessionQueueAutoDrain,
 			queueFlushBySessionRef,
 			restartingAgentId,
 			sessionDurationByAgent,
@@ -2519,6 +2525,7 @@ export function App() {
 			queue.discardQueuedPrompt,
 			queue.queuedPrompts,
 			queue.retractQueuedPromptForEdit,
+			queue.suppressSessionQueueAutoDrain,
 			queueFlushBySessionRef,
 			restartActiveAgent,
 			restartingAgentId,

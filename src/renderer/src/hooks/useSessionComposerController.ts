@@ -164,6 +164,8 @@ export type UseSessionComposerControllerOptions = {
 	onProviderLogin?: (providerId?: string) => void;
 	/** Passed through to useSessionSend.enqueue. */
 	enqueue?: (sessionId: string, snapshot: EnqueuePromptSnapshot) => boolean;
+	/** 「停止响应」时抑制排队消息自动投递；由 SessionPaneServices 注入 queue.suppressSessionQueueAutoDrain。 */
+	suppressQueuedDrain?: (sessionId: string) => void;
 };
 
 export type ComposerDraftGuard = {
@@ -274,7 +276,7 @@ function composerImageNotice(error: unknown): string {
 }
 
 export function useSessionComposerController(options: UseSessionComposerControllerOptions) {
-	const { sessionId, enqueue, ensureSessionId } = options;
+	const { sessionId, enqueue, ensureSessionId, suppressQueuedDrain } = options;
 	const store = useStore();
 	const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
 	const enhanceModelConfig = useAtomValue(enhanceModelAtom);
@@ -1851,6 +1853,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			return;
 		}
 		try {
+			// 用户意图先落地（先于 IPC）：与 useSessionRunControl.abortAgent 同口径——
+			// abort 结算后队列不得自动续发；会话再次变忙时由 useQueuedPrompt 自动解除。
+			suppressQueuedDrain?.(sessionId);
 			requireSessionCommand(await desktopApi.sessions.abortRuntime(target));
 		} catch (error) {
 			// abort 失败必须可见：之前这里直接 throw 变成未处理 rejection，
@@ -1858,7 +1863,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			// 异常常驻提示，直到用户手动关闭。
 			showNotice(error instanceof Error ? error.message : String(error), Number.POSITIVE_INFINITY);
 		}
-	}, [runtime?.agentId, runtime?.runtimeGeneration, sessionId]);
+	}, [runtime?.agentId, runtime?.runtimeGeneration, sessionId, suppressQueuedDrain]);
 
 	const acknowledgeUnknownDelivery = useCallback(() => {
 		setSendStateAtom({ sessionId, state: { status: "idle" } });

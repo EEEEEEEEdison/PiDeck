@@ -2,6 +2,7 @@ import { app, BrowserWindow, Menu } from "electron";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile, copyFile } from "node:fs/promises";
 import { join } from "node:path";
+import { ipcChannels } from "../../shared/ipc";
 import { DEFAULT_IMAGE_GEN_OUTPUT_FORMAT, DEFAULT_IMAGE_GEN_SIZE, DEFAULT_IMAGE_GEN_WATERMARK, parseImageGenOutputFormat, parseImageGenSize, parseImageGenWatermark } from "../../shared/imageGenParams";
 import {
 	createDefaultExternalEditorSettings,
@@ -983,7 +984,8 @@ export class SettingsStore {
 	notifyTitleBarChange(window: BrowserWindow | null) {
 		if (!window || window.isDestroyed()) return;
 		// Electron 的 frame 不能运行时无刷新切换；设置页保存后提示用户重启生效。
-		window.webContents.send("settings:apply-window", this.get());
+		// 通道必须走 ipcChannels 常量（与 preload 订阅同名，防重命名漂移）——守卫见 tests/ipcThreeWaySync.test.mjs。
+		window.webContents.send(ipcChannels.settingsApplyWindow, this.get());
 	}
 
 	/**

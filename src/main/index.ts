@@ -2659,15 +2659,19 @@ function registerIpc() {
 	registerScratchPadIpc({ appLogger });
 
 	// 通知历史落盘：showNotice 单点记录后推送主进程，重启可回灌（渲染层环形缓冲只服务当次会话）
-	registerNoticeHistoryIpc(
-		new NoticeHistoryStore({
-			getFilePath: () => join(app.getPath("userData"), "notice-history.json"),
-			log: (level, message, detail) => {
-				if (level === "error") void appLogger.error("notice-history", message, detail);
-				else void appLogger.info("notice-history", message, detail);
-			},
-		}),
-	);
+	const noticeHistoryStore = new NoticeHistoryStore({
+		getFilePath: () => join(app.getPath("userData"), "notice-history.json"),
+		log: (level, message, detail) => {
+			if (level === "error") void appLogger.error("notice-history", message, detail);
+			else void appLogger.info("notice-history", message, detail);
+		},
+	});
+	registerNoticeHistoryIpc(noticeHistoryStore);
+	// C12：退出前 flush 防抖窗口内的尾巴——store 写盘是防抖合并（500ms），不冲盘就退出
+	// 会丢最后几条通知历史；runAll 会 await 异步清理，写盘完成才放行退出。
+	quitCleanup.register("notice-history", async () => {
+		await noticeHistoryStore.flush();
+	});
 
 	// 粘贴大文本 → 落盘文件（受管目录，路径校验 + 启动清理）
 	cleanupPasteFiles = registerPasteFilesIpc({

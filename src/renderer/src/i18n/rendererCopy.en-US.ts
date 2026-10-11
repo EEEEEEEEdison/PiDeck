@@ -619,6 +619,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"git.stageDirectory": "Stage Directory",
 	"git.unstage": "Unstage",
 	"git.unstageAll": "Unstage All",
+	"git.viewModeTree": "Switch to tree view",
+	"git.viewModeFlat": "Switch to flat list",
 	"git.discard": "Discard Unstaged Changes",
 	"git.discardChanges": "Discard Changes",
 	"git.discardDirectory": "Discard Directory Changes",

@@ -128,6 +128,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 		onCreateSession: useSessionPaneServices().runCreateSessionDraft,
 		// 输入框 `/login`：桌面接管后打开登录供应商弹框（pi 的登录只在它的 CLI 层）
 		onProviderLogin: useSessionPaneServices().openProviderLogin,
+		// 「停止响应」后暂停排队消息自动投递（App 注入 queue.suppressSessionQueueAutoDrain）
+		suppressQueuedDrain: useSessionPaneServices().queueSuppressAutoDrain,
 	});
 	// ACP 会话配置(configOptions):枚举由 agent 回传,选择经 session/set_config_option 下发。
 	// agentId 未就绪/后端不符时 hook 内部自挂空,无额外成本。

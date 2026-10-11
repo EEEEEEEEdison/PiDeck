@@ -3689,9 +3689,10 @@ export class AgentManager {
 
 	async getCommands(agentId: string) {
 		const runtime = this.requireRuntime(agentId);
-		const response = await runtime.process.client.request({
-			type: "get_commands",
-		});
+		// 元数据查询用固定短超时（与本文件其他 get_commands 调用点同一约定）：
+		// 卡死的 pi 进程不能把活会话的斜杠菜单拖到 rpcTimeout（默认 600s）；
+		// 超时 reject → Coordinator 转 SESSION_COMMAND_FAILED → 渲染层回退静态建议。
+		const response = await runtime.process.client.request({ type: "get_commands" }, 10_000);
 		return (response.data as { commands?: unknown[] } | undefined)?.commands ?? [];
 	}
 
@@ -4468,7 +4469,6 @@ export class AgentManager {
 		// 无条件写 sessionRuntimeByIdAtom → timeline 等订阅者 100/s 全量重渲染
 		// （O(消息数) + V8 committed 只涨不缩，GB 级内存爬升的核心驱动）。
 		// web SSE/飞书等内部订阅走上方 localEventListeners，不受影响。
-		// this.emit(ipcChannels.agentsEvent, { agentId, event });
 
 		if (!isRecord(event)) return;
 		const typed = event;

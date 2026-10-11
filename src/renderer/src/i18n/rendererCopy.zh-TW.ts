@@ -624,6 +624,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"git.stageDirectory": "暫存目錄",
 	"git.unstage": "取消暫存",
 	"git.unstageAll": "全部取消暫存",
+	"git.viewModeTree": "切換為樹形展示",
+	"git.viewModeFlat": "切換為平鋪列表",
 	"git.discard": "丟棄未暫存更改",
 	"git.discardChanges": "回滾更改",
 	"git.discardDirectory": "回滾目錄",

@@ -618,6 +618,8 @@ export const zhCN = {
 	"git.stageDirectory": "暂存目录",
 	"git.unstage": "取消暂存",
 	"git.unstageAll": "全部取消暂存",
+	"git.viewModeTree": "切换为树形展示",
+	"git.viewModeFlat": "切换为平铺列表",
 	"git.discard": "丢弃未暂存更改",
 	"git.discardChanges": "回滚更改",
 	"git.discardDirectory": "回滚目录",
