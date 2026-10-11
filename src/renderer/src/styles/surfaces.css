@@ -620,15 +620,7 @@
 .composer-box .rich-input.bang-bang {
   caret-color: var(--color-danger);
 }
-/* shell 模式下 RichInput 左侧留出与 ::before 指示条对齐的空间,复刻原 textarea 的 padding-left。 */
-.composer-box.shell-mode .rich-input,
-.composer-box.shell-silent-mode .rich-input {
-  padding-left: 18px;
-}
-.composer-box.shell-mode .rich-input.is-editor-empty::before,
-.composer-box.shell-silent-mode .rich-input.is-editor-empty::before {
-  left: 18px;
-}
+/* shell 模式不再有 ::before 指示条（2026-10 精简），输入区不再为它让出左内边距。 */
 
 /* 模板预览弹框 */
 /* 预览区占满弹框剩余高度（弹框已受 max-h 约束），按钮行固定、正文内部滚动，
