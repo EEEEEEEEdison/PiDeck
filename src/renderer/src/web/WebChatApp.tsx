@@ -138,6 +138,14 @@ export function WebChatApp() {
 	const [searchOpen, setSearchOpen] = useState(false);
 	const [assetsOpen, setAssetsOpen] = useState(false);
 	const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
+	// 令牌失效兑底：服务端轮换 token 后所有请求 401，轮询层只会默默 setConnected(false)，
+	// 用户看到的是「一直断线」；这里显式提示需从桌面端重新扫码/打开新链接。
+	const [authExpired, setAuthExpired] = useState(false);
+	useEffect(() => {
+		const onAuthFailed = () => setAuthExpired(true);
+		window.addEventListener("pideck-web-auth-failed", onAuthFailed);
+		return () => window.removeEventListener("pideck-web-auth-failed", onAuthFailed);
+	}, []);
 	const recoveryLastAttemptRef = useRef(0);
 	const statusRef = useRef(status);
 	statusRef.current = status;
@@ -1057,6 +1065,15 @@ export function WebChatApp() {
 				<WebBranchBar sessions={state.sessions} activeSessionId={activeSessionId} onSelect={(sessionId) => setActiveSessionId(sessionId)} />
 				{/* 第二批：断线恢复提示（几秒后自动消失） */}
 				{recoveryNotice ? <div className="border-b border-border bg-primary/10 px-3 py-1 text-center text-xs text-primary">{recoveryNotice}</div> : null}
+				{/* 令牌失效提示：不会自愈，需用户从桌面端重新分享；重试仅覆盖「服务端已恢复同 token」的场景 */}
+				{authExpired ? (
+					<div className="flex items-center justify-center gap-2 border-b border-border bg-destructive/10 px-3 py-1.5 text-center text-xs text-destructive">
+						<span>{t("web.authExpired")}</span>
+						<Button variant="outline" size="sm" className="h-6 px-2 text-micro" onClick={() => window.location.reload()}>
+							{t("web.authExpiredRetry")}
+						</Button>
+					</div>
+				) : null}
 				<WebTimeline
 					messages={timelineMessages}
 					hasActiveSession={Boolean(activeSession)}

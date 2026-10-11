@@ -35,10 +35,23 @@ export function getWebToken(): string | null {
 }
 
 /** 统一出口：合并鉴权头后转发给 fetch；调用方原有 headers 优先。 */
+let authFailureNotified = false;
 function apiFetch(input: string, init?: RequestInit): Promise<Response> {
 	return fetch(input, {
 		...init,
 		headers: { ...getWebAuthHeaders(), ...init?.headers },
+	}).then((res) => {
+		// 401 兑底 UX：令牌轮换/失效时所有轮询都会 401，这里统一广播一次
+		// 「需要重新扫码」事件（任意成功响应后复位，可再次触发）。
+		if (res.status === 401) {
+			if (!authFailureNotified && typeof window !== "undefined") {
+				authFailureNotified = true;
+				window.dispatchEvent(new CustomEvent("pideck-web-auth-failed"));
+			}
+		} else if (res.ok) {
+			authFailureNotified = false;
+		}
+		return res;
 	});
 }
 

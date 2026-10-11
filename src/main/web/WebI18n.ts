@@ -51,6 +51,9 @@ export const webZhCN = {
 	"webError.internal": "Web 服务发生内部错误",
 	"webError.unauthorized": "缺少或错误的 Web 服务访问令牌",
 	"webError.bodyTooLarge": "请求体超过大小限制",
+	"webError.invalidJson": "请求体不是合法的 JSON",
+	"web.toolRunning": " 执行中…",
+	"web.toolComplete": " 完成",
 } as const;
 
 export type WebTranslationKey = keyof typeof webZhCN;
@@ -104,6 +107,9 @@ export const webEnUS: Record<WebTranslationKey, string> = {
 	"webError.internal": "The web service encountered an internal error",
 	"webError.unauthorized": "Missing or invalid web service token",
 	"webError.bodyTooLarge": "Request body exceeds the size limit",
+	"webError.invalidJson": "Request body is not valid JSON",
+	"web.toolRunning": " running",
+	"web.toolComplete": " done",
 };
 
 export const webClientDictionaries = {

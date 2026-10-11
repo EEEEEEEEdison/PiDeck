@@ -56,4 +56,7 @@ export const webZhTW: Record<WebTranslationKey, string> = {
 	"webError.internal": "Web 服務發生內部錯誤",
 	"webError.unauthorized": "缺少或錯誤的 Web 服務訪問令牌",
 	"webError.bodyTooLarge": "請求體超過大小限制",
+	"webError.invalidJson": "請求體不是合法的 JSON",
+	"web.toolRunning": " 執行中…",
+	"web.toolComplete": " 完成",
 };

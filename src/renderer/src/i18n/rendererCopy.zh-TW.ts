@@ -5401,6 +5401,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"web.ungroupedHint": "無法匹配到任何專案的會話（可能專案已被移除，或會話未歸屬專案）",
 	"web.scrollToBottom": "滾動到底部",
 	"web.streamFailed": "流式連線失敗",
+	"web.authExpired": "存取權杖已失效，請從桌面端重新分享或掃碼開啟",
+	"web.authExpiredRetry": "重試",
 	"web.messageImage": "訊息圖片",
 	"web.msgCopy": "複製",
 	"web.msgEdit": "編輯",

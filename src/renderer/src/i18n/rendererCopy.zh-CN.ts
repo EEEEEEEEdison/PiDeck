@@ -5396,6 +5396,8 @@ export const zhCN = {
 	"web.ungroupedHint": "无法匹配到任何项目的会话（可能项目已被移除，或会话未归属项目）",
 	"web.scrollToBottom": "滚动到底部",
 	"web.streamFailed": "流式连接失败",
+	"web.authExpired": "访问令牌已失效，请从桌面端重新分享或扫码打开",
+	"web.authExpiredRetry": "重试",
 	"web.messageImage": "消息图片",
 	"web.msgCopy": "复制",
 	"web.msgEdit": "编辑",
