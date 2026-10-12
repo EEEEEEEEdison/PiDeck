@@ -8,7 +8,7 @@ const byId = Object.fromEntries(MCP_SERVICE_CATALOG.map((entry) => [entry.id, en
 
 test("MCP service catalog ships the verified batches (intl + CN) with categories and unique ids", () => {
 	const ids = Array.from(MCP_SERVICE_CATALOG, (entry) => entry.id);
-	assert.deepEqual(ids, ["pideck", "context7", "modelscope", "playwright", "chrome-devtools", "github", "sentry", "supabase", "linear", "notion", "lark", "dingtalk", "alipay", "tencent-docs", "baidu-netdisk", "amap", "tencent-map", "rail12306", "brave-search", "firecrawl", "exa", "tavily", "figma", "qcc"]);
+	assert.deepEqual(ids, ["pideck", "context7", "modelscope", "playwright", "chrome-devtools", "github", "sentry", "supabase", "linear", "notion", "lark", "dingtalk", "alipay", "tencent-docs", "baidu-netdisk", "amap", "tencent-map", "rail12306", "baizhi", "brave-search", "firecrawl", "exa", "tavily", "figma", "qcc"]);
 	assert.equal(new Set(ids).size, ids.length);
 	for (const entry of MCP_SERVICE_CATALOG) {
 		assert.ok(["dev", "work", "data", "maps", "search", "design"].includes(entry.category), `${entry.id} category`);
@@ -132,7 +132,7 @@ test("brand icons cover every catalog entry except the documented fallbacks", ()
 	assert.equal(MCP_BRAND_ICONS.pideck.path, "M0 0H18V12H12V18H6V24H0ZM6 6V12H12V6ZM18 12H24V24H18Z");
 	assert.equal(MCP_BRAND_ICONS.tavily.viewBox, "0 0 55 55");
 	assert.equal(MCP_BRAND_ICONS.exa.viewBox, "0 0 256 256");
-	for (const id of ["tencent-docs", "baidu-netdisk", "qcc"]) {
+	for (const id of ["tencent-docs", "baidu-netdisk", "qcc", "baizhi"]) {
 		assert.match(MCP_BRAND_ICONS[id].png ?? "", /^data:image\/png;base64,[A-Za-z0-9+/=]+$/, `${id} inline png`);
 		assert.equal(MCP_BRAND_ICONS[id].path, undefined, `${id} keeps no vector path`);
 		assert.equal(MCP_BRAND_ICONS[id].multiPaths, undefined, `${id} keeps no multiPaths`);
@@ -168,4 +168,19 @@ test("stdio entries carry the exact package names from the official docs", () =>
 	// 百度网盘官方远程端点只有 SSE（pi 只支持 streamable HTTP）：经 mcp-remote 桥接，
 	// 桥接进程 http-first、405 回退 SSE，Authorization 头引用环境变量里的 Access Token。
 	assert.deepEqual(plain(byId["baidu-netdisk"].base), { command: "npx", args: ["-y", "mcp-remote@latest", "https://mcp-pan.baidu.com/sse", "--header", "Authorization: Bearer ${BAIDU_NETDISK_ACCESS_TOKEN}"] });
+});
+
+test("Baizhi requires a raw API key and binds it only to the fixed endpoint Authorization header", () => {
+	const entry = byId.baizhi;
+	assert.equal(entry.category, "search");
+	assert.equal(entry.auth, "header-key");
+	assert.equal(catalogNeedsCredential(entry), true);
+	assert.deepEqual(plain(entry.credentials), [{ labelKey: "config.mcp.catalog.baizhiKey", credential: { kind: "header", header: "Authorization", scheme: "Bearer" } }]);
+	const baseBefore = plain(entry.base);
+	const first = plain(buildCatalogDefinition(entry, ["  synthetic-baizhi-a  "]));
+	const second = plain(buildCatalogDefinition(entry, ["synthetic-baizhi-b"]));
+	assert.deepEqual(first, { url: "https://agent-toolkit.app.baizhi.cloud/mcp", headers: { Authorization: "Bearer synthetic-baizhi-a" } });
+	assert.deepEqual(second, { url: "https://agent-toolkit.app.baizhi.cloud/mcp", headers: { Authorization: "Bearer synthetic-baizhi-b" } });
+	assert.deepEqual(plain(entry.base), baseBefore, "a second template must not reuse another credential");
+	assert.deepEqual(plain(buildCatalogDefinition(entry, [" "])), baseBefore, "the builder leaves blank credentials out; the required form field blocks connection");
 });

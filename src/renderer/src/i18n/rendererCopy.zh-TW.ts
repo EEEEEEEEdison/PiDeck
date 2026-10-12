@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: af61a85c251d14598958d598c7af5acfcf534ba356670800de28f4dd7daa88e0（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 64059d408dc3c608f48de352efa401967a5ef648deb08d45c3f16f8aa3b554f9（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -2172,6 +2172,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.mcp.catalog.linearHint": "Linear 官方遠端服務：Issue、專案與評論的讀寫。儲存後在狀態區點「登入」完成授權。",
 	"config.mcp.catalog.notion": "Notion",
 	"config.mcp.catalog.notionHint": "Notion 官方遠端服務：語義搜尋工作區、用 Markdown 讀寫頁面。OAuth 授權後自動沿用帳號權限。",
+	"config.mcp.catalog.baizhi": "百智雲 Agent 工具包",
+	"config.mcp.catalog.baizhiHint": "託管聯網搜尋、網頁讀取與結構化提取。需要百智雲帳號、API Key 和服務積分；工具呼叫會發送輸入並可能扣減積分。",
+	"config.mcp.catalog.baizhiKey": "百智雲 API Key（原值，不含 Bearer 字首）",
 	"config.mcp.catalog.braveSearch": "Brave Search",
 	"config.mcp.catalog.braveSearchHint": "Brave 官方搜尋服務（網頁/本地/圖片/新聞）。API Key 寫入服務的 BRAVE_API_KEY 環境變數。",
 	"config.mcp.catalog.braveSearchKey": "Brave Search API Key",
