@@ -59,6 +59,7 @@ export const zhCN = {
 	"hostPlugins.disabled": "已禁用",
 	"hostPlugins.changed": "内容已变更，需重新授权",
 	"hostPlugins.enable": "授权并启用",
+	"hostPlugins.enableShort": "启用",
 	"hostPlugins.disable": "禁用",
 	"hostPlugins.empty": "暂无插件。将含 pideck-plugin.json 的插件文件夹放入上方目录，再重新扫描。",
 	"hostPlugins.failed": "插件操作失败（{code}）。请检查插件目录并重新扫描。",

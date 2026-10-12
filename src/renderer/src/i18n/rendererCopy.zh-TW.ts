@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 64059d408dc3c608f48de352efa401967a5ef648deb08d45c3f16f8aa3b554f9（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 564c20e59a900facf143ce09985732330cbc7dd742538de4e2ab00a2fe2132ea（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -66,6 +66,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"hostPlugins.disabled": "已停用",
 	"hostPlugins.changed": "內容已變更，需重新授權",
 	"hostPlugins.enable": "授權並啟用",
+	"hostPlugins.enableShort": "啟用",
 	"hostPlugins.disable": "停用",
 	"hostPlugins.empty": "暫無外掛。將含 pideck-plugin.json 的外掛資料夾放入上方目錄，再重新掃描。",
 	"hostPlugins.failed": "外掛操作失敗（{code}）。請檢查外掛目錄並重新掃描。",

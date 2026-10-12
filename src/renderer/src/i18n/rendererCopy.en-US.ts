@@ -60,6 +60,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"hostPlugins.disabled": "Disabled",
 	"hostPlugins.changed": "Changed; consent required",
 	"hostPlugins.enable": "Approve and enable",
+	"hostPlugins.enableShort": "Enable",
 	"hostPlugins.disable": "Disable",
 	"hostPlugins.empty": "No plugins yet. Place a folder containing pideck-plugin.json in the directory above, then rescan.",
 	"hostPlugins.failed": "Plugin operation failed ({code}). Check the plugin directory and rescan.",
