@@ -63,8 +63,9 @@ import { useAnnouncementNotifier } from "./hooks/useAnnouncementNotifier";
 import { useModelsVerifyNotifier } from "./hooks/useModelsVerifyNotifier";
 import { useBackgroundAskPatrol } from "./hooks/useBackgroundAskPatrol";
 import { announcementCenterOpenAtom, announcementNotificationEnabledAtom } from "./atoms/announcement-atoms";
-import { logoStyleAtom } from "./atoms/app-ui-atoms";
+import { appDisplayNameAtom, customLogoAtom, logoStyleAtom } from "./atoms/app-ui-atoms";
 import { LOGO_STYLE_STORAGE_KEY, resolveLogoStyle } from "./components/app/piTuiLogoData";
+import { resolveAppDisplayName } from "../../shared/types/settings";
 import { openProviderLoginAtom } from "./atoms/providerLoginAtoms";
 import { useSessionLayout } from "./hooks/useSessionLayout";
 import { useFileEditor } from "./hooks/useFileEditor";
@@ -913,6 +914,15 @@ export function App() {
 			// localStorage 不可用（隐私模式等）只影响启动画面回退 classic，不致命
 		}
 	}, [settings.logoStyle, setLogoStyle]);
+
+	// 自定义品牌（显示名称 / 自定义 logo 图）→ 渲染层镜像 atom：品牌区、关于弹层、空态 LogoMark 订阅即时切换；
+	// 与 logo 风格分开一个 effect：名字/图改了不必重写 localStorage 的启动画面缓存。
+	const setAppDisplayName = useSetAtom(appDisplayNameAtom);
+	const setCustomLogo = useSetAtom(customLogoAtom);
+	useEffect(() => {
+		setAppDisplayName(resolveAppDisplayName(settings.appDisplayName));
+		setCustomLogo(settings.logoCustomImage ?? "");
+	}, [settings.appDisplayName, settings.logoCustomImage, setAppDisplayName, setCustomLogo]);
 
 	// 公告通知开关 → 渲染层镜像 atom：通知调度与侧栏入口显隐共用同一数据源，
 	// 设置保存后即时生效（settings.get 首拉与 onSettingsApplied 都经此处同步）

@@ -1622,9 +1622,10 @@ focusExistingWindow = handleVersionFocusRequest;
 
 function setupTray() {
 	// 托盘图标跟随设置里的「Logo 风格」；resolveLogoImage 按风格选 build/icon.png 或 icon-pi-tui.png
-	// （均由 electron-vite 的 ?asset 后缀解析，打包后也能正确定位）。
+	// （均由 electron-vite 的 ?asset 后缀解析，打包后也能正确定位）；custom 风格读设置里的自定义图。
 	// 资源缺失时降级回 classic iconPath：托盘必须建得出来——closeToTray 开启时它是唯一的唤回入口。
-	const icon = resolveLogoImage(settingsStore.get().logoStyle)?.image ?? nativeImage.createFromPath(iconPath);
+	const trayLogoSettings = settingsStore.get();
+	const icon = resolveLogoImage(trayLogoSettings.logoStyle, trayLogoSettings.logoCustomImage)?.image ?? nativeImage.createFromPath(iconPath);
 
 	/** 创建托盘实例；首次创建与自愈重建共用同一条路径，避免两处行为漂移。 */
 	const createTrayInstance = (): Tray => {
@@ -3570,7 +3571,7 @@ function registerIpc() {
 			// 快捷键覆盖可能随备份一起被恢复：同步刷新主进程生效绑定，无需重启
 			refreshShortcutBindings(settingsStore.get());
 			// Logo 风格也可能随备份恢复：同步刷新窗口/Dock 图标
-			applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow);
+			applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow, settingsStore.get().logoCustomImage);
 			void piModelCapabilityCache?.refresh().catch(() => undefined);
 		},
 	});
@@ -4758,7 +4759,7 @@ app
 		// 快捷键覆盖从磁盘载入后立即刷新主进程生效绑定（此后 settings:update 路径实时刷新）
 		refreshShortcutBindings(settingsStore.get());
 		// Logo 风格：启动时按已加载设置刷新窗口/Dock 图标（此后 settings:update 路径实时刷新）
-		applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow);
+		applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow, settingsStore.get().logoCustomImage);
 		piModelCapabilityCache = new PiModelCapabilityCache({
 			// 模型能力水合分两档（详见 docs/pi-model-capability-plan.md）：
 			// - 快速档（默认，loadExtensions=false）：--no-extensions。实测 418 模型下

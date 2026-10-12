@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: d983f08a9533c600e6a2b6c637134f653d49a971e6a69c8bf727aceea1f03f89（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: d59252964385216cafd191d527699053585e38ab45ff226c2b880b7c320d43ed（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4383,9 +4383,17 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.navigationSimple": "簡潔模式",
 	"settings.navigationModeDesc": "簡潔模式將會話放在左側單列表，檔案與差異放在右側；儲存後生效。",
 	"settings.logoStyle": "Logo 風格",
-	"settings.logoStyleDesc": "classic 為 PiDeck 四塊拼圖；pi-tui 為 Pi 官方終端三色畫素標，儲存後全部介面落點即時切換，下次啟動開屏同步。",
+	"settings.logoStyleDesc": "classic 為 PiDeck 四塊拼圖；pi-tui 為 Pi 官方終端三色畫素標；custom 用你上傳的圖片，儲存後所有品牌位即時切換。",
 	"settings.logoStyleClassic": "PiDeck 經典",
 	"settings.logoStylePiTui": "Pi 終端同款",
+	"settings.logoStyleCustom": "自定義圖片",
+	"settings.logoCustomImage": "自定義 Logo 圖片",
+	"settings.logoCustomImageDesc": "建議正方形、透明底的 PNG 或 SVG，尺寸 512×512 或更大；點陣圖會自動縮到 512×512 以內，過大的檔案會被拒絕。",
+	"settings.logoCustomImageChoose": "選擇圖片",
+	"settings.logoCustomImageClear": "移除圖片",
+	"settings.logoCustomImageFailed": "圖片讀取失敗：請改用正方形、透明底的 PNG 或 SVG，檔案不要超過 12MB。",
+	"settings.appDisplayName": "應用顯示名稱",
+	"settings.appDisplayNameDesc": "顯示在左上角品牌區與「關於」面板，按輸入原樣呈現（不轉大寫）；留空用 PiDeck。",
 	"navigation.back": "後退",
 	"navigation.forward": "前進",
 	"settings.sessionTabMaxWidth": "會話 Tab 寬度上限",
