@@ -22,7 +22,7 @@
 ## CHANGELOG 与发布说明
 
 1. `CHANGELOG.md` / `CHANGELOG.zh-CN.md` 加版本号与日期，条目记录用户可感知变化，中英文一致，条目用 `- **标题** — 描述` 格式。
-2. GitHub Release notes 写明主要变化，不接受只写版本号。
+2. GitHub Release notes 写明主要变化，不接受只写版本号。发版 workflow 的 `extract-changelog` 作业会按 tag 从 `CHANGELOG.zh-CN.md`（缺失时回落 `CHANGELOG.md`）抽取 `## v<版本>` 整段作为 Release 正文，因此**正文不需要另行撰写**，把 CHANGELOG 写全即可；需要额外说明时再手动编辑 Release。
 3. docs-site 官网同步更新。
 
 ## 发布说明同步（scripts/sync-release-notes.js，不手改 README 亮点区块）

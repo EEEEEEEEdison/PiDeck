@@ -10,9 +10,9 @@ description: PiDeck 每个版本的发布记录：新功能、问题修复与体
 - [中文 CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.zh-CN.md)
 - [English CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.md)
 
-## v0.9.0 (2026-10-10)
+## v0.9.0 (2026-10-12)
 
-发布时间：2026-10-10
+发布时间：2026-10-12
 
 - 🚀 **ACP 协议后端：接入更多 AI 编程工具**
 - 🚀 **独立 PiDeck 宿主插件系统**

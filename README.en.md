@@ -81,9 +81,9 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.9.0 (2026-10-10)** (2026-10-10)
+> **Latest: v0.9.0 (2026-10-12)** (2026-10-12)
 
-### v0.9.0 (2026-10-10) Release Highlights
+### v0.9.0 (2026-10-12) Release Highlights
 - 🚀 **ACP backend: more AI coding tools in one workbench**
 - 🚀 **Independent PiDeck host-plugin system**
 - 🚀 **Built-in remote access and access tokens**

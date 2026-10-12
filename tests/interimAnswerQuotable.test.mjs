@@ -51,7 +51,7 @@ test("ProcessFold passes node id to settled interim answers", () => {
 });
 
 test("ThinkingBlock marks its card so expanded reasoning text stays excluded from quoting", () => {
-	assert.match(timelineEventCardsSource, /<section\s+data-thinking-step="true"/);
+	assert.match(timelineEventCardsSource, /<section\b[^>]*data-thinking-step="true"/);
 });
 
 test("quote exclusion no longer blacklists the whole execution fold", () => {
