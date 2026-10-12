@@ -60,6 +60,8 @@ export type TurnRowProps = {
 	sessionId?: string;
 	/** 运行时后端（pi/dsh）：决定行头回复者署名；缺省 "pi"（旧调用方兼容） */
 	backend?: AgentBackend;
+	/** ACP 工具 id（会话记录绑定）：行头按它显示对应 CLI 的品牌 logo，缺省回退通用终端图标。 */
+	acpToolId?: string;
 	/** 新消息入场动画：仅发送后尾部新增的消息播放一次 */
 	fresh?: boolean;
 	/** 上滚窗口扩展时顶部新增的轮次：播放「从顶部淡入」过渡（2026-12 体验优化） */
@@ -293,7 +295,7 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 			<div className="flex min-w-0 flex-col gap-3">
 				{/* 行头：头像 + Pi/DSH 署名 + 时间。耗时不放行头——回复生成时用户视线在底部，
 				    统一显示在 turn 尾部（见底部耗时行），不用翻回开头看跑了多久。 */}
-				<TurnAuthorHeader backend={props.backend} endedAt={run.endedAt} />
+				<TurnAuthorHeader backend={props.backend} acpToolId={props.acpToolId} endedAt={run.endedAt} />
 
 				{/* 执行过程折叠栏：中间内容（思考/工具/中间回答）统一收进容器，
 				    由 stepsVisible 整体控制显隐；最终回答在容器外常驻。

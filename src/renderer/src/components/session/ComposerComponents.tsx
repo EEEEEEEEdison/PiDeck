@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
 import { useAtomValue } from "jotai";
 import { dshModuleHiddenAtom, imageGenModuleHiddenAtom, videoGenModuleHiddenAtom, composerModesHiddenAtom, acpEnabledAtom, acpToolsAtom } from "../../atoms";
-import { AlertCircle, BrainCircuit, Check, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, ListChecks, Loader2, Paperclip, Plus, RefreshCw, Settings2, Sparkles, Star, Target, Terminal, X, Zap } from "lucide-react";
+import { AlertCircle, BrainCircuit, Check, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, ListChecks, Loader2, Paperclip, Plus, RefreshCw, Settings2, Sparkles, Star, Target, X, Zap } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import type { PromptEnhanceView } from "../../hooks/usePromptEnhance";
 import { PromptEnhanceControls } from "./PromptEnhanceControls";
@@ -20,7 +20,7 @@ import type { ImageGenConfigFile } from "../../../../shared/imageGenConfig";
 import type { VideoGenConfigFile } from "../../../../shared/videoGenConfig";
 import { ProviderUsageInline } from "../app/ProviderUsageInline";
 import { useProviderUsageBatchRefresh } from "../../hooks/useProviderUsage";
-import { DshLogo, PiLogo } from "./SessionSourceBadge";
+import { AcpToolLogo, DshLogo, PiLogo } from "./SessionSourceBadge";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger } from "../ui-shadcn/select";
 import { computeModelDisplay, formatModelRef, resolveComposerLiveModel, resolveGuideDisplayModel, type ModelPending } from "../../utils/modelPendingDisplay";
 import { WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeDshModelPreference, readWelcomeModelPreference, shouldClearWelcomePreference } from "../../utils/chatSessionBootstrap";
@@ -207,6 +207,15 @@ function currentValueName(entry: { option: import("../../../../shared/types/acp"
 	return entry.values.find((value) => value.value === text)?.name ?? text;
 }
 
+/**
+ * ACP 工具品牌标记：按 acpToolId 从已登记工具里查（工具已被删除时找不到 → 通用终端图标）。
+ * 下拉触发器与后端锁定态的只读标识共用，避免两处各写一遍查找逻辑。
+ */
+function AcpToolMark(props: { acpToolId?: string; className: string }) {
+	const acpTools = useAtomValue(acpToolsAtom);
+	return <AcpToolLogo tool={acpTools.find((tool) => tool.id === props.acpToolId)} className={props.className} />;
+}
+
 export function ComposerBackendPicker(props: { backend: AgentBackend; acpToolId?: string; disabled?: boolean; onChangeBackend: (backend: AgentBackend, acpToolId?: string) => void }) {
 	const dshHidden = useAtomValue(dshModuleHiddenAtom);
 	const imageGenHidden = useAtomValue(imageGenModuleHiddenAtom);
@@ -216,6 +225,10 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; acpToolId?
 	const acpEnabled = useAtomValue(acpEnabledAtom);
 	const acpTools = useAtomValue(acpToolsAtom);
 	const showAcp = (acpEnabled && acpTools.length > 0) || props.backend === "acp";
+	// 当前工具名：ACP 只显示图标，名称靠 title/aria-label 保留（用户反馈「看不出是 OpenCode
+	// 还是 Codex」）——logo 区分品牌，悬停/读屏再给具体名称。
+	const currentTool = props.backend === "acp" ? acpTools.find((tool) => tool.id === props.acpToolId) : undefined;
+	const triggerLabel = currentTool?.name ?? t("sessionBackend.acp");
 	const showDsh = !dshHidden || props.backend === "dsh";
 	const showImageGen = !imageGenHidden || props.backend === "imagegen";
 	const showVideoGen = !videoGenHidden || props.backend === "videogen";
@@ -239,7 +252,8 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; acpToolId?
 			<SelectTrigger
 				size="sm"
 				className="composer-bar-btn backend h-7 gap-1 rounded-md border-transparent bg-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:border-transparent data-[state=open]:bg-muted/60 data-[state=open]:ring-0 [&_[data-slot='select-icon']]:hidden"
-				title={t("session.backendPickerHint")}
+				title={`${triggerLabel} · ${t("session.backendPickerHint")}`}
+				aria-label={triggerLabel}
 			>
 				{/* 不渲染 SelectValue：按当前后端手动渲染 logo，输入框只显示图标不带文字。
 				    隐藏 shadcn SelectTrigger 自带的 chevron（[data-slot='select-icon']），
@@ -252,7 +266,7 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; acpToolId?
 				) : props.backend === "videogen" ? (
 					<Clapperboard className="size-[15px] shrink-0 text-muted-foreground" />
 				) : props.backend === "acp" ? (
-					<Terminal className="size-[15px] shrink-0 text-muted-foreground" />
+					<AcpToolMark acpToolId={props.acpToolId} className="size-[15px] shrink-0" />
 				) : (
 					<PiLogo className="size-[15px] shrink-0" />
 				)}
@@ -285,7 +299,7 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; acpToolId?
 						<SelectLabel className="text-xs text-muted-foreground">{t("sessionBackend.acp")}</SelectLabel>
 						{acpTools.map((tool) => (
 							<SelectItem key={tool.id} value={`acp:${tool.id}`}>
-								<Terminal className="size-3.5 shrink-0 text-muted-foreground" />
+								<AcpToolLogo tool={tool} className="size-3.5 shrink-0" />
 								<span className="truncate">{tool.name}</span>
 							</SelectItem>
 						))}
@@ -523,6 +537,8 @@ export function ComposerBottomBar(props: {
 	const modelTo = modelDisplay.to;
 	const modelName = modelFrom?.modelName || modelFrom?.modelId;
 	const modelLabel = modelName ? formatModelRef(modelFrom ?? { provider: "", modelId: "" }) : `${t("app.model")}: -`;
+	// 锁定态只读后端标识：ACP 会话把工具名拼进 title/aria-label（与下拉触发器同一套品牌 logo）。
+	const lockedAcpTool = props.backend === "acp" ? useAtomValue(acpToolsAtom).find((tool) => tool.id === props.acpTool?.toolId) : undefined;
 	const modelPendingTitle = props.modelPending
 		? t("app.modelPendingTitle", {
 				from: formatModelRef(props.modelPending.from),
@@ -549,8 +565,8 @@ export function ComposerBottomBar(props: {
 						<button
 							type="button"
 							className="composer-bar-btn backend inline-flex h-7 cursor-pointer items-center gap-1 rounded-md px-1.5 text-control font-semibold text-foreground hover:bg-muted/60"
-							title={t("session.backendLockedHint")}
-							aria-label={t("session.backendLockedHint")}
+							title={lockedAcpTool ? `${lockedAcpTool.name} · ${t("session.backendLockedHint")}` : t("session.backendLockedHint")}
+							aria-label={lockedAcpTool ? `${lockedAcpTool.name} · ${t("session.backendLockedHint")}` : t("session.backendLockedHint")}
 							onClick={() => showNotice(t("session.backendLockedNotice"), 5000)}
 						>
 							{props.backend === "dsh" ? (
@@ -560,7 +576,7 @@ export function ComposerBottomBar(props: {
 							) : props.backend === "videogen" ? (
 								<Clapperboard className="size-[15px] shrink-0 text-muted-foreground" />
 							) : props.backend === "acp" ? (
-								<Terminal className="size-[15px] shrink-0 text-muted-foreground" />
+								<AcpToolMark acpToolId={props.acpTool?.toolId} className="size-[15px] shrink-0" />
 							) : (
 								<PiLogo className="size-[15px] shrink-0" />
 							)}

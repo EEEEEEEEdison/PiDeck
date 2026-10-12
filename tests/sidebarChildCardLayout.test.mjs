@@ -132,7 +132,7 @@ test("sidebar omits the redundant projects heading and tabs shrink to their titl
 	assert.doesNotMatch(conversationTitleSpan, /color:/);
 	assert.match(styles, /\.conversation-title span\.running \{[\s\S]*color:/);
 	assert.match(sourceBadge, /<Badge[\s\S]*variant="outline"/);
-	assert.match(sourceBadge, /<SourceLogo source=\{props\.source\} \/>/);
+	assert.match(sourceBadge, /<BrandMark brand=\{props\.source\} \/>/);
 	assert.match(sourceBadge, /aria-label=\{label\}/);
 	assert.doesNotMatch(sourceBadge, />\{label\}<\//);
 	assert.doesNotMatch(sessionTree, /session-source-badge/);
