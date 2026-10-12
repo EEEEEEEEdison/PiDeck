@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: e87325e77d1ddcb87e5fe459287c29c3da8a87153af39f251f613897477cfc8f（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: d983f08a9533c600e6a2b6c637134f653d49a971e6a69c8bf727aceea1f03f89（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -46,10 +46,15 @@ export const zhTW: Record<TranslationKey, string> = {
 	"hostPlugins.localPortsHint": "填 1–65535 的整數，例如 4187；多個埠用逗號或空格分隔，最多 16 個。只會訪問 http://127.0.0.1:<埠>。",
 	"hostPlugins.scaffoldPresentation": "面板形態",
 	"hostPlugins.scaffoldModal": "彈窗（modal）",
+	"hostPlugins.scaffoldPopover": "側欄浮層（popover，適合只有幾行控制元件的面板）",
 	"hostPlugins.scaffoldPage": "整頁（page）",
 	"hostPlugins.scaffoldCreate": "生成外掛",
 	"hostPlugins.scaffoldCreated": "已生成 {id}：先讀目錄裡的 README.md，再回到這裡授權啟用。",
 	"hostPlugins.installSuccess": "外掛已安裝，啟用前需確認授權",
+	"hostPlugins.remove": "解除安裝",
+	"hostPlugins.removeConfirmTitle": "解除安裝 {name}？",
+	"hostPlugins.removeConfirmDescription": "會刪除外掛目錄並清除它的授權，無法撤銷。內建示例不能解除安裝（下次啟動會重新落位），停用它請用「停用」。",
+	"hostPlugins.removed": "已解除安裝 {name}",
 	"hostPlugins.plugin": "外掛",
 	"hostPlugins.permission": "權限與狀態",
 	"hostPlugins.actions": "操作",

@@ -15,6 +15,7 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
+import vm from "node:vm";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const { parseHostPluginManifest } = loadTsCommonJs("src/main/plugins/hostPluginManifest.ts");
@@ -241,6 +242,25 @@ test("billion-context service: status, start and stop all go through the fixed C
 	assert.deepEqual(plain(await missing.stop()), { id: SERVICE_ID, available: false, running: false });
 });
 
+test("billion-context service: a proxy that comes straight back is reported as stop-restarted, not stop-failed", async () => {
+	const killed = [];
+	const first = JSON.stringify({ processes: [{ pid: 23704, port: 28800, alive: true }], global: { runningVersion: "0.1.195" } });
+	const second = JSON.stringify({ processes: [{ pid: 49760, port: 28800, alive: true }], global: { runningVersion: "0.1.195" } });
+	let calls = 0;
+	const service = new BillionContextService({
+		// 终止动作成功，但 doctor 立刻报了一个新 pid——pi 发现自己的代理死了，又拉起来一个。
+		cli: { run: async () => ({ ok: true, stdout: ++calls === 1 ? first : second }), spawnDetached: () => ({ ok: true }) },
+		kill: async (pid) => (killed.push(pid), true),
+		timing: { pollMs: 1, stopSettleMs: 10 },
+	});
+	const status = plain(await service.stop());
+	assert.equal(status.running, true);
+	assert.equal(status.reason, "stop-restarted");
+	assert.equal(status.pid, 49760);
+	assert.equal(status.uiUrl, "http://127.0.0.1:28800/__bili/");
+	assert.deepEqual(killed, [23704]);
+});
+
 test("billion-context service: a service that never comes up reports start-timeout instead of hanging", async () => {
 	const stopped = JSON.stringify({ processes: [], global: {} });
 	let calls = 0;
@@ -298,6 +318,19 @@ test("seedBuiltin places the packaged demo plugin once and never overwrites it",
 		// 落位不等于授权：内置插件同样是 requiresConsent。
 		assert.equal(manager.catalog().plugins[0].requiresConsent, true);
 
+		// 内置内容升级：目录里还是上次落位的那份（指纹等于落位记录）→ 允许替换，已授权的沿用。
+		// 这是第一方内容换版，不该让用户在每次应用更新后重新批准自己的内置示例。
+		const granted = manager.catalog().plugins[0];
+		await manager.setEnabled(SERVICE_ID, true, granted.fingerprint);
+		await writeFile(join(plugin, "app.js"), "console.log('shipped-v2');");
+		await manager.seedBuiltin(source);
+		assert.equal(await readFile(join(target, "app.js"), "utf8"), "console.log('shipped-v2');");
+		// seedBuiltin 只动磁盘，目录内容要重新扫描才反映到 catalog（真实链路由 initialize 接着调 load）
+		await manager.load();
+		const upgraded = manager.catalog().plugins[0];
+		assert.notEqual(upgraded.fingerprint, granted.fingerprint);
+		assert.equal(upgraded.enabled, true, "第一方内容换版不该让用户重新授权");
+
 		// 用户改过的副本永不被覆盖
 		await writeFile(join(target, "app.js"), "console.log('mine');");
 		await manager.seedBuiltin(source);
@@ -309,6 +342,95 @@ test("seedBuiltin places the packaged demo plugin once and never overwrites it",
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
+});
+
+test("seedBuiltin migrates copies placed before the seed record existed", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pideck-host-plugins-"));
+	try {
+		const source = join(root, "resources");
+		const plugin = join(source, SERVICE_ID);
+		const userData = join(root, "userData");
+		const target = join(userData, "host-plugins", SERVICE_ID);
+		await mkdir(plugin, { recursive: true });
+		await writeFile(join(plugin, "pideck-plugin.json"), JSON.stringify(manifest({ id: SERVICE_ID, name: "billion-context", version: "0.2.0" })));
+		await writeFile(join(plugin, "app.html"), "<!doctype html>");
+		await writeFile(join(plugin, "app.js"), "console.log('new');");
+		// 旧版本 PiDeck 落的副本 + 只有 grants 的状态文件（没有 seeded 字段），用户已授权过
+		await mkdir(target, { recursive: true });
+		await writeFile(join(target, "pideck-plugin.json"), JSON.stringify(manifest({ id: SERVICE_ID, name: "billion-context", version: "0.1.0" })));
+		await writeFile(join(target, "app.html"), "<!doctype html>");
+		await writeFile(join(target, "app.js"), "console.log('old');");
+		const manager = new HostPluginManager(userData);
+		await manager.load();
+		const legacy = manager.catalog().plugins[0];
+		await writeFile(join(userData, "host-plugin-state.json"), JSON.stringify({ version: 1, grants: { [SERVICE_ID]: { fingerprint: legacy.fingerprint, enabled: true } } }));
+
+		await manager.seedBuiltin(source);
+		await manager.load();
+		// 版本不同 ⇒ 这份副本来自另一个 PiDeck 版本的内置载荷，用新版替换；已授权的顺延
+		assert.equal(await readFile(join(target, "app.js"), "utf8"), "console.log('new');");
+		assert.equal(manager.catalog().plugins[0].enabled, true);
+
+		// 迁移只发生一次：之后 seeded 有记录，手改过的副本又回到「永不覆盖」
+		await writeFile(join(target, "app.js"), "console.log('mine');");
+		await manager.seedBuiltin(source);
+		assert.equal(await readFile(join(target, "app.js"), "utf8"), "console.log('mine');");
+		manager.dispose();
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("remove 卸载第三方插件：先撤权、再删目录、清授权；内置示例拒绝卸载", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pideck-host-plugins-"));
+	try {
+		const manager = new HostPluginManager(join(root, "userData"));
+		const directory = join(root, "userData", "host-plugins", "third-party");
+		await mkdir(directory, { recursive: true });
+		await writeFile(join(directory, "pideck-plugin.json"), JSON.stringify(manifest({ id: "third-party", name: "Third Party" })));
+		await writeFile(join(directory, "app.html"), "<!doctype html>");
+		await manager.load();
+		const plugin = manager.catalog().plugins.find((item) => item.manifest.id === "third-party");
+		await manager.setEnabled("third-party", true, plugin.fingerprint);
+		assert.equal(manager.getEnabled("third-party")?.manifest.id, "third-party");
+
+		assert.deepEqual(plain((await manager.remove("third-party")).plugins), []);
+		assert.equal(manager.getEnabled("third-party"), undefined, "卸载必须先撤权");
+		assert.equal(
+			await stat(directory).then(
+				() => true,
+				() => false,
+			),
+			false,
+		);
+		await assert.rejects(() => manager.remove("third-party"), /plugin-not-found/);
+
+		// 内置示例删了下次启动会被重新落位，删了只会让人以为卸载没生效 → 直接拒绝。
+		const source = join(root, "resources");
+		await mkdir(join(source, SERVICE_ID), { recursive: true });
+		await writeFile(join(source, SERVICE_ID, "pideck-plugin.json"), JSON.stringify(manifest({ id: SERVICE_ID })));
+		await writeFile(join(source, SERVICE_ID, "app.html"), "<!doctype html>");
+		await manager.seedBuiltin(source);
+		await manager.load();
+		await assert.rejects(() => manager.remove(SERVICE_ID), /plugin-builtin/);
+		manager.dispose();
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("服务面板入口：侧栏一行 + 浮层，rail 永远显示活动面板", async () => {
+	// 回归：openDrawerForce("browser") 只切内容、不钉住面板；rail 若只显示 pinned/canRemove，
+	// 就没有归属 tab（用户反馈「直接出来一个页面，但是没有归属 tab」）。
+	const rail = await readFile("src/renderer/src/components/workspace/WorkspaceDrawerRail.tsx", "utf8");
+	assert.match(rail, /\(action\.pinned \?\? false\) \|\| !action\.canRemove \|\| action\.active/);
+
+	// presentation:"popover" 的面板在侧栏那一行就地展开，不写 hostPluginPanelAtom（否则会再弹一个对话框）。
+	const dock = await readFile("src/renderer/src/components/plugins/HostPluginDockButtons.tsx", "utf8");
+	assert.match(dock, /presentation === "popover"[\s\S]{0,900}<PopoverTrigger asChild>/);
+	assert.match(dock, /onClick=\{row\.presentation === "popover" \? undefined/);
+	// HostPluginSurface 内部是 flex-1，浮层里必须给一个定高 flex 列，否则 webview 高度塌成 0。
+	assert.match(dock, /flex h-\[280px\] flex-col/);
 });
 
 test("the packaged billion-context demo is a loadable package that only talks to window.pideck", async () => {
@@ -323,4 +445,81 @@ test("the packaged billion-context demo is a loadable package that only talks to
 	// 面板 CSP 是 connect-src 'none'：不能 fetch、不能内嵌、不能引 CDN，能力只走 window.pideck。
 	assert.doesNotMatch(app, /\bfetch\(|XMLHttpRequest|innerHTML|importScripts|https?:\/\/(?!127\.0\.0\.1)/);
 	assert.doesNotMatch(await readFile(join(directory, "app.html"), "utf8"), /<script[^>]*src="https?:/);
+});
+
+test("服务 Web UI 交给内置浏览器时，插件面板先让位", async () => {
+	// 面板 modal 是整窗遮罩：不让位的话，刚打开的浏览器抽屉会被盖住（用户反馈「弹框不关、看不到归属 tab」）。
+	const source = await readFile("src/renderer/src/hooks/plugins/useHostPluginNavigation.ts", "utf8");
+	assert.match(source, /onOpenBrowser\([\s\S]{0,200}closePanel\(null\)[\s\S]{0,200}openBrowser\.current\(url\)/, "先收起插件面板，再打开内置浏览器");
+});
+
+test("面板只在动作返回状态时重绘（openUi 没有返回值）", async () => {
+	// 回归：openUi 契约是 Promise<void>，主进程回 null；直接 paint(await action()) 会抛
+	// “Cannot read properties of null (reading 'available')”。
+	const app = await readFile(join("resources", "host-plugins", SERVICE_ID, "app.js"), "utf8");
+	assert.doesNotMatch(app, /paint\(\s*await\s+action\(\)\s*\)/);
+	assert.match(app, /const\s+next\s*=\s*await\s+action\(\)[\s\S]{0,200}if\s*\(\s*next\s*\)\s*\{[\s\S]{0,80}paint\(next\)/);
+	// 动作留下的提示必须在收尾的 refresh() 之后补回：refresh() 自己会清空提示区。
+	assert.match(app, /await\s+refresh\(\)[\s\S]{0,80}say\(reasonText\(notice\)\)/);
+});
+
+test("服务已在运行时三个按钮不能停在忙碌时的置灰状态", async () => {
+	// 回归（用户反馈「直接检查到运行中，但是按钮是灰的」）：服务是别人（用户手敲 bili start、
+	// 或 pi 自己的扩展）拉起来的，PiDeck 只管读状态——但面板曾把按钮永久置灰。
+	// 根因：paint() 是在忙碌期间被调用的，setBusy(false) 之后没人重算 disabled。
+	// 这里跑真脚本 + 假 DOM 断言最终可点状态（app.js 是浏览器脚本、无 import，vm 直接求值）。
+	const elements = new Map();
+	const element = (id) => {
+		if (!elements.has(id)) {
+			elements.set(id, {
+				id,
+				textContent: "",
+				title: "",
+				hidden: false,
+				disabled: false,
+				dataset: {},
+				listeners: {},
+				addEventListener(type, handler) {
+					this.listeners[type] = handler;
+				},
+				setAttribute(name, value) {
+					this[name] = value;
+				},
+			});
+		}
+		return elements.get(id);
+	};
+	const running = { id: SERVICE_ID, available: true, running: true, pid: 23704, uiUrl: "http://127.0.0.1:28800/__bili/" };
+	const sandbox = {
+		document: { body: { dataset: {} }, documentElement: { lang: "" }, getElementById: element },
+		window: { setTimeout, clearTimeout },
+		pideck: {
+			context: { get: async () => ({ locale: "zh-CN" }) },
+			services: { status: async () => running, start: async () => running, stop: async () => ({ ...running, running: false }), openUi: async () => undefined },
+		},
+	};
+	vm.runInNewContext(await readFile(join("resources", "host-plugins", SERVICE_ID, "app.js"), "utf8"), sandbox);
+	// main() 是 fire-and-forget 的 async：冲刷微任务直到首次状态渲染完成。
+	for (let i = 0; i < 50; i += 1) await new Promise((resolve) => setImmediate(resolve));
+
+	assert.equal(element("status").textContent, "运行中");
+	assert.equal(element("start").disabled, true, "已在运行：启动按钮应禁用");
+	assert.equal(element("stop").disabled, false, "已在运行：停止按钮必须可点");
+	assert.equal(element("open").disabled, false, "已在运行且有端口：打开面板必须可点");
+	assert.equal(element("refresh").disabled, false, "查询结束后刷新按钮必须解锁");
+	assert.equal(sandbox.document.body.dataset.busy, "", "查询结束后忙碌标记必须清掉");
+});
+
+test("面板在等状态查询期间给出忙碌反馈（刷新转圈）", async () => {
+	// 回归（用户反馈「点击刷新服务状态也没动画」）：一次状态查询要跑 bili doctor，不给反馈就像没点动。
+	const app = await readFile(join("resources", "host-plugins", SERVICE_ID, "app.js"), "utf8");
+	const css = await readFile(join("resources", "host-plugins", SERVICE_ID, "styles.css"), "utf8");
+	const html = await readFile(join("resources", "host-plugins", SERVICE_ID, "app.html"), "utf8");
+	assert.match(app, /document\.body\.dataset\.busy = next \? "1" : ""/);
+	assert.match(app, /el\("refresh"\)\.disabled = next/);
+	// 旋转的是图标本身：直接转按钮会把边框一起转。
+	assert.match(html, /<button id="refresh"[^>]*>\s*<span class="glyph">/);
+	assert.match(css, /body\[data-busy="1"\] #refresh \.glyph\s*\{[\s\S]{0,120}animation: pideck-spin/);
+	// 原因码不只在「不可用」时显示：stop-restarted 是带状态的成功响应。
+	assert.match(app, /say\(status\.reason \? reasonText\(status\.reason\) : ""\)/);
 });

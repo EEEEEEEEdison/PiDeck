@@ -17,6 +17,8 @@ const BILI_UI_PATH = "/__bili/";
 export type BillionContextServiceDeps = {
 	cli: LocalServiceCli;
 	kill: (pid: number) => Promise<boolean>;
+	/** 轮询节奏与预算。测试用来把「等进程起来/落下」压到毫秒级；生产一律用默认值。 */
+	timing?: { pollMs?: number; startSettleMs?: number; stopSettleMs?: number };
 };
 
 type ServiceSnapshot = { running: boolean; pid?: number; origin?: string; version?: string };
@@ -99,8 +101,15 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
  */
 export class BillionContextService implements LocalServiceAdapter {
 	readonly id = BILI_SERVICE_ID;
+	private readonly timing: { pollMs: number; startSettleMs: number; stopSettleMs: number };
 
-	constructor(private readonly deps: BillionContextServiceDeps) {}
+	constructor(private readonly deps: BillionContextServiceDeps) {
+		this.timing = {
+			pollMs: deps.timing?.pollMs ?? POLL_INTERVAL_MS,
+			startSettleMs: deps.timing?.startSettleMs ?? START_SETTLE_MS,
+			stopSettleMs: deps.timing?.stopSettleMs ?? STOP_SETTLE_MS,
+		};
+	}
 
 	async status(signal?: AbortSignal): Promise<LocalServiceStatus> {
 		const report = await this.deps.cli.run(DOCTOR_ARGS, DOCTOR_TIMEOUT_MS);
@@ -116,7 +125,7 @@ export class BillionContextService implements LocalServiceAdapter {
 		if (!current.available || current.running) return current;
 		const spawned = this.deps.cli.spawnDetached(START_ARGS);
 		if (!spawned.ok) return { id: this.id, available: true, running: false, reason: spawned.reason };
-		return (await this.waitFor(signal, START_SETTLE_MS, (next) => next.running)) ?? { id: this.id, available: true, running: false, reason: "start-timeout" };
+		return (await this.waitFor(signal, this.timing.startSettleMs, (next) => next.running)) ?? { id: this.id, available: true, running: false, reason: "start-timeout" };
 	}
 
 	async stop(signal?: AbortSignal): Promise<LocalServiceStatus> {
@@ -124,7 +133,14 @@ export class BillionContextService implements LocalServiceAdapter {
 		if (!current.available || !current.running || !current.pid) return { id: this.id, available: current.available, running: false };
 		const killed = await this.deps.kill(current.pid);
 		if (!killed) return { ...current, reason: "stop-failed" };
-		return (await this.waitFor(signal, STOP_SETTLE_MS, (next) => !next.running)) ?? { ...current, reason: "stop-failed" };
+		const settled = await this.waitFor(signal, this.timing.stopSettleMs, (next) => !next.running);
+		if (settled) return settled;
+		// 终止动作本身成功了，但服务又回来了：这个代理可能被别的持有方管着（例如 pi 的 bili 扩展
+		// 发现自己的代理掉了就重新拉起）。「停不掉」和「停了又被拉起来」是两件事，
+		// 用 pid 变化分开报，面板才能给出能读得懂的解释而不是一个笼统的失败。
+		const latest = await this.status(signal);
+		if (!latest.running) return latest;
+		return { ...latest, reason: latest.pid !== undefined && latest.pid !== current.pid ? "stop-restarted" : "stop-failed" };
 	}
 
 	/** 轮询到期望状态为止；信号中断（插件被撤销授权）或超出预算返回 null，由调用方给稳定原因码。 */
@@ -134,7 +150,7 @@ export class BillionContextService implements LocalServiceAdapter {
 			const status = await this.status(signal);
 			if (done(status)) return status;
 			if (signal?.aborted || Date.now() >= deadline) return null;
-			await delay(POLL_INTERVAL_MS, signal);
+			await delay(this.timing.pollMs, signal);
 			if (signal?.aborted) return null;
 		}
 	}

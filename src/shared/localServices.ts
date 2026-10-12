@@ -23,6 +23,6 @@ export type LocalServiceStatus = {
 	/** 运行中才有：服务自己的 Web UI 地址。 */
 	uiUrl?: string;
 	version?: string;
-	/** 稳定原因码（可用时为空）：cli-missing / cli-failed / invalid-report / start-failed / start-timeout / stop-failed。 */
+	/** 稳定原因码（可用时为空）：cli-missing / cli-failed / invalid-report / start-failed / start-timeout / stop-failed / stop-restarted。 */
 	reason?: string;
 };

@@ -85,6 +85,40 @@ h1 {
 	opacity: 0.5;
 }
 
+/* 一次状态查询要跑 `bili doctor --json`（一到两秒）：不给反馈就像按钮没响应。
+   转圈和脉冲都只做视觉，禁用态由 JS 负责，避免“看着能点其实点不动”。 */
+body[data-busy="1"] #refresh {
+	opacity: 0.8;
+}
+
+body[data-busy="1"] #refresh .glyph {
+	display: inline-block;
+	animation: pideck-spin 900ms linear infinite;
+}
+
+body[data-busy="1"] .dot {
+	animation: pideck-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes pideck-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes pideck-pulse {
+	50% {
+		opacity: 0.35;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	body[data-busy="1"] #refresh .glyph,
+	body[data-busy="1"] .dot {
+		animation: none;
+	}
+}
+
 .facts {
 	display: flex;
 	flex-direction: column;

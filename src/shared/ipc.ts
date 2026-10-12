@@ -927,6 +927,8 @@ export const ipcChannels = {
 	hostPluginsMount: "host-plugins:mount",
 	hostPluginsUpdate: "host-plugins:update",
 	hostPluginsUnmount: "host-plugins:unmount",
+	/** 卸载：删掉 userData 里的插件目录并清掉授权（内置示例不可卸载，见 HostPluginManager.remove）。 */
+	hostPluginsRemove: "host-plugins:remove",
 	hostPluginsChanged: "host-plugins:changed",
 	hostPluginRequest: "host-plugin:request",
 	hostPluginEvent: "host-plugin:event",

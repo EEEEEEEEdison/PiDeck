@@ -32,7 +32,7 @@
 
 - `permissions` 白名单：`sessions.read`（读会话）、`workbench.navigate`（导航时间线）、`workbench.openExternal`（系统浏览器开 https）、`network.https`（受控公网 HTTPS）、`network.local`（受控固定端口本地 HTTP）、`service.local`（按名启停 PiDeck 已实现适配器的本地服务）；未知权限直接拒绝加载。网络权限必须配对应的 `network.httpsOrigins` / `network.localPorts`，每类 1–16 个不重复目的地；`service.local` 必须配 `services`（1–8 个，且必须命中 `src/shared/localServices.ts` 白名单）。`storage` 不需要权限，每插件一个独立命名空间（见下）。
 - 资产上限：单文件 4 MiB、整包 16 MiB、100 个文件、目录深度 8；禁止符号链接。
-- 面板 `entry` 必须是包内相对路径且以 `.html` 结尾（拒 `../` 逃逸）；可服务扩展名固定为 `HOST_PLUGIN_MIME`：html/js/mjs/css/json/svg/png/jpg/webp/woff2，`pideck-plugin.json` 自身永不可服务（`asset-not-allowed`）。资产路径只允许 `^[a-zA-Z0-9_./-]+$`（空格/中文文件名无法引用）。可选 `icon` 走 `src/shared/hostPluginIcons.ts` 白名单，可选 `presentation` 只接受 `modal`/`page`，其余值 fail closed 拒装（`src/main/plugins/hostPluginManifest.ts`）。
+- 面板 `entry` 必须是包内相对路径且以 `.html` 结尾（拒 `../` 逃逸）；可服务扩展名固定为 `HOST_PLUGIN_MIME`：html/js/mjs/css/json/svg/png/jpg/webp/woff2，`pideck-plugin.json` 自身永不可服务（`asset-not-allowed`）。资产路径只允许 `^[a-zA-Z0-9_./-]+$`（空格/中文文件名无法引用）。可选 `icon` 走 `src/shared/hostPluginIcons.ts` 白名单，可选 `presentation` 只接受 `modal`/`popover`/`page`，其余值 fail closed 拒装（`src/main/plugins/hostPluginManifest.ts`）。
 
 ## 授权与指纹
 
@@ -86,9 +86,25 @@
 - 双重门：权限 + `manifest.services` 点名。Broker 里四个方法（`status`/`start`/`stop`/`openUi`）逐个登记，不用前缀推断——新增方法忘登记会报错而不是白拿权限。
 - 启停轮询跟着授权绑定走（Broker binding 的 AbortController）：插件被禁用 / 上下文更新 / 面板关闭时立即中断还在等的 `start`/`stop`。
 - 停止只能按 pid 终止（外部 CLI 没有 stop 子命令）：pid 一律来自 `bili doctor --json` 的报告，不猜、不按名字杀。UI 地址同样从报告里取，但只接受 `http://127.0.0.1|localhost:<port>`，防报告被改写成公网地址把内置浏览器带走。
+- 停止**不保证停得住**：billion-context 的 pi lane 由 pi 自己的扩展持有（`dist/agent/pi-native.js` 的 `ensureProxyRunning`），进程一死 pi 会立刻重新拉起——实测杀掉 pid 后约 2 秒就有新 pid 监听同一端口。适配器在轮询窗口内看到「仍在运行但 pid 已变」时返回 `reason: "stop-restarted"`（带新 pid 与 uiUrl），而不是报 `stop-failed` 或假装成功；只有 pid 没变才算真失败。面板要如实转述（要彻底停掉需先退出 pi），不要自动重试。
 - 「打开面板」不走插件：Broker 转发 `onOpenBrowser` sink → `hostPluginOpenBrowser` IPC → 渲染层 `workspace.openDrawerForce("browser") + navigateTo(url)`。插件页 CSP 是 `frame-src 'none'`，本来就无法内嵌这类 SPA。
-- 内置示例：`resources/host-plugins/billion-context/` 随包分发（`extraResources` → `resources/host-plugins`），由 `HostPluginManager.seedBuiltin()` 在首次启动落位到 `userData/host-plugins/`；**目标目录已存在就永不覆盖**，且落位不等于授权（同样是 `requiresConsent`，仍需用户按指纹确认）。
+- 内置示例：`resources/host-plugins/billion-context/` 随包分发（`extraResources` → `resources/host-plugins`），由 `HostPluginManager.seedBuiltin()` 在 `load()` 前落位到 `userData/host-plugins/`。落位不等于授权：首次落位同样是 `requiresConsent`，仍需用户按指纹确认。
+- 落位的三种情形（`seeded` 记录上次落位指纹，存在 `host-plugin-state.json`）：目录不存在 → 复制一份；目录内容仍等于上次落位的指纹（用户没动过）→ 用新版内置内容替换；其余（用户改过、装过别的版本、自己写了同 id 的）→ **永不覆盖**。只有第一种情形（上一版内置内容）升级时授权顺延，避免每次应用更新都要求重新批准自己的内置示例；第三方与用户改过的副本不在顺延范围。
+- 旧状态文件（`seeded` 机制之前）没有落位记录，磁盘上分不出「我们落的」与「用户自己装的同 id 插件」：这种情形只用一次，拿 `manifest.version` 当第二条线索——版本不同 ⇒ 来自另一个 PiDeck 版本的内置载荷（即我们自己落的），替换并顺延授权；版本相同则当作用户的副本不覆盖。`seedBuiltin` 写过一次 `seeded` 后该分支就永久失效。
+- 卸载：`HostPluginManager.remove(id)` 先撤权再删目录（顺序与 `setEnabled` 一致，挂载中的视图立刻失效），同时清掉授权与落位记录。`seeded` 里的 id 拒绝卸载（`plugin-builtin`）——下次启动 `seedBuiltin` 会把它重新落位，删了只会让人以为卸载没生效；要停用请用禁用。渲染层入口在设置页插件行（`HostPluginsTab` 的「卸载」+ 确认框）。
 - 新增服务的成本：`src/main/localServices/` 加适配器 + 在 `src/shared/localServices.ts` 登记 ID，插件侧 manifest 校验随之放行。第三方插件无法自行扩展能力面。
+
+## 面板形态与入口（`presentation`）
+
+同一个 `contributes.panels` 声明，三种呈现方式（缺省 `modal`）：
+
+- `modal`：近全屏大弹框（与定时任务弹框同一尺寸语系），适合统计/浏览类长驻页面；
+- `popover`：侧栏那一行旁边就地展开的浮层（`HostPluginDockButtons` 里的 `Popover`），适合「状态行 + 几个按钮」这种紧凑面板；从设置页/命令面板这类没有锚点的入口进来时退化成小对话框；
+- `page`：工作区内联页，非模态覆盖会话区，侧栏入口再点即关。
+
+侧栏入口位于「定时任务」下方（`SidebarContent.tsx` 的宿主插件区），只列**已启用**插件的面板；无已启用面板时整块不渲染。
+
+抽屉 rail 的可见性过滤含 `|| action.active`——不变式是「rail 永远显示当前活动面板」。没有这一条时，外部入口（如 `service.openUi` 打开内置浏览器、消息里的「在浏览器打开」）只切抽屉内容而不钉住面板，rail 上就没有归属 tab。
 
 ## 存储（`storage`）
 

@@ -11,8 +11,10 @@ const COPY = {
 		start: "启动",
 		stop: "停止",
 		open: "打开面板",
+		opening: "打开中…",
 		starting: "启动中…",
 		stopping: "停止中…",
+		refresh: "刷新服务状态",
 		installHint: "未检测到可用的 bili 命令，请先全局安装：npm i -g billion-context",
 		stoppedHint: "服务未运行。面板是代理进程自带的，不跑就没有面板。",
 		noUiHint: "服务已运行但未报告端口，无法确定面板地址。",
@@ -29,6 +31,7 @@ const COPY = {
 			"start-failed": "启动命令未能执行。",
 			"start-timeout": "已发出启动命令，但 20 秒内未检测到服务进程。",
 			"stop-failed": "停止失败：进程可能已退出或权限不足。",
+			"stop-restarted": "已终止，但又被自动拉起：这个代理由 pi 持有（pi 的模型请求走它，一掉就重新拉起）。要彻底停掉请先退出 pi。",
 			"invalid-request": "请求格式不被接受。",
 		},
 	},
@@ -39,8 +42,10 @@ const COPY = {
 		start: "Start",
 		stop: "Stop",
 		open: "Open panel",
+		opening: "Opening…",
 		starting: "Starting…",
 		stopping: "Stopping…",
+		refresh: "Refresh status",
 		installHint: "No usable bili command was found. Install it globally: npm i -g billion-context",
 		stoppedHint: "The service is not running. The panel ships with the proxy process, so there is no panel without it.",
 		noUiHint: "The service is running but reported no port, so the panel URL is unknown.",
@@ -57,6 +62,7 @@ const COPY = {
 			"start-failed": "The start command could not be executed.",
 			"start-timeout": "The start command ran, but no service process appeared within 20 seconds.",
 			"stop-failed": "Stop failed: the process may already be gone, or permission was denied.",
+			"stop-restarted": "The process was terminated, but it came straight back: pi owns this proxy (pi routes its model requests through it and respawns it when it dies). Quit pi to stop it for good.",
 			"invalid-request": "The request shape was rejected.",
 		},
 	},
@@ -66,6 +72,8 @@ const el = (id) => document.getElementById(id);
 let copy = COPY["zh-CN"];
 let busy = false;
 let timer;
+// 上次已知的服务状态：按钮可用性靠它重算（见 applyControls）。
+let lastStatus = { available: true, running: false };
 
 function say(message) {
 	const node = el("message");
@@ -83,6 +91,7 @@ function errorText(error) {
 }
 
 function paint(status) {
+	lastStatus = status;
 	const available = status.available !== false;
 	const running = status.running === true;
 	el("dot").dataset.state = !available ? "missing" : running ? "running" : "stopped";
@@ -90,48 +99,78 @@ function paint(status) {
 	el("pid").textContent = running && status.pid ? String(status.pid) : "—";
 	el("version").textContent = status.version || "—";
 	el("ui").textContent = status.uiUrl || "—";
+	el("note").textContent = !available ? copy.installHint : running ? (status.uiUrl ? copy.modalHint : copy.noUiHint) : copy.stoppedHint;
+	// 原因码优先：既包括「服务不可用」，也包括「停了又被拉起来」这类带状态的成功响应。
+	say(status.reason ? reasonText(status.reason) : "");
+	applyControls();
+}
+
+/**
+ * 按钮可用性只跟「上次已知状态 + 是否忙碌」有关，所以单独抽出来。
+ * 关键：paint() 经常是在忙碌期间被调用的，setBusy(false) 必须重新应用一次，
+ * 否则 disabled 会停在忙碌时的 true——面板显示「运行中」但三个按钮全是灰的（用户报过）。
+ */
+function applyControls() {
+	const available = lastStatus.available !== false;
+	const running = lastStatus.running === true;
 	el("start").disabled = busy || !available || running;
 	el("stop").disabled = busy || !running;
-	el("open").disabled = busy || !running || !status.uiUrl;
-	el("note").textContent = !available ? copy.installHint : running ? (status.uiUrl ? copy.modalHint : copy.noUiHint) : copy.stoppedHint;
-	// 状态本身就是「不可用」时，把原因码摆在明面上，而不是只把按钮置灰。
-	say(available ? "" : reasonText(status.reason));
+	el("open").disabled = busy || !running || !lastStatus.uiUrl;
 }
 
 function setBusy(next, label) {
 	busy = next;
-	window.clearTimeout(timer);
-	if (next) {
-		// 启停要等进程真的起来/落下，比普通请求慢得多；超时后自己解锁，避免按钮永久卡住。
-		timer = window.setTimeout(() => {
-			busy = false;
-			say(reasonText("start-timeout"));
-			void refresh();
-		}, BUSY_TIMEOUT_MS);
-	}
+	// 转圈动画和按钮锁定都挂在这个属性上：刷新一次 bili doctor 要一两秒，没有反馈就像点不动。
+	document.body.dataset.busy = next ? "1" : "";
+	el("refresh").disabled = next;
+	applyControls();
 	if (label) el("status").textContent = label;
+}
+
+/** 启停要等进程真的起来/落下，比普通请求慢得多；超时后自己解锁，避免按钮永久卡住。 */
+function armBusyTimeout() {
+	window.clearTimeout(timer);
+	timer = window.setTimeout(() => {
+		setBusy(false);
+		// 先重画再报原因：refresh() 自己会清提示，顺序反了就什么都看不见。
+		void refresh().then(() => say(reasonText("start-timeout")));
+	}, BUSY_TIMEOUT_MS);
 }
 
 async function refresh() {
 	if (busy) return;
+	setBusy(true);
 	try {
 		paint(await pideck.services.status(SERVICE_ID));
 	} catch (error) {
 		paint({ available: true, running: false });
 		say(errorText(error));
+	} finally {
+		window.clearTimeout(timer);
+		setBusy(false);
 	}
 }
 
 async function run(label, action) {
 	if (busy) return;
 	setBusy(true, label);
+	armBusyTimeout();
+	let notice = "";
 	try {
-		paint(await action());
+		const next = await action();
+		// start/stop 会回填新的服务状态；openUi 只负责把面板交给内置浏览器，没有返回值可画。
+		if (next) {
+			paint(next);
+			notice = next.reason || "";
+		}
 	} catch (error) {
-		say(errorText(error));
+		notice = typeof error?.message === "string" ? error.message : "";
 	} finally {
+		window.clearTimeout(timer);
 		setBusy(false);
+		// refresh() 会把状态重画一遍并清掉提示，所以动作自己留下的提示要在这里补回去。
 		await refresh();
+		say(reasonText(notice));
 	}
 }
 
@@ -143,6 +182,8 @@ async function main() {
 		// context 拿不到就用默认语言，不影响服务操作。
 	}
 	document.documentElement.lang = copy === COPY["en-US"] ? "en-US" : "zh-CN";
+	el("refresh").title = copy.refresh;
+	el("refresh").setAttribute("aria-label", copy.refresh);
 	el("start").textContent = copy.start;
 	el("stop").textContent = copy.stop;
 	el("open").textContent = copy.open;
@@ -150,7 +191,7 @@ async function main() {
 	el("refresh").addEventListener("click", () => void refresh());
 	el("start").addEventListener("click", () => void run(copy.starting, () => pideck.services.start(SERVICE_ID)));
 	el("stop").addEventListener("click", () => void run(copy.stopping, () => pideck.services.stop(SERVICE_ID)));
-	el("open").addEventListener("click", () => void run(null, () => pideck.services.openUi(SERVICE_ID)));
+	el("open").addEventListener("click", () => void run(copy.opening, () => pideck.services.openUi(SERVICE_ID)));
 
 	await refresh();
 }

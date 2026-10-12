@@ -51,11 +51,11 @@ export function parseHostPluginManifest(value: unknown): HostPluginManifest {
 	const contributes = value.contributes;
 	if (!isPluginRecord(contributes) || !Array.isArray(contributes.panels) || contributes.panels.length < 1 || contributes.panels.length > 8 || !Array.isArray(contributes.commands) || contributes.commands.length > 16) throw new Error("invalid-contributions");
 	const panels = contributes.panels.map((panel) => {
-		// icon/presentation 可选：icon 必须在白名单内；presentation 只接受 modal|page，未知值 fail-closed 拒装。
+		// icon/presentation 可选：icon 必须在白名单内；presentation 只接受 modal|page|popover，未知值 fail-closed 拒装（缺省 modal，旧包不带此字段）。
 		if (!isPluginRecord(panel) || !isHostPluginId(panel.id) || !label(panel.title) || !isHostPluginAsset(panel.entry) || !panel.entry.endsWith(".html")) throw new Error("invalid-panel");
 		if (panel.icon !== undefined && !isHostPluginPanelIconName(panel.icon)) throw new Error("invalid-panel-icon");
 		let presentation: HostPluginPanelPresentation | undefined;
-		if (panel.presentation === "modal" || panel.presentation === "page") presentation = panel.presentation;
+		if (panel.presentation === "modal" || panel.presentation === "page" || panel.presentation === "popover") presentation = panel.presentation;
 		else if (panel.presentation !== undefined) throw new Error("invalid-panel-presentation");
 		return { id: panel.id, title: panel.title, entry: panel.entry, ...(panel.icon !== undefined ? { icon: panel.icon } : {}), ...(presentation !== undefined ? { presentation } : {}) };
 	});

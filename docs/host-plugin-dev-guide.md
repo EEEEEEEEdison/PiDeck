@@ -14,7 +14,7 @@ title: 宿主插件开发指南
 
 | ✅ 能做 | ❌ 不能做 |
 |--------|----------|
-| 在 PiDeck 里注册自己的面板（大弹框 `modal` 或工作区内联页 `page`） | 页面直接联网（`fetch`/`XMLHttpRequest`/WebSocket 仍被禁止） |
+| 在 PiDeck 里注册自己的面板（大弹框 `modal`、侧栏浮层 `popover` 或工作区内联页 `page`） | 页面直接联网（`fetch`/`XMLHttpRequest`/WebSocket 仍被禁止） |
 | 经 `network.request` 调用已授权的公网 HTTPS API / 本地固定端口 HTTP 服务 | 访问未声明的地址、局域网、任意端口；自动执行 BAT 或启动服务 |
 | 读取**当前项目**的会话目录：`sessions.list` / `get` / `search` | 读取其他项目的会话、读取任意本地文件 |
 | 读取会话的活跃分支历史：`sessions.entries`（分页、有预算） | 修改会话、发消息、调用 pi 或任何 RPC 命令 |
@@ -49,7 +49,7 @@ title: 宿主插件开发指南
    - **显示名**：面板与命令里的名字；
    - **权限**：默认只勾 `sessions.read`；按需增加 `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local` / `service.local`。纯联网工具可取消会话读取；
    - **网络目的地**（仅勾网络权限时出现）：HTTPS 填 `https://api.example.com` 这样的 origin，本地填明确端口（如 `4187`）；多个值用逗号或空白分隔，每类最多 16 个，不支持通配符；
-   - **面板形态**：`modal`（大弹框，默认）或 `page`（工作区内联页）；
+   - **面板形态**：`modal`（大弹框，默认）、`popover`（侧栏一行旁边的浮层，适合几行控件的紧凑面板）或 `page`（工作区内联页）；
 3. 生成后目录出现在插件目录里，并自动重新扫描（默认**禁用**）；
 4. 在列表里点 **「授权并启用」**；
 5. 从侧栏入口或命令面板（Ctrl+K）打开面板。
@@ -155,11 +155,11 @@ for (const session of page.sessions) {
 | `permissions` | ✅ | 数组，只能取 `sessions.read` / `workbench.navigate` / `workbench.openExternal` / `network.https` / `network.local` / `service.local`，不能重复；未知权限拒装 |
 | `network` | 网络权限存在时 ✅ | `network.https` 对应 `httpsOrigins`，`network.local` 对应 `localPorts`。没声明对应权限不得填写该字段；规则见 5.5 |
 | `services` | `service.local` 存在时 ✅ | 1–8 个，只能点名 PiDeck **已实现适配器**的本地服务（当前仅 `billion-context`）；没声明 `service.local` 不得填写该字段；规则见 5.8 |
-| `contributes.panels` | ✅ | 1–8 个。`id`（同上 ID 规则）、`title`（≤160）、`entry`（包内相对路径，**必须以 `.html` 结尾**）、`icon`（白名单，可选）、`presentation`（`modal` 或 `page`，可选） |
+| `contributes.panels` | ✅ | 1–8 个。`id`（同上 ID 规则）、`title`（≤160）、`entry`（包内相对路径，**必须以 `.html` 结尾**）、`icon`（白名单，可选）、`presentation`（`modal` / `popover` / `page`，可选） |
 | `contributes.commands` | ✅ | 0–16 个。`id`、`title`、`panelId` 必须指向已声明的面板 |
 
 - **`icon` 白名单**：`bar-chart`、`activity`、`database`、`table`、`calendar`、`file-text`、`terminal`、`globe`、`git-branch`、`message`、`clock`、`layers`（见 `src/shared/hostPluginIcons.ts`）。不填或填未知名字都不会崩，未知名字直接拒装。
-- **`presentation`**：`modal`（缺省）= 近全屏大弹框；`page` = 工作区内联页，非模态覆盖会话区，侧栏入口再点即关。统计/浏览类长驻面板建议 `page`。
+- **`presentation`**：`modal`（缺省）= 近全屏大弹框；`popover` = 侧栏那一行旁边就地展开的浮层（宽 320px、高 280px 量级，只适合状态行 + 几个按钮的紧凑面板；从设置页/命令面板这类没有锚点的入口进来时退化成小对话框）；`page` = 工作区内联页，非模态覆盖会话区，侧栏入口再点即关。统计/浏览类长驻面板建议 `page`，启停/状态类紧凑面板建议 `popover`。
 - **`entry` 资源路径规则**：只用相对路径（`^[a-zA-Z0-9_./-]+$`，≤240 字符），不能以 `/` 开头，不能含 `..`、`.` 段。**文件名不要用空格或中文**，否则 HTML 里引用不到。
 
 ### 4.2 包预算（超出即拒装/拒载）
@@ -456,7 +456,7 @@ type HostPluginServiceStatus = {
 	pid?: number;
 	version?: string;
 	uiUrl?: string; // Web 面板地址（http://127.0.0.1:<port>/...），未运行或未知时为 undefined
-	reason?: string; // 稳定原因码：cli-missing / cli-failed / invalid-report / start-* / stop-failed…
+	reason?: string; // 稳定原因码：cli-missing / cli-failed / invalid-report / start-* / stop-failed / stop-restarted…
 };
 ```
 
@@ -471,6 +471,7 @@ await pideck.services.openUi("billion-context"); // PiDeck 内置浏览器打开
 ```
 
 - `start` / `stop` 比普通请求慢得多（要等进程真的起来 / 落下）；面板请自己加「进行中」态，不要连点。
+- `stop` **可能返回一个仍在运行的服务**：`reason: "stop-restarted"` 表示进程被杀掉后又被别人拉起来了（典型情形是代理由 pi 自己持有，pi 一发现它死了就重新拉起）。这时 `status.running` 仍是 `true`、`pid` 是**新**进程；面板要把 `reason` 直接告诉用户，不要当成失败或重试。
 - 服务不可用时的错误码见第 7 节（`service-unavailable` / `service-not-running` / `cli-missing` / `start-timeout`…）。
 - 这类面板通常**只监听 127.0.0.1 且无鉴权**：不要在界面或文档里引导用户把端口暴露到公网/局域网。
 
@@ -521,6 +522,7 @@ await pideck.services.openUi("billion-context"); // PiDeck 内置浏览器打开
 | `service-not-running` | 服务未运行（`stop` / `openUi` 时） | 先 `start`，或提示用户手动启动 |
 | `cli-missing` / `cli-failed` / `invalid-report` | 外部 CLI 不存在 / 执行失败 / 输出无法解析 | 让用户先安装（如 `npm i -g billion-context`） |
 | `start-failed` / `start-timeout` / `stop-failed` | 启动命令没发出去 / 20 秒内没起来 / 终止失败 | 提示用户手动排查；不要自动重试 |
+| `stop-restarted` | 终止成功但进程立刻又被拉起（pi 持有该代理时会这样） | 不是错误：如实转述，提示「要彻底停掉需先退出 pi」 |
 
 加载/安装/发布：
 
@@ -528,7 +530,7 @@ await pideck.services.openUi("billion-context"); // PiDeck 内置浏览器打开
 |--------|------|
 | `missing-manifest` | 目录里没有 `pideck-plugin.json`（选错目录/选到父目录） |
 | `invalid-manifest` / `invalid-panel` / `invalid-command` / `invalid-contributions` | manifest 字段不合法（ID、title、entry、panelId…） |
-| `invalid-panel-icon` / `invalid-panel-presentation` | icon 不在白名单 / presentation 不是 `modal`\|`page` |
+| `invalid-panel-icon` / `invalid-panel-presentation` | icon 不在白名单 / presentation 不是 `modal`\|`popover`\|`page` |
 | `duplicate-panel` / `duplicate-command` / `duplicate-plugin-id` | id 重复 |
 | `unsupported-permission` | 权限不在允许集合内 |
 | `invalid-network` | 网络权限与目的地不匹配、重复、格式非法或超 16 个 |

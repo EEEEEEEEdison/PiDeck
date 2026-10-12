@@ -296,6 +296,7 @@ export function createPreviewApi(): PiDesktopApi {
 			mount: async () => ({ ok: false, code: "desktop-only" }),
 			update: async () => ({ ok: false, code: "desktop-only" }),
 			unmount: async () => ({ ok: false, code: "desktop-only" }),
+			remove: async () => ({ ok: false, code: "desktop-only" }),
 			onChanged: () => () => undefined,
 			onNavigate: () => () => undefined,
 			onOpenBrowser: () => () => undefined,

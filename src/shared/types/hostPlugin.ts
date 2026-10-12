@@ -13,7 +13,10 @@ export type HostPluginServicePolicy = { ids: string[] };
 export type HostPluginNetworkRequest = { url: string; method?: "GET" | "POST"; headers?: Record<string, string>; body?: string; timeoutMs?: number };
 export type HostPluginNetworkResponse = { url: string; status: number; ok: boolean; headers: Record<string, string>; body: string };
 /** 面板呈现方式：modal = 大弹框（默认，兼容既有插件）；page = 工作区内联页面（非模态，覆盖会话区）。 */
-export type HostPluginPanelPresentation = "modal" | "page";
+/**
+ * modal = 近全屏对话框；page = 工作区内联页；popover = 侧栏入口旁的小浮层（面板只有几行控件时用）。
+ */
+export type HostPluginPanelPresentation = "modal" | "page" | "popover";
 export type HostPluginManifest = {
 	schemaVersion: 1;
 	apiVersion: 1;
@@ -120,6 +123,8 @@ export type HostPluginDesktopApi = {
 	install: () => Promise<HostPluginResult<HostPluginCatalog>>;
 	/** Pick and install an unpacked plugin directory (same dialog rule: the renderer never supplies a path). */
 	installDirectory: () => Promise<HostPluginResult<HostPluginCatalog>>;
+	/** 卸载：删掉 userData 里的插件目录并清掉授权；内置示例不可卸载（返回 plugin-builtin）。 */
+	remove: (id: string) => Promise<HostPluginResult<HostPluginCatalog>>;
 	mount: (input: HostPluginMountInput) => Promise<HostPluginResult<HostPluginMount>>;
 	update: (instanceId: string, context: HostPluginContext) => Promise<HostPluginResult<void>>;
 	unmount: (instanceId: string) => Promise<HostPluginResult<void>>;
