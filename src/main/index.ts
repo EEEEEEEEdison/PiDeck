@@ -982,6 +982,8 @@ async function copyCatalogSession(sessionId: string) {
 		importedSourceId: entry.importedSourceId,
 		// 复制产物同为 fork 身份（文件头带 parentSession，与运行中 clone 同源标记）。
 		forked: true,
+		// 命令层权威标题：上面刚把 (fork) 名写进产物文件，扫描竞态不得把标题留在正文兜底上。
+		titleAuthority: "command",
 		// 模型偏好/思考档位随复制继承：静态副本不会产生新的 model_change，不继承则重启后模型选择器为空。
 		model: entry.model,
 		thinkingLevel: entry.thinkingLevel,
@@ -1087,6 +1089,8 @@ async function replaceAgentSession(agentId: string, replace: () => Promise<unkno
 				// 会话名，见上方 appendSessionForkSuffix）；开关由调用方按语义传入，
 				// switch_session / 历史会话换绑等不标记。
 				forked: options?.markForked,
+				// 命令层权威标题：上面刚把 (fork) 名写进新会话文件，扫描竞态不得把标题留在正文兜底上。
+				titleAuthority: "command",
 				// 重发/编辑 fork 后的子会话文件里没有新的 model_change，扫描回读拿不到模型；
 				// 不从源会话继承的话，重启后模型选择器为空、激活也不会重放该会话的模型偏好。
 				model: originEntry?.model,
