@@ -5359,6 +5359,7 @@ export const zhCN = {
 	"agent.tips.composerModes": "底栏左侧可切换计划、目标、生图等模式",
 	"agent.tips.multiSelect": "悬停自己的消息可多选分享为文本 / Markdown / 图片",
 	"agent.tips.settingsExtras": "设置里有用量统计、桌面宠物、Web 服务与飞书机器人",
+	"agent.tips.sessionStatusPlacement": "设置 →「外观设置」的会话状态位置能把待办、修改文件、子代理挪到右侧边栏",
 	"agent.tips.pasteAttach": "输入框可以直接粘贴图片、拖入文件当附件",
 	"agent.tips.messageActions": "悬停自己的消息可重发、在输入框中编辑或 fork 成新会话",
 	"agent.tips.sessionSort": "右键项目 →「会话排序」，可按最近活跃、创建时间或标题排列",
