@@ -7,6 +7,14 @@
  * 「命令被模型回答了」。这里把「哪些命令由桌面接管」收敛成一处判定，
  * 新增接管命令时只改这一个文件 + 对应处理分支。
  *
+ * `/hotkeys` 同类：pi 的 builtin 斜杠命令（`dist/core/slash-commands.js` 的
+ * BUILTIN_SLASH_COMMANDS）只在交互式 TUI 里被处理（只被 modes/interactive 引用），
+ * RPC 的 prompt 路径只尝试 extension 命令与模板/技能展开（docs/rpc-commands.md 也
+ * 明说 builtin 命令「would not execute if sent via prompt」），所以它必须桌面接管，
+ * 否则同样落到「命令被模型回答」。其余同类 builtin（copy/export/share/session/
+ * settings/clone）桌面已有等价入口，直接在 AppUtils 的隐藏表里不列（见
+ * HIDDEN_DESKTOP_BUILTIN_COMMAND_NAMES）。
+ *
  * 注意：不在这里判定 `/logout` 这类需要更多上下文的命令；未列出的命令一律
  * 归类为 `text`（照旧发给 pi）。
  */
@@ -19,6 +27,8 @@ export type ComposerSlashCommand =
 	| { kind: "compact"; prompt: string }
 	/** `/login [providerId]`：打开凭证登录弹框；带参数时预选该供应商。 */
 	| { kind: "login"; providerId?: string }
+	/** `/hotkeys`：打开设置里的快捷键页（pi 的 builtin 在 RPC 模式下不执行）。 */
+	| { kind: "hotkeys" }
 	/** 普通消息：照旧发给 pi（含 pi 自己实现的其他斜杠命令）。 */
 	| { kind: "text" };
 
@@ -46,5 +56,6 @@ export function classifyComposerSlashCommand(message: string): ComposerSlashComm
 				.split(/\s+/)[0] ?? "";
 		return PROVIDER_ID_PATTERN.test(argument) ? { kind: "login", providerId: argument } : { kind: "login" };
 	}
+	if (/^\/hotkeys\s*$/.test(trimmed)) return { kind: "hotkeys" };
 	return { kind: "text" };
 }

@@ -269,6 +269,15 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			options.openProviderLogin?.(slashCommand.providerId);
 			return;
 		}
+		if (slashCommand.kind === "hotkeys") {
+			// `/hotkeys` 跳设置里的快捷键页：pi 的 builtin 斜杠命令在 RPC 模式下不执行，
+			// 发下去只会得到「命令被模型回答了」。同样不写乐观气泡、不占 sending 锁。
+			clearComposerSnapshot(sourceSessionId, keepDraft);
+			resetComposerEphemeralUi(keepDraft);
+			sendingSessionIdsRef.current.delete(sourceSessionId);
+			store.set(openSettingsAtom, { tab: "shortcuts" });
+			return;
+		}
 		const isNewCommand = slashCommand.kind === "new";
 		const isCompactCommand = slashCommand.kind === "compact";
 		if (isNewCommand) {
