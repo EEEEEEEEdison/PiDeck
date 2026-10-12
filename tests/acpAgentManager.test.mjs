@@ -37,7 +37,8 @@ function fakeAgentProcess(t, { handler = () => undefined } = {}) {
 			const frame = JSON.parse(line);
 			frames.push(frame);
 			if (frame.method && frame.id !== undefined) {
-				const outcome = handler(frame);
+				// 第二参数 { writeFromCli }:用例可在应答前先推通知(模拟 ACP 规范的 load 重放时序)
+				const outcome = handler(frame, { writeFromCli: (obj) => stdout.write(`${JSON.stringify(obj)}\n`) });
 				if (outcome?.__error) {
 					stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id, error: { code: outcome.code ?? -32000, message: outcome.message ?? "fail" } })}\n`);
 				} else if (outcome !== undefined) {
@@ -216,6 +217,55 @@ test("未声明 loadSession 时直接 session/new(不带旧 sessionId)", async (
 	const news = lastProc().methodFrames("session/new");
 	assert.equal(news.length, 1);
 	assert.equal(news[0].params.sessionId, undefined);
+});
+
+test("新建:tab.sessionId 必须回填 agent 侧会话 id(coordinator buildAttachPatch 据此把 acpSessionId 落 catalog;缺失则重开历史会话永远 session/new 新建、历史丢失)", async (t) => {
+	const { createAgent, manager } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-fresh" };
+			return {};
+		},
+	});
+	const fresh = await createAgent();
+	assert.equal(manager.list().find((tab) => tab.id === fresh.id)?.sessionId, "sess-fresh", "session/new 后 tab.sessionId = agent 侧会话 id");
+});
+
+test("恢复:load 成功后 tab.sessionId 同样回填(load 回来的会话 id 才是 catalog 要持久化的身份)", async (t) => {
+	const { manager } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+			if (frame.method === "session/load") return { sessionId: "sess-restored" };
+			if (frame.method === "session/new") return { sessionId: "should-not-happen" };
+			return {};
+		},
+	});
+	const tab = await manager.create({ projectId: "p1", deckSessionId: "deck-1", backend: "acp", agentPreset: "gemini", acpSessionId: "sess-old" });
+	assert.equal(manager.list().find((item) => item.id === tab.id)?.sessionId, "sess-restored");
+});
+
+test("恢复:load 重放的 session/update(ACP 规范:agent 先重放历史再回 load 响应)不得被 sessionId 过滤丢弃", async (t) => {
+	const { manager, events } = harness(t, {
+		handler: (frame, { writeFromCli }) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+			if (frame.method === "session/load") {
+				// 模拟规范行为:先推全部历史重放,再应答 session/load
+				writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-old", update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: "earlier question" } } } });
+				writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-old", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "earlier answer" } } } });
+				return { sessionId: "sess-old" };
+			}
+			if (frame.method === "session/new") return { sessionId: "should-not-happen" };
+			return {};
+		},
+	});
+	const tab = await manager.create({ projectId: "p1", deckSessionId: "deck-1", backend: "acp", agentPreset: "gemini", acpSessionId: "sess-old" });
+	await waitFor(() => {
+		const flushed = events.messages.filter((payload) => payload.agentId === tab.id);
+		return flushed.length > 0 && flushed.at(-1).messages.length >= 2;
+	}, "load 重放历史投影为消息");
+	const messages = manager.getMessages(tab.id);
+	assert.equal(messages.filter((message) => message.role === "user").at(-1)?.text, "earlier question", "重放的用户消息保留");
+	assert.equal(messages.filter((message) => message.role === "assistant").at(-1)?.text, "earlier answer", "重放的助手消息保留");
 });
 
 test("sendPrompt:流式 update 投影为消息,stopReason 结算后回 idle", async (t) => {

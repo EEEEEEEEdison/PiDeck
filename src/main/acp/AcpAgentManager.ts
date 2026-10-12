@@ -328,9 +328,15 @@ export class AcpAgentManager implements SessionAgentGateway {
 		// -32602 Invalid params(实测), 会话创建即失败冒泡成首条消息发送失败。
 		let setup: AcpSessionSetupResult | undefined;
 		if (resumeSessionId && runtime.agentInfo.capabilities.loadSession) {
+			// ACP 规范:agent 先经 session/update 重放历史、再回 load 响应。重放期 client
+			// 手里只有请求参数里的旧 sessionId,必须提前挂到 runtime 上,否则
+			// handleSessionUpdate 的 sessionId 过滤会把整段重放历史全部丢弃。
+			runtime.acpSessionId = resumeSessionId;
 			try {
 				setup = (await conn.request("session/load", { sessionId: resumeSessionId, cwd, mcpServers: [] }, HANDSHAKE_TIMEOUT_MS)) as AcpSessionSetupResult;
 			} catch (error) {
+				// 回退新建:清掉临时身份,load 失败后 CLI 迟到的孤儿 update 不再混进新会话。
+				runtime.acpSessionId = "";
 				this.deps.logger?.warn("acp", `session/load failed, falling back to session/new: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		}
@@ -339,6 +345,11 @@ export class AcpAgentManager implements SessionAgentGateway {
 		}
 		if (!setup?.sessionId || typeof setup.sessionId !== "string") throw new Error("ACP session/new returned no sessionId");
 		runtime.acpSessionId = setup.sessionId;
+		// tab.sessionId 镜像 agent 侧会话 id(与 DSH 的 tab.sessionId=host id 同契约):
+		// SessionRuntimeCoordinator 的 buildAttachPatch / prompt dispatch / restart 都以
+		// 它为键把 acpSessionId 落 catalog。缺失则 acpSessionId 永不持久化,重开历史
+		// 会话只能 session/new 新建,历史全部丢失。
+		runtime.tab.sessionId = setup.sessionId;
 		if (typeof setup.title === "string" && setup.title.trim()) runtime.title = setup.title.trim();
 		// configOptions 规范路径(取代旧 modes):模型/思考档/模式枚举,渲染层选择器数据源
 		runtime.configOptions = Array.isArray(setup.configOptions) ? setup.configOptions : undefined;
