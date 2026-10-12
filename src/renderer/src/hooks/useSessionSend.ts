@@ -577,10 +577,15 @@ export function useSessionSend(options: UseSessionSendOptions) {
 					state: { status: "error", requestId, error: deliveryError },
 				});
 				options.showError?.(toastMessage, 4000);
-				// ACP 首启失败回收：激活从未成功（status 仍 draft，agent 侧会话未建、无任何消息）
-				// 的 acp 会话是纯垃圾条目（-32602/spawn 失败都走这）——外层删会话并把回填后的
+				// ACP 首启失败回收：激活从未成功（result 无 agentId，agent 侧会话未建、无任何消息）
+				// 的 acp 会话是纯垃圾条目（spawn/session-new 失败都走这）——外层删会话并把回填后的
 				// 草稿搬回引导页，不在历史列表留「xxx agent」空会话。prune 成功即结算：后续状态都指向已删会话。
-				if (!staleRuntime && record?.backend === "acp" && record.status === "draft") {
+				// !result.agentId 是必要条件：runtime 已激活、agent 侧会话已建，只是 prompt 被 agent
+				// 拒收（如网关 token 失效的 -32000 Authentication required）时，会话与错误现场都必须保留。
+				// 不能只靠 record.status === "draft"：catalog 的 promoteToActive 是 void 异步写，
+				// 失败帧到达时渲染层 record 常仍停在 draft，判定会随竞态漂移（2026-10 用户反馈：
+				// 首启失败被弹回引导页，看不到失败原因）。
+				if (!staleRuntime && !result.agentId && record?.backend === "acp" && record.status === "draft") {
 					const pruned = await options.pruneFailedAcpDraft?.(sessionId);
 					if (pruned) {
 						sendingSessionIdsRef.current.delete(sourceSessionId);

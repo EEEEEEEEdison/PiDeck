@@ -665,3 +665,53 @@ test("session/prompt 非超时拒绝（JSON-RPC 错误）不补发 session/cance
 	await sleep(120);
 	assert.equal(lastProc().methodFrames("session/cancel").length, 0);
 });
+
+/**
+ * 用户消息主进程侧落库（2026-10 用户反馈：ACP 时间线只有 AI 回复，用户消息不见了）。
+ * ACP 的 user_message_chunk 是 agent 的可选回显，OpenCode 等根本不发；而 agents:message
+ * 是全量替换语义，渲染层的乐观气泡会被第一次 flush 抹掉。
+ */
+test("sendPrompt:agent 不回显时用户消息仍进投影,首条 prompt 兜底标题写回 catalog", async (t) => {
+	const titles = [];
+	const { manager, events, createAgent } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+				if (frame.method === "session/new") return { sessionId: "sess-echo" };
+				if (frame.method === "session/prompt") return { stopReason: "end_turn" }; // 不回显 user_message_chunk
+				return {};
+			},
+		},
+		{ onTitleChanged: (deckSessionId, title) => titles.push({ deckSessionId, title }) },
+	);
+	const tab = await createAgent();
+	const result = await manager.sendPrompt({ agentId: tab.id, message: "修复登录页面的 bug" });
+	assert.equal(result.accepted, true);
+	const flushed = events.messages.at(-1);
+	const user = flushed.messages.find((message) => message.role === "user");
+	assert.ok(user, "用户消息必须由主进程落进投影，不依赖 agent 回显");
+	assert.equal(user.text, "修复登录页面的 bug");
+	assert.equal(flushed.totalLength, flushed.messages.length);
+	assert.deepEqual(titles, [{ deckSessionId: "deck-1", title: "修复登录页面的 bug" }], "首条 prompt 兜底标题必须写回 catalog（ACP 无本地会话文件）");
+	// 第二条 prompt 不得把标题改掉（agent 后续给的标题仍可覆盖，见投影器单测）
+	await manager.sendPrompt({ agentId: tab.id, message: "第二个问题" });
+	assert.equal(titles.length, 1);
+	assert.equal(events.messages.at(-1).messages.filter((message) => message.role === "user").length, 2);
+});
+
+test("sendPrompt 派发失败:撤回刚落的用户条目（不留没有回复的幽灵消息）", async (t) => {
+	const { manager, events, createAgent } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-fail" };
+			if (frame.method === "session/prompt") return { __error: { code: -32000, message: "Authentication required" } };
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	const result = await manager.sendPrompt({ agentId: tab.id, message: "会被拒绝的消息" });
+	assert.equal(result.accepted, false);
+	const flushed = events.messages.at(-1);
+	assert.equal(flushed.messages.filter((message) => message.role === "user").length, 0, "派发失败且 agent 未产出时必须撤回");
+});

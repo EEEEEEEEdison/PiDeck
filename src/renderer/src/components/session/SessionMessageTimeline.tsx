@@ -853,6 +853,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 									sessionId={sessionId}
 									// 行头署名与后端一致：DSH 会话的回复标 dsh，而非 pi
 									backend={session?.backend ?? "pi"}
+									// ACP 会话的回复行头用工具自己的品牌 logo（分不清是哪个 CLI 就失去署名意义）
+									acpToolId={session?.acpToolId}
 									fresh={freshMessageIds.has(item.id)}
 									topFresh={topFreshIds.has(item.id)}
 									onPreviewImage={props.onPreviewImage}

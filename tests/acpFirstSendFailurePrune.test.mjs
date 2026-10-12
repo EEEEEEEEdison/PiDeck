@@ -15,6 +15,10 @@ test("useSessionSend: 拒收时对从未激活的 acp draft 会话触发回收",
 	// 只回收 backend=acp 且 status 仍 draft 的会话：active 会话（历史会话发送失败）
 	// 有真实内容，必须保留供重试/查看
 	assert.match(sendHook, /record\?\.backend === "acp" && record\.status === "draft"/);
+	// 且必须 result 无 agentId（激活从未成功）。2026-10 回归：runtime 已激活、只是 prompt 被
+	// agent 拒收（-32000 Authentication required）时也会走到这里，而 catalog 的 promoteToActive
+	// 是 void 异步写、record 常仍停在 draft——漏掉 !result.agentId 会把唯一错误现场删掉并弹回引导页。
+	assert.match(sendHook, /!staleRuntime && !result\.agentId && record\?\.backend === "acp" && record\.status === "draft"/);
 	assert.match(sendHook, /options\.pruneFailedAcpDraft\?\.\(sessionId\)/);
 	// 回收成功立即结算：后续 sendState 不再写给已删除的会话
 	assert.match(sendHook, /if \(pruned\) \{\s*\n\s*sendingSessionIdsRef\.current\.delete\(sourceSessionId\);\s*\n\s*return;/);

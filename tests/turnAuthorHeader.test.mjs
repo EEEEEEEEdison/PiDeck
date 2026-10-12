@@ -5,9 +5,10 @@ import test from "node:test";
 const turnRow = readFileSync("src/renderer/src/components/session/turn/TurnRow.tsx", "utf8");
 const header = readFileSync("src/renderer/src/components/session/turn/TurnAuthorHeader.tsx", "utf8");
 const backendMark = readFileSync("src/renderer/src/components/session/SessionSourceBadge.tsx", "utf8");
+const timeline = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
 
 test("TurnRow always mounts a Pi/DSH author header, not DSH-only text", () => {
-	assert.match(turnRow, /<TurnAuthorHeader backend=\{props\.backend\} endedAt=\{run\.endedAt\} \/>/);
+	assert.match(turnRow, /<TurnAuthorHeader backend=\{props\.backend\} acpToolId=\{props\.acpToolId\} endedAt=\{run\.endedAt\} \/>/);
 	// 旧策略：Pi 默认不署名、只给 DSH 短标签。时间线行头已改回两边都用 logo。
 	assert.doesNotMatch(turnRow, /props\.backend === "dsh" &&/);
 	assert.doesNotMatch(turnRow, /sessionBackend\.dsh/);
@@ -26,8 +27,13 @@ test("TurnAuthorHeader uses shadcn Avatar logos without a visible name", () => {
 	assert.match(header, /aria-label=\{name\}/);
 	assert.match(header, /sessionBackend\.pi/);
 	assert.match(header, /sessionBackend\.dsh/);
-	// ACP 回复头不能冒充 pi：终端图标 + Agent CLI 名称（工具名在输入框/详情展示）
-	assert.match(header, /isAcp \? <TerminalIcon/);
+	// ACP 回复头不能冒充 pi：按会话绑定的工具显示各家品牌 logo（工具已删则回退通用终端图标），
+	// 名称同理回退通用名「ACP」（用户反馈：只给通用终端图标分不清是哪个 CLI 在回答）
+	assert.match(header, /isAcp \? <AcpToolLogo tool=\{acpTool\}/);
+	assert.match(header, /acpTool\?\.name \?\? t\("sessionBackend\.acp"\)/);
+	assert.match(header, /acpToolId\?: string/);
+	// 工具 id 必须从会话记录一路传到行头（中间断一环就退化成通用图标）
+	assert.match(timeline, /acpToolId=\{session\?\.acpToolId\}/);
 	assert.match(header, /sessionBackend\.acp/);
 	assert.doesNotMatch(header, /<span[^>]*>\{\s*name\s*\}<\/span>/);
 });
