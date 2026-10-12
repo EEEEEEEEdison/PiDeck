@@ -47,5 +47,5 @@ test("品牌名常量与 package.json build.productName 一致（安装版通知
 	const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 	assert.equal(APP_DISPLAY_NAME, "PiDeck");
 	assert.equal(APP_DISPLAY_NAME, pkg.build.productName, "APP_DISPLAY_NAME 必须与 electron-builder 的 productName 保持同一品牌名");
-	assert.notEqual(pkg.name, APP_DISPLAY_NAME, "npm 包名仍是 pi-desktop，这正是不能用 app.getName() 当通知标题的原因");
+	assert.notEqual(pkg.name, APP_DISPLAY_NAME, "npm 包名与产品显示名独立，通知标题固定使用品牌常量");
 });

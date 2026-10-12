@@ -465,7 +465,7 @@ src/
 ```bash
 # 克隆仓库
 git clone https://github.com/ayuayue/PiDeck.git
-cd pi-desktop
+cd PiDeck
 
 # 安装依赖
 npm install

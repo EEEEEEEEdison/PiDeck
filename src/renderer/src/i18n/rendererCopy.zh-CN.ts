@@ -5438,7 +5438,7 @@ export const zhCN = {
 	"health.check.wsl.config": "WSL 兜底配置",
 	"health.check.wsl.config.hint": "Windows 上开启 WSL 兜底却未填发行版，兜底永远不会生效。",
 	"health.check.instance.locks": "单实例锁状态",
-	"health.check.instance.locks.hint": "检查实例锁文件是否残留。旧版本升级被中断会留下锁文件，导致再次启动「双击图标没反应」，需手动删除 ~/.config/pi-desktop/instance-locks 下的锁。",
+	"health.check.instance.locks.hint": "检查实例锁文件是否残留。旧版本升级被中断会留下锁文件，导致再次启动「双击图标没反应」。锁文件位于当前应用数据目录下的 instance-locks 中，可从设置中打开数据目录查看。",
 	...mainProcessZhCN,
 	"update.openRelease": "打开 Release",
 	"update.viewInSettings": "查看设置",

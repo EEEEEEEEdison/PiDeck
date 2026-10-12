@@ -27,7 +27,7 @@ test("generateFallbackAppUpdateConfigYaml 生成合法的 GitHub provider 配置
 	assert.match(yaml, /provider:\s*github/);
 	assert.match(yaml, /owner:\s*ayuayue/);
 	assert.match(yaml, /repo:\s*PiDeck/);
-	assert.match(yaml, /updaterCacheDirName:\s*pi-desktop-updater/);
+	assert.match(yaml, /updaterCacheDirName:\s*pideck-updater/);
 
 	const customYaml = generateFallbackAppUpdateConfigYaml({
 		owner: "test-owner",
@@ -83,7 +83,7 @@ test("ensureAppUpdateConfig: 当默认配置缺失（如便携版）时在 userD
 	assert.equal(writtenFiles.has(expectedFallbackPath), true);
 	const content = writtenFiles.get(expectedFallbackPath);
 	assert.match(content, /provider:\s*github/);
-	assert.match(content, /updaterCacheDirName:\s*pi-desktop-updater/);
+	assert.match(content, /updaterCacheDirName:\s*pideck-updater/);
 });
 
 test("shouldDisableDifferentialDownload: 便携版、缺失默认配置或 E2E 环境下必须禁用差量下载", () => {

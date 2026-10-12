@@ -3,6 +3,15 @@
 > 本文档承接 AGENTS.md 移出的领域运维细节。AGENTS.md 只保留每域一行硬约束速查；
 > 动手改对应模块前，先读本文对应小节。
 
+## 应用命名与历史数据目录迁移
+
+- 三平台显示名统一 `PiDeck`，Dev 通道为 `PiDeck Dev`；npm 包名为 `pideck`，Linux 可执行文件为 `pideck` / `pideck-dev`。Linux 必须显式配置 `linux` / `deb` / `appImage` 的产物名，不能让 `.deb` 回退到 npm 历史名称；Dev 单独覆盖三者，避免空格或继承 stable 的 Debian 替代关系。
+- 正式安装版根为 Windows `%APPDATA%\PiDeck`、macOS `~/Library/Application Support/PiDeck`、Linux `~/.config/PiDeck`（遵循 Electron/XDG 路径）；调试态为 `PiDeck-dev[-<branch>]`，Dev 独立环境为 `PiDeck-channel-dev`。便携版仍为 exe 同级 `data/` / `data-channel-dev/`，显式目录不更名。
+- `userDataNameMigration.ts` 负责正式根与开发根的整目录更名、设置/自动化/目录记录/草稿/飞书配置里的绝对路径和会话 token 改写、pi 会话目录迁移与 `header.cwd` 修复；历史消息正文不改。`devUserDataMigration.ts` 必须在读取 Dev 决策指针之前调用，防止升级后独立环境被误判为未选择。
+- 飞书子目录由 `pi-desktop/` 整体迁到 `feishu/`，保留密文和绑定；路径在实际读写时解析，不在模块导入时缓存，避免早于 `app.setPath`。环境导入兼容两种子目录。改名失败继续旧目录并重试；两代目录并存时使用新目录，但不覆盖、删除或自动合并旧数据。
+- `appBrand.initializeAppBrand` 在 ready 前保留历史运行时名供 Electron 初始化 Linux/macOS 密钥环，ready 时恢复品牌；不能提前改加密身份，否则既有 safeStorage 密文/Cookie 无法使用原密钥。Windows AUMID、macOS bundle ID 和旧 localStorage key 保持兼容身份；旧名只用于兼容，不作为新的安装包或数据目录名。
+- 更新缓存新写入使用 `pideck-updater`，旧缓存可重建，保留不删除。验证入口：`tests/appBrand*.test.mjs`、`tests/*UserData*.test.mjs`、`tests/userData*.test.mjs`、`tests/feishuConfigDirectory.test.mjs`、`tests/feishuSecretStorage.test.mjs`、`tests/channelDataImport.test.mjs`；真实安装与系统密钥环仍需按平台 smoke。
+
 ## README 与官网共用图片（docs/images 单一数据源）
 
 - 微信群二维码这类 README 与 docs-site 都要展示、且会**周期性换图**的资源，唯一数据源固定为 `docs/images/<名>`；**不要在 `docs-site/public/images/` 再存一份**（历史上 `wechat_pay.png` 就是两份拷贝，换图要手工同步两处）。
@@ -106,7 +115,7 @@
 - 现象：`npm run dev` 启动或打开资源弹层/编辑器时报 `Failed to fetch dynamically imported module: http://127.0.0.1:<port>/@fs/.../node_modules/.vite/deps/<chunk>.js?v=<hash>`。不是代码 bug，是渲染进程命中了上一轮预构建的旧模块。
 - 机理：Vite 给 `.vite/deps` 打 `Cache-Control: max-age=31536000, immutable`，缓存键只有「URL + `?v=browserHash`」，而 browserHash 由 lockfile 与配置推导——重新预构建改变 chunk 切分时它可以不变。于是同一 URL 磁盘内容已换、Chromium 仍返回旧副本，旧副本 import 的 chunk 已被删除，Vite 回 504；又因为请求没出网络，Vite「504 → full-reload」的自愈路径也不会触发。
 - 收口：`src/main/devRendererCache.ts` + `src/main/index.ts` 的 `createWindow`，仅在 dev（`shouldUseDevRendererUrl()`）加载 renderer 前 `await` 清一次默认 session 的 HTTP 缓存与 JS 编译缓存；清理失败只记日志，不挡窗口创建。打包态零影响。
-- 逃生开关：`PIDECK_DEV_KEEP_HTTP_CACHE=1` 跳过清理（需要保留 dev 态登录态时）。手工排查用 `grep -rl <chunk后缀> node_modules/.vite/deps/_metadata.json` 与 `%APPDATA%/pi-desktop-dev[-<branch>]/Cache/Cache_Data`：URL 里的 `?v=` 若与当前 metadata 的 browserHash 相同却找不到对应文件，即为陈旧缓存。
+- 逃生开关：`PIDECK_DEV_KEEP_HTTP_CACHE=1` 跳过清理（需要保留 dev 态登录态时）。手工排查用 `grep -rl <chunk后缀> node_modules/.vite/deps/_metadata.json` 与 `%APPDATA%/PiDeck-dev[-<branch>]/Cache/Cache_Data`：URL 里的 `?v=` 若与当前 metadata 的 browserHash 相同却找不到对应文件，即为陈旧缓存。
 - 时序是契约：清理必须 `await` 在 `loadURL` 之前，写在之后等于没清。守卫见 `tests/devRendererCache.test.mjs`。
 
 ## Tab 激活态语言（两种声明约定，2027-10 统一）

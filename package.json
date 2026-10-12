@@ -1,5 +1,5 @@
 {
-  "name": "pi-desktop",
+  "name": "pideck",
   "version": "0.9.0",
   "dshRuntimeVersion": "0.2.0-rc.2",
   "packageManager": "npm@11.6.2",
@@ -256,7 +256,8 @@
       }
     ],
     "extraMetadata": {
-      "main": "out/main/index.js"
+      "main": "out/main/index.js",
+      "productName": "PiDeck"
     },
     "win": {
       "icon": "build/icon.ico",
@@ -294,7 +295,18 @@
         "tar.gz"
       ],
       "category": "Development",
-      "maintainer": "ayuayue <ayuayue@users.noreply.github.com>"
+      "maintainer": "ayuayue <ayuayue@users.noreply.github.com>",
+      "executableName": "pideck",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "deb": {
+      "packageName": "pideck",
+      "artifactName": "${productName}_${version}_${arch}.${ext}",
+      "fpm": [
+        "--replaces=pi-desktop",
+        "--conflicts=pi-desktop",
+        "--provides=pi-desktop"
+      ]
     },
     "appImage": {
       "artifactName": "${productName}-${arch}.${ext}"

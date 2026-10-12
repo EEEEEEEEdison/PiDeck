@@ -1,10 +1,20 @@
-/**
- * 应用品牌名（面向用户可见的系统级文案：通知标题等）。
- *
- * 为什么要有这个常量：`app.getName()` 取的是运行时 package.json 的 `name`/`productName`，
- * 而打包进 asar 的 package.json 只有 npm 包名 `name: "pi-desktop"`（electron-builder 的
- * `build.productName: "PiDeck"` 不会写进 asar），因此**安装版**的系统通知标题会显示
- * `pi-desktop`；dev 态更是随目录名变化（`pi-desktop-dev-<branch>`）。
- * 品牌名是产品事实、不该随打包元数据漂移，故在此固定一处，通知站点统一引用。
- */
+/** 系统通知等用户可见文案统一使用品牌常量，不随通道或 npm 包名变化。 */
 export const APP_DISPLAY_NAME = "PiDeck";
+
+/** Electron 的 Linux/macOS 密钥环标识源自旧运行时名，必须保留以解密既有凭据。 */
+const LEGACY_KEYCHAIN_APP_NAME = "pi-desktop";
+
+type AppBrandLifecycle = {
+	setName: (name: string) => void;
+	once: (event: "ready", listener: () => void) => unknown;
+};
+
+/**
+ * 在 ready 前装配：Electron 在 PostCreateMainMessageLoop 快照密钥环名，随后才发 ready。
+ * 此阶段保持历史标识；ready 时恢复品牌，窗口/菜单/通知不再显示 npm 的内部旧名。
+ * 不能把改名提前到 ready 前，否则旧 safeStorage 密文和 Chromium Cookie 将失去原密钥。
+ */
+export function initializeAppBrand(app: AppBrandLifecycle, displayName: string = APP_DISPLAY_NAME): void {
+	app.setName(LEGACY_KEYCHAIN_APP_NAME);
+	app.once("ready", () => app.setName(displayName));
+}

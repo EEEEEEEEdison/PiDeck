@@ -2,14 +2,15 @@
  * 飞书配置管理
  *
  * 多 Bot CRUD + App Secret 加密存储。
- * 数据持久化到 ~/.pi-desktop/feishu.json
+ * 数据持久化到 userData/feishu/；历史 pi-desktop 子目录首读时整体迁移。
  */
 
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { app, safeStorage } from "electron";
 import type { FeishuBotConfig } from "../../shared/types";
+import { getAppLogger } from "../logging/sharedLogger";
 
 let defaultBotName = "Feishu bot";
 
@@ -21,7 +22,18 @@ export function setFeishuConfigDefaultBotName(name: string): void {
 // ===== 配置文件路径 =====
 
 function getConfigDir(): string {
-	const dir = join(app.getPath("userData"), "pi-desktop");
+	const userData = app.getPath("userData");
+	const dir = join(userData, "feishu");
+	const legacy = join(userData, "pi-desktop");
+	// 保留密文与绑定的原始字节；两代目录并存时不覆盖，改名失败继续读旧配置。
+	if (!existsSync(dir) && existsSync(legacy)) {
+		try {
+			renameSync(legacy, dir);
+		} catch {
+			void getAppLogger()?.warn("migration", "Feishu directory rename failed; continuing on legacy directory");
+			return legacy;
+		}
+	}
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
 	}
@@ -171,19 +183,23 @@ export function getDecryptedBotAppSecret(botId: string): string {
  * removeBinding 不会删除此映射，确保断开重连后能复用已有群组、不重复创建。
  * key 为会话文件路径（sessionPath），value 为飞书群 chatId。
  */
-const SESSION_CHAT_MAP_PATH = join(getConfigDir(), "feishu-session-chat.json");
+// 不能在模块求值时缓存路径：此时主进程可能尚未迁移/setPath，必须在读写边界解析。
+function getSessionChatMapPath(): string {
+	return join(getConfigDir(), "feishu-session-chat.json");
+}
 
 function readSessionChatMap(): Record<string, string> {
 	try {
-		if (!existsSync(SESSION_CHAT_MAP_PATH)) return {};
-		return JSON.parse(readFileSync(SESSION_CHAT_MAP_PATH, "utf-8"));
+		const path = getSessionChatMapPath();
+		if (!existsSync(path)) return {};
+		return JSON.parse(readFileSync(path, "utf-8"));
 	} catch {
 		return {};
 	}
 }
 
 function writeSessionChatMap(map: Record<string, string>): void {
-	writeFileSync(SESSION_CHAT_MAP_PATH, JSON.stringify(map, null, 2), "utf-8");
+	writeFileSync(getSessionChatMapPath(), JSON.stringify(map, null, 2), "utf-8");
 }
 
 /** 根据 sessionPath 查找已有群组 chatId（不受 removeBinding 影响） */
@@ -207,19 +223,22 @@ export function setPersistentChatId(sessionPath: string, chatId: string): void {
  * 为每个稳定 Session 分配一个指定的飞书 Bot。
  * 如果未分配，默认使用连接中的 Bot。
  */
-const SESSION_BOT_MAP_PATH = join(getConfigDir(), "feishu-session-bot.json");
+function getSessionBotMapPath(): string {
+	return join(getConfigDir(), "feishu-session-bot.json");
+}
 
 function readSessionBotMap(): Record<string, string> {
 	try {
-		if (!existsSync(SESSION_BOT_MAP_PATH)) return {};
-		return JSON.parse(readFileSync(SESSION_BOT_MAP_PATH, "utf-8"));
+		const path = getSessionBotMapPath();
+		if (!existsSync(path)) return {};
+		return JSON.parse(readFileSync(path, "utf-8"));
 	} catch {
 		return {};
 	}
 }
 
 function writeSessionBotMap(map: Record<string, string>): void {
-	writeFileSync(SESSION_BOT_MAP_PATH, JSON.stringify(map, null, 2), "utf-8");
+	writeFileSync(getSessionBotMapPath(), JSON.stringify(map, null, 2), "utf-8");
 }
 
 /** 获取某个稳定 Session 指定的 Bot ID，如果未指定返回 undefined。 */

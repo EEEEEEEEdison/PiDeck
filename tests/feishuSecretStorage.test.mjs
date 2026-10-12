@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile, mkdir, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -29,8 +29,9 @@ function makeFakeSafeStorage({ available = true, failDecrypt = false } = {}) {
 	};
 }
 
-async function loadConfigModule({ safeStorage }) {
+async function loadConfigModule({ safeStorage, prepare = async () => {} }) {
 	const tempDir = await mkdtemp(join(tmpdir(), "feishu-secret-"));
+	await prepare(tempDir);
 	const load = createTsSandbox({
 		stubs: {
 			electron: {
@@ -44,7 +45,7 @@ async function loadConfigModule({ safeStorage }) {
 }
 
 async function readStoredConfig(tempDir) {
-	return JSON.parse(await readFile(join(tempDir, "pi-desktop", "feishu.json"), "utf8"));
+	return JSON.parse(await readFile(join(tempDir, "feishu", "feishu.json"), "utf8"));
 }
 
 test("v2：safeStorage 可用时入库带 v2 前缀，解密还原明文", async () => {
@@ -115,13 +116,26 @@ test("v2 解密失败（换机器/系统凭据变化）返回空串，不把密�
 	}
 });
 
-test("兼容：legacy base64 数据（无 v2 前缀）照常解密", async () => {
-	const { mod, tempDir } = await loadConfigModule({ safeStorage: makeFakeSafeStorage() });
+test("旧飞书目录迁到 feishu，密文、群绑定与会话分配原样保留", async () => {
+	const legacy = Buffer.from("legacy-secret-2023", "utf8").toString("base64");
+	const config = { version: 2, bots: [{ id: "legacy-bot", name: "old", enabled: true, appId: "cli_old", appSecret: legacy, requireMention: true }], deletedBotIdsByAppId: {} };
+	const { mod, tempDir } = await loadConfigModule({
+		safeStorage: makeFakeSafeStorage(),
+		prepare: async (dir) => {
+			await mkdir(join(dir, "pi-desktop"));
+			await writeFile(join(dir, "pi-desktop", "feishu.json"), JSON.stringify(config));
+			await writeFile(join(dir, "pi-desktop", "feishu-bindings-legacy-bot.json"), JSON.stringify([{ chatId: "chat-old" }]));
+			await writeFile(join(dir, "pi-desktop", "feishu-session-chat.json"), JSON.stringify({ "/sessions/old.jsonl": "chat-old" }));
+			await writeFile(join(dir, "pi-desktop", "feishu-session-bot.json"), JSON.stringify({ "session-old": "legacy-bot" }));
+		},
+	});
 	try {
-		const legacy = Buffer.from("legacy-secret-2023", "utf8").toString("base64");
-		const config = { version: 2, bots: [{ id: "legacy-bot", name: "old", enabled: true, appId: "cli_old", appSecret: legacy, requireMention: true }], deletedBotIdsByAppId: {} };
-		await writeFile(join(tempDir, "pi-desktop", "feishu.json"), JSON.stringify(config));
 		assert.equal(mod.getDecryptedBotAppSecret("legacy-bot"), "legacy-secret-2023");
+		assert.equal((await readStoredConfig(tempDir)).bots[0].appSecret, legacy);
+		assert.equal(mod.loadBindings("legacy-bot")[0].chatId, "chat-old");
+		assert.equal(mod.getPersistentChatId("/sessions/old.jsonl"), "chat-old");
+		assert.equal(mod.getSessionBotId("session-old"), "legacy-bot");
+		await assert.rejects(access(join(tempDir, "pi-desktop")), { code: "ENOENT" });
 	} finally {
 		await rm(tempDir, { recursive: true, force: true });
 	}

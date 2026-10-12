@@ -23,7 +23,7 @@ const projects: Project[] = [
 	{
 		id: "builtin-chat",
 		name: "Chat",
-		path: "C:/Users/14012/AppData/Roaming/pi-desktop/chat-workspace",
+		path: "C:/Users/14012/AppData/Roaming/PiDeck/chat-workspace",
 		lastOpenedAt: now,
 		pinned: true,
 		sortOrder: -1,
@@ -1154,7 +1154,7 @@ export function createPreviewApi(): PiDesktopApi {
 				releasesUrl: "https://github.com/ayuayue/PiDeck/releases",
 				platform: "win32" as NodeJS.Platform,
 				homeDir: "C:/Users/preview",
-				userDataDir: "C:/Users/preview/AppData/Roaming/pi-desktop",
+				userDataDir: "C:/Users/preview/AppData/Roaming/PiDeck",
 			}),
 			preferredSystemLanguages: async () => (navigator.languages?.length ? [...navigator.languages] : [navigator.language]),
 			networkAddresses: async () => [{ address: "192.168.1.100", interfaceName: "Wi-Fi", cidr: "192.168.1.100/24", isPrivate: true, family: "IPv4" }],

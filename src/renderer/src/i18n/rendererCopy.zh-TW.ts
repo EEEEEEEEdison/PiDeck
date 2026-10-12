@@ -5444,7 +5444,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"health.check.wsl.config": "WSL 兜底配置",
 	"health.check.wsl.config.hint": "Windows 上開啟 WSL 兜底卻未填發行版，兜底永遠不會生效。",
 	"health.check.instance.locks": "單例項鎖狀態",
-	"health.check.instance.locks.hint": "檢查例項鎖檔案是否殘留。舊版本升級被中斷會留下鎖檔案，導致再次啟動「雙擊圖示沒反應」，需手動刪除 ~/.config/pi-desktop/instance-locks 下的鎖。",
+	"health.check.instance.locks.hint": "檢查例項鎖檔案是否殘留。舊版本升級被中斷會留下鎖檔案，導致再次啟動「雙擊圖示沒反應」。鎖檔案位於目前應用程式資料目錄下的 instance-locks 中，可從設定中開啟資料目錄查看。",
 	...mainProcessZhTW,
 	"update.openRelease": "開啟 Release",
 	"update.viewInSettings": "檢視設定",

@@ -39,14 +39,15 @@ import type { PiResourceScope } from "../shared/types/piResources";
 import { createWindowZoomShortcutHandler } from "./windowZoom";
 import { DEFAULT_DEV_USER_DATA_NAME, isSharedDevBranch, readDevGitBranch, resolveDevUserDataDirName, sanitizeDevBranchSegment } from "./devIsolation";
 import { KEEP_DEV_HTTP_CACHE_ENV, clearDevRendererCache } from "./devRendererCache";
-import { isPortablePackagedEnv, resolveAppUserDataDir, resolveChannelDevDataDir, resolvePackagedUserDataDir } from "./portableUserData";
+import { isPortablePackagedEnv, resolveAppUserDataDir, resolvePackagedUserDataDir } from "./portableUserData";
 import { readDataEnvDecision, validateStartupDataEnv, writeDataEnvDecision } from "./dataEnv/dataEnvMarker";
 import { registerDataEnvIpc } from "./ipc/dataEnvIpc";
 import { ChannelSwitchService } from "./update/ChannelSwitchService";
 import { registerChannelSwitchIpc } from "./ipc/channelSwitchIpc";
 import { resolveUpdateChannel } from "./update/channelIdentity";
 import { APP_DEEP_LINK_SCHEME } from "./utils/deepLinkScheme";
-import { APP_DISPLAY_NAME } from "./utils/appBrand";
+import { APP_DISPLAY_NAME, initializeAppBrand } from "./utils/appBrand";
+import { migrateDevUserData } from "./projects/devUserDataMigration";
 import { isMainWindowFocused, shouldAlertNow } from "./notifications/alertFocusGate";
 import { buildToastXml, notificationLaunchUrl, resolveNotificationLogoUri } from "./notifications/notificationToast";
 import { extractFocusTargetFromArgv } from "./utils/focusTarget";
@@ -61,10 +62,12 @@ import { applyTrayLogoStyle, applyWindowLogoStyle, resolveLogoImage } from "./ap
 declare const __PIDECK_DEV_BUILD__: boolean;
 
 // dev 构建（PiDeck Dev 安装包）只影响通知归属（AUMID）与 deep link scheme（pideck-dev://），
-// userData 与正式版**共用** pi-desktop——双通道共用数据目录是刻意决策（2026-09）：
+// userData 与正式版**共用** PiDeck——双通道共用数据目录是刻意决策（2026-09）：
 // 用户在 stable / dev 安装包之间切换不丢 settings / 会话 / 扩展配置。
-// 未打包的 npm run dev 仍隔离到 pi-desktop-dev(±分支后缀)，避免开发调试误写坏真实数据。
+// 未打包的 npm run dev 仍隔离到 PiDeck-dev(±分支后缀)，避免开发调试误写坏真实数据。
 const isDevBuild = !app.isPackaged || __PIDECK_DEV_BUILD__;
+// ready 前只为密钥环保留历史身份，窗口创建前恢复用户可见品牌，避免改 npm 名后旧密文失效。
+initializeAppBrand(app, app.isPackaged && __PIDECK_DEV_BUILD__ ? "PiDeck Dev" : APP_DISPLAY_NAME);
 
 // E2E（Playwright 驱动）静默运行：窗口显示但不抢焦点、不最大化铺满屏，
 // 避免打断用户在其他软件的输入。fixture 通过 env PIDECK_E2E=1 标识。
@@ -75,9 +78,9 @@ const isE2E = process.env.PIDECK_E2E === "1";
 const bootAnchorMs = Date.now();
 
 // userData 决策（三分支判定在 portableUserData.resolveAppUserDataDir，单测覆盖）：
-// - 未打包 npm run dev：功能分支再按 git 分支名拆目录（pi-desktop-dev-<branch>），
+// - 未打包 npm run dev：功能分支再按 git 分支名拆目录（PiDeck-dev-<branch>），
 //   避免多个 worktree 同时启动共用 catalog / 单实例锁 / DSH home；main/dev 仍用历史目录。
-// - 打包态（stable 与 dev 通道安装包）：共用历史 %APPDATA%/pi-desktop（便携版 exe 同级 data/）。
+// - 打包态（stable 与 dev 通道安装包）：共用 %APPDATA%/PiDeck（便携版 exe 同级 data/）。
 // 必须在读取 settings / 版本单实例锁之前设置。
 let userDataNameMigrationResult: UserDataNameMigration | null = null;
 const isolateDevByGitBranch = !app.isPackaged;
@@ -91,13 +94,22 @@ const gatedExplicitUserDataDir = explicitUserDataDir && (isDevBuild || isE2E) ? 
 // 只有 dev 通道读决策指针：stable 恒走共用目录，不碰 dev 独立目录。
 // 决策指针与独立数据目录同处（规格 §6）：读到 null = dev 首启未决策，本会话临时落共用目录运行。
 const updateChannel = resolveUpdateChannel();
-const channelDevDataDir = updateChannel === "dev" ? resolveChannelDevDataDir({ appDataDir: app.getPath("appData"), portableExeDir: process.env.PORTABLE_EXECUTABLE_DIR }) : "";
+const devDirectoryMigration = migrateDevUserData({
+	appDataDir: app.getPath("appData"),
+	homeDir: app.getPath("home"),
+	devDirectoryName: devUserDataDirName,
+	isPackaged: app.isPackaged,
+	channel: updateChannel,
+	portableExeDir: process.platform === "win32" ? process.env.PORTABLE_EXECUTABLE_DIR?.trim() : undefined,
+	explicitDir: gatedExplicitUserDataDir,
+});
+const channelDevDataDir = updateChannel === "dev" ? devDirectoryMigration.channelDevDataDir : "";
 const devDataMode: DataEnvMode | null = updateChannel === "dev" ? (readDataEnvDecision(channelDevDataDir)?.dataMode ?? null) : null;
 // 共用数据目录：既是 setPath 的 shared 分支，也是数据导入的源目录（与 fallbackSharedDir 同源，规格 §6 单向正式→dev）。
 // 安装版历史根已由 %APPDATA%/pi-desktop 更名为 %APPDATA%/PiDeck：老用户首启在这里做一次性迁移
 // （整目录改名 + 持久化绝对路径改写 + pi 会话 encoded 目录改名），迁移失败自动回退旧目录、下次启动重试。
 // Windows 便携 exe 落到 PORTABLE_EXECUTABLE_DIR/data，与安装版隔离（否则同版本单实例锁让第二次启动静默退出）。
-// 迁移只接管「打包且非显式目录」这条路径；未打包调试态有自己的 -dev 目录，不参与更名。
+// 此处只迁移正式根；调试态与 Dev 独立环境在读取决策指针前由 migrateDevUserData 迁移。
 const packagedAppDataDir = app.getPath("appData");
 const fallbackSharedDataDir = resolvePackagedUserDataDir({ appData: packagedAppDataDir });
 if (app.isPackaged && !gatedExplicitUserDataDir) {
@@ -114,7 +126,7 @@ app.setPath(
 	"userData",
 	resolveAppUserDataDir({
 		explicitDir: gatedExplicitUserDataDir,
-		unpackagedDevDir: join(app.getPath("appData"), devUserDataDirName),
+		unpackagedDevDir: devDirectoryMigration.unpackagedDevDir,
 		isPackaged: app.isPackaged,
 		channel: updateChannel,
 		devDataMode,
@@ -169,7 +181,7 @@ if (app.isPackaged) {
 }
 
 // 按「应用版本」隔离的单实例：同版本复用窗口，不同版本可并行。
-// 双通道共用 userData（pi-desktop）的前提下，锁文件仍按版本分文件：
+// 双通道共用 userData（PiDeck）的前提下，锁文件仍按版本分文件：
 // stable 与 dev 通道版本号不同即可并存；同版本（含同版本的两个通道包）会复用窗口。
 // 不用 Electron requestSingleInstanceLock：它按 userData 全局互斥，会导致 0.6.7 与 0.6.8 无法同开。
 // focus 回调稍后挂到 focusMainWindow（定义在文件后部），避免顶层 TDZ。
@@ -3711,16 +3723,14 @@ app
 		});
 		// userData 更名迁移（pi-desktop → PiDeck）在 setPath 前同步执行，当时还没有日志器；
 		// 结果在此补记，失败/回退路径必须可从日志诊断。
-		if (userDataNameMigrationResult?.kind === "migrated") {
-			void appLogger.info("migration", "userData directory renamed to PiDeck", {
-				from: userDataNameMigrationResult.oldPath,
-				to: userDataNameMigrationResult.userDataPath,
-				sessionDirs: userDataNameMigrationResult.migratedSessionDirs.length,
-			});
-		} else if (userDataNameMigrationResult?.kind === "failed") {
-			void appLogger.warn("migration", "userData rename failed; continuing on legacy dir, retry next launch", {
-				reason: userDataNameMigrationResult.reason,
-			});
+		for (const result of [userDataNameMigrationResult, ...devDirectoryMigration.migrations]) {
+			if (result?.kind === "migrated") {
+				void appLogger.info("migration", "userData directory renamed to PiDeck", { from: result.oldPath, to: result.userDataPath, sessionDirs: result.migratedSessionDirs.length });
+			} else if (result?.kind === "failed") {
+				void appLogger.warn("migration", "userData rename failed; continuing on legacy dir, retry next launch", { reason: result.reason });
+			} else if (result?.kind === "skipped" && result.reason === "collision") {
+				void appLogger.warn("migration", "Legacy and PiDeck directories coexist; preserving both without merging", { userDataPath: result.userDataPath });
+			}
 		}
 		rpcLogger = new RpcLogger();
 		// 用量统计：pi-tracker 的 <agentDir>/analytics/usage.jsonl
@@ -5009,7 +5019,7 @@ app
 				// 仅失焦提醒：窗口在前台时不弹系统通知（设置默认关闭时不生效）
 				if (!shouldAlertNow(settings.alertOnlyWhenUnfocused, isMainWindowFocused(mainWindow))) return;
 				const isSuccess = run.status === "succeeded";
-				// 品牌常量而非 app.getName()：安装版 asar 内 package.json 只有 name=pi-desktop，标题会露馅
+				// 系统通知固定使用品牌常量，不受运行时通道/打包元数据影响
 				const appName = APP_DISPLAY_NAME;
 				const body = isSuccess
 					? mainCopy("mainNotification.automationDone", { name: task.name })
