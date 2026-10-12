@@ -1095,10 +1095,16 @@ export function GitPanel(props: GitPanelProps) {
 					finishCommitGen(scopeKey, { message });
 					showNotice(t("git.generateCommitMessageDone"), 2500);
 				} else {
-					// 主进程空 diff / 模型空输出都走 ok+空串；用户侧必须看到失败，否则会以为还在转
+					// 现在只有「模型返回空串」走到这里：空暂存区 / 无仓库 / 读 diff 失败都有独立错误码（#338）
 					finishCommitGen(scopeKey);
 					showNotice(t("git.generateCommitMessageEmpty"), 5000, "warning");
 				}
+			} else if (result.code === "GIT_COMMIT_EMPTY_DIFF") {
+				finishCommitGen(scopeKey);
+				// 后端以真实暂存区为准判定为空：本地 UI 分组可能是旧快照（#338 的误报场景），
+				// 提示先暂存后顺便走一次静默刷新，否则按钮守卫会继续放行、用户反复点出同一提示。
+				showNotice(t("git.stageBeforeGenerateCommitMessage"), 5000, "warning");
+				void refresh(true);
 			} else if (result.code === "GIT_COMMIT_MODEL_REQUIRED") {
 				finishCommitGen(scopeKey);
 				// 未配置：提示 + “去设置”直达常用设置的 Git 摘要栏（覆盖上次记住的其它 tab）
@@ -1125,7 +1131,7 @@ export function GitPanel(props: GitPanelProps) {
 			finishCommitGen(scopeKey);
 			showNotice(commitGenNoticeText(err instanceof Error ? err.message : undefined, t("git.generateCommitMessageFailed")), 5000, "error");
 		}
-	}, [openSettings, props.generateCommitMessage, props.projectId, repoScopeKey, groups.index.length]);
+	}, [openSettings, props.generateCommitMessage, props.projectId, repoScopeKey, groups.index.length, refresh]);
 
 	const doPush = async () => {
 		if (!props.push || mutationRunningRef.current) return;

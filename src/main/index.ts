@@ -2578,6 +2578,8 @@ function registerIpc() {
 	// quitApp 先置 isQuitting，与 dataEnv/托盘「退出」同一写法，防 closeToTray 吞掉退出。
 	const channelSwitchService = new ChannelSwitchService({
 		currentChannel: () => updateChannel,
+		// 版本守卫数据源：目标通道最新版不高于当前版本时判「已是最新」，不提供下载。
+		currentVersion: () => app.getVersion(),
 		netFetch: (url, init) => net.fetch(url, init),
 		getTempDir: () => app.getPath("temp"),
 		spawnInstaller: (filePath) => {

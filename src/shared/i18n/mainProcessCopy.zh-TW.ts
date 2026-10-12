@@ -46,6 +46,8 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"git.commitMessageModelRequired": "未配置提交摘要生成模型，請前往 設定 > Git 配置供應商與模型後重試。",
 	"git.commitMessageBusy": "上一份提交摘要仍在生成中，請稍候再試。",
 	"git.commitMessageTimeout": "提交摘要生成超時，請重試。",
+	"git.commitMessageEmptyDiff": "沒有暫存的更改，請先暫存更改後再生成提交摘要。",
+	"git.commitMessageNoRepo": "未找到可用的 Git 倉庫目錄，請先開啟或初始化倉庫後重試。",
 	"tray.showWindow": "顯示視窗",
 	"tray.version": "PiDeck v{version}",
 	"tray.checkUpdate": "檢查更新…",

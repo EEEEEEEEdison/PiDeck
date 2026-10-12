@@ -4599,6 +4599,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.channelSwitchToStable": "切換回穩定版",
 	"settings.channelSwitchDialogTitle": "切換更新通道",
 	"settings.channelSwitchQuerying": "正在查詢目標通道最新版本…",
+	"settings.channelSwitchUpToDate": "已是最新版本，無需切換",
+	"settings.channelSwitchUpToDateDetail": "當前 v{version} 已是最新版本，{channel} 通道沒有更新的版本。",
 	"settings.channelSwitchTargetVersion": "目標版本：v{version}",
 	"settings.channelSwitchNotes": "更新說明",
 	"settings.channelSwitchDataModeNotice": "安裝後首次啟動會讓你選擇資料模式",
