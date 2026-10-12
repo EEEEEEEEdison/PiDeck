@@ -16,13 +16,16 @@ function step(state, update) {
 	return projectAcpSessionUpdate(state, update, AGENT);
 }
 
-test("user_message_chunk echoes text and image blocks", () => {
-	let state = step(initialAcpProjection(), { sessionUpdate: "user_message_chunk", content: { type: "text", text: "hello" } });
+test("user_message_chunk merges the blocks of one replayed prompt into a single message", () => {
+	// 规范一次只携带一个 content block;同一 prompt 的文本+图片分多条 update 回放,
+	// 必须并回同一条消息,否则图文 prompt 恢复后被拆成多个气泡。
+	let state = step(initialAcpProjection(), { sessionUpdate: "user_message_chunk", content: { type: "text", text: "hello " } });
+	state = step(state, { sessionUpdate: "user_message_chunk", content: { type: "text", text: "world" } });
 	state = step(state, { sessionUpdate: "user_message_chunk", content: { type: "image", data: "abcd", mimeType: "image/png" } });
-	assert.equal(state.messages.length, 2);
+	assert.equal(state.messages.length, 1);
 	assert.equal(state.messages[0].role, "user");
-	assert.equal(state.messages[0].text, "hello");
-	assert.equal(state.messages[1].images[0].mimeType, "image/png");
+	assert.equal(state.messages[0].text, "hello world");
+	assert.equal(state.messages[0].images[0].mimeType, "image/png");
 	assert.equal(state.replayed, true);
 });
 
@@ -109,6 +112,88 @@ test("session_info_update records title and unknown updates are ignored", () => 
 	state = step(state, { sessionUpdate: "some_future_update", anything: true });
 	assert.equal(state.messages.length, before);
 	assert.equal(state.replayed, true);
+});
+
+test("standard tool_call_update patches retain omitted fields and unwrap content", () => {
+	let state = step(initialAcpProjection(), { sessionUpdate: "tool_call", toolCallId: "tc-standard", title: "Read file", kind: "read", status: "pending", rawInput: { path: "src/a.ts" } });
+	state = step(state, { sessionUpdate: "tool_call_update", toolCallId: "tc-standard", status: "completed", content: [{ type: "content", content: { type: "text", text: "file body" } }] });
+	assert.equal(state.messages.length, 1);
+	assert.equal(state.messages[0].meta.status, "completed");
+	assert.equal(state.messages[0].meta.toolName, "Read file");
+	assert.equal(state.messages[0].meta.kind, "read");
+	assert.equal(state.messages[0].meta.fullText, "file body");
+	assert.equal(state.messages[0].meta.args.path, "src/a.ts");
+	assert.match(state.messages[0].meta.detailText, /file body/);
+	state = step(state, { sessionUpdate: "tool_call_update", toolCallId: "tc-standard", title: "Read src/a.ts", locations: [] });
+	assert.equal(state.messages[0].meta.status, "completed", "omitted status must not reset a completed card to running");
+	assert.equal(state.messages[0].meta.toolName, "Read src/a.ts");
+	assert.equal(state.messages[0].meta.fullText, "file body");
+	assert.equal(state.messages[0].text, "Read src/a.ts");
+	assert.equal(state.messages[0].meta.locations.length, 0);
+	state = step(state, { sessionUpdate: "tool_call_update", toolCallId: "tc-standard", content: [] });
+	assert.equal(state.messages[0].meta.fullText, "", "an empty replacement must clear the previous result");
+	assert.doesNotMatch(state.messages[0].meta.detailText, /file body/);
+});
+
+test("failed tool patches use the existing error-card contract and retain scalar input/output", () => {
+	let state = step(initialAcpProjection(), { sessionUpdate: "tool_call", toolCallId: "tc-error", title: "Run command", kind: "execute", status: "in_progress", rawInput: "git status" });
+	state = step(state, { sessionUpdate: "tool_call_update", toolCallId: "tc-error", status: "failed", rawOutput: "permission denied" });
+	assert.equal(state.messages[0].meta.status, "error");
+	assert.equal(state.messages[0].meta.isError, true);
+	assert.equal(state.messages[0].meta.args, "git status");
+	assert.match(state.messages[0].meta.detailText, /permission denied/);
+	state = step(state, { sessionUpdate: "tool_call_update", toolCallId: "tc-error", title: "Failed command" });
+	assert.equal(state.messages[0].meta.status, "error");
+	assert.match(state.messages[0].meta.detailText, /permission denied/);
+});
+
+test("standard plan entries replace todos, including an empty plan", () => {
+	let state = step(initialAcpProjection(), { sessionUpdate: "plan", entries: [{ content: "Inspect", priority: "high", status: "in_progress" }] });
+	assert.equal(state.todos.length, 1);
+	assert.equal(state.todos[0].content, "Inspect");
+	assert.equal(state.todos[0].status, "in_progress");
+	state = step(state, { sessionUpdate: "plan", entries: [] });
+	assert.equal(state.todos.length, 0);
+});
+
+test("tool content images attach to the card and follow the content table on later patches", () => {
+	let state = step(initialAcpProjection(), {
+		sessionUpdate: "tool_call",
+		toolCallId: "shot",
+		title: "screenshot",
+		kind: "execute",
+		status: "completed",
+		content: [
+			{ type: "content", content: { type: "text", text: "captured" } },
+			{ type: "content", content: { type: "image", data: "abcd", mimeType: "image/png" } },
+		],
+	});
+	assert.equal(state.messages[0].images?.length, 1, "image results must survive projection instead of becoming a lost placeholder");
+	assert.equal(state.messages[0].images[0].data, "abcd");
+	assert.ok(state.messages[0].meta.fullText.includes("captured"));
+	assert.ok(state.messages[0].meta.fullText.includes("[image]"));
+	state = step(state, { sessionUpdate: "tool_call_update", toolCallId: "shot", status: "completed" });
+	assert.equal(state.messages[0].images?.length, 1, "a patch without content keeps the previous result images");
+	state = step(state, { sessionUpdate: "tool_call_update", toolCallId: "shot", content: [{ type: "content", content: { type: "text", text: "text only" } }] });
+	assert.equal(state.messages[0].images, undefined, "replacing the content table clears stale images");
+});
+
+test("history replay separates assistant turns at the next user message", () => {
+	let state = step(initialAcpProjection(), { sessionUpdate: "user_message_chunk", content: { type: "text", text: "Question one" } });
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Answer one" } });
+	state = step(state, { sessionUpdate: "user_message_chunk", content: { type: "text", text: "Question two" } });
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Answer two" } });
+	assert.equal(state.messages.length, 4);
+	assert.equal(state.messages[1].text, "Answer one");
+	assert.equal(state.messages[1].stopReason, "stop");
+	assert.equal(state.messages[3].text, "Answer two");
+});
+
+test("settleAcpTurn maps max_tokens to a length stop instead of error", () => {
+	const state = step(initialAcpProjection(), { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "partial" } });
+	assert.equal(settleAcpTurn(state, "max_tokens").messages[0].stopReason, "length");
+	assert.equal(settleAcpTurn(state, "max_turn_requests").messages[0].stopReason, "length");
+	assert.equal(settleAcpTurn(state, "refusal").messages[0].stopReason, "stop");
 });
 
 test("settleAcpTurn marks stop reason and clears active index", () => {

@@ -52,6 +52,7 @@ import { BackgroundScanCoordinator } from "../sessions/BackgroundScanCoordinator
 import { DIRECTORY_IMPORT_MAX_SUMMARIES } from "../sessions/directorySessionImport";
 import type { DirectorySessionImporter } from "../sessions/DirectorySessionImporter";
 import { registerSessionImageMutationIpc } from "./sessionImageMutationIpc";
+import { acpMessagePage } from "../acp/acpMessagePage";
 
 function isDshModelDiscoveryInput(input: unknown): input is DshModelDiscoveryInput {
 	if (!isRecord(input) || typeof input.settingsNs !== "string" || !input.settingsNs.trim()) return false;
@@ -1007,6 +1008,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 
 	ipcMain.handle(ipcChannels.sessionsCatalogReadMessagePage, async (_event, sessionId: string, before?: number, pageSize?: number, options?: { beforeEntryId?: string }) => {
 		const entry = sessionCatalog.get(sessionId);
+		if (entry?.backend === "acp") return acpMessagePage(readAcpMessages?.(entry.acpSessionId ?? "") ?? [], before, pageSize);
 		// DSH 会话没有 pi 会话文件：历史浏览走 host 的 session.history 事件流翻页
 		// （游标 = 事件 seq），与 pi 的磁盘分页同形状（messages/total/nextBefore）；
 		// 第三条参数在 pi 路径是「轮数」，所以 DSH 这里按 turnCount 传（main 侧换算消息预算）。

@@ -384,26 +384,26 @@ test("permission 审批:select label 映射 optionId 回传;cancel 走 cancelled
 	cli.writeFromCli({
 		jsonrpc: "2.0",
 		id: 777,
-		method: "permission/request",
+		method: "session/request_permission",
 		params: {
 			sessionId: "sess-1",
-			permissions: [{ type: "command", command: "rm -rf build" }],
+			toolCall: { toolCallId: "shell-1", title: "git status", rawInput: { command: "git status" } },
 			options: [
-				{ kind: "allow_once", name: "Allow" },
-				{ kind: "reject_once", name: "Reject" },
+				{ optionId: "allow-command", kind: "allow_once", name: "Allow" },
+				{ optionId: "reject-command", kind: "reject_once", name: "Reject" },
 			],
 		},
 	});
 	await waitFor(() => events.uiRequests.some((payload) => payload.method === "select" && payload.agentId === tab.id), "ui request raised");
 	const request = events.uiRequests.find((payload) => payload.method === "select");
-	assert.equal(request.title, "rm -rf build");
+	assert.equal(request.title, "git status");
 	assert.deepEqual([...request.options], ["Allow", "Reject"]);
-	// 渲染层点 Allow(label)→ manager 映射回 allow_once
+	// 渲染层点 Allow(label)→ manager 映射回原 optionId（不是 kind）
 	const accepted = await manager.sendUIResponse(tab.id, request.requestId, { type: "select", value: "Allow" });
 	assert.equal(accepted.accepted, true);
 	await waitFor(() => cli.frames.some((frame) => frame.id === 777 && frame.result), "respond frame sent");
 	const respondFrame = cli.frames.find((frame) => frame.id === 777 && frame.result);
-	assert.deepEqual(respondFrame.result, { outcome: "selected", optionId: "allow_once" });
+	assert.deepEqual(respondFrame.result, { outcome: { outcome: "selected", optionId: "allow-command" } });
 	// 完成事件让渲染层撤卡
 	assert.ok(events.uiRequests.some((payload) => payload.requestId === request.requestId && payload.completed === true));
 	void sendPromise;
@@ -431,13 +431,14 @@ test("连接死亡:pending 审批全部 cancelled 结算,tab 转 error", async (
 	cli.writeFromCli({
 		jsonrpc: "2.0",
 		id: 888,
-		method: "permission/request",
-		params: { sessionId: "sess-1", permissions: [{ type: "command", command: "cargo build" }], options: [{ kind: "allow_once" }] },
+		method: "session/request_permission",
+		params: { sessionId: "sess-1", toolCall: { toolCallId: "shell-2", title: "cargo build" }, options: [{ optionId: "allow-build", name: "Allow", kind: "allow_once" }] },
 	});
 	await waitFor(() => events.uiRequests.some((payload) => payload.method === "select"), "permission raised");
-	// 进程死亡 → conn.close 先行,管道已断:respond 帧无处可写(正常语义),
-	// 断言只看审批卡撤除(completed)与 tab 终态。
+	// exit 之后仍可能有 stdout 尾帧；Node 在 stdio 关闭后才发 close。
+	// 断言只看审批卡撤除(completed)与 tab 终态，已断管不要求送出回包。
 	cli.proc.emit("exit", 1, null);
+	cli.proc.emit("close", 1, null);
 	await waitFor(() => events.uiRequests.some((payload) => payload.completed === true), "pending permission settled cancelled");
 	const listed = manager.list().find((item) => item.id === tab.id);
 	assert.equal(listed.status, "error");
