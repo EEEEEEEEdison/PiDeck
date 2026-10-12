@@ -29,6 +29,10 @@ test("controller: 回调先搬草稿回引导页再删会话（反序丢输入�
 	const del = controller.indexOf("desktopApi.sessions.deleteRecord(failedSessionId)");
 	const remove = controller.indexOf("store.set(removeSessionStateAtom, failedSessionId)");
 	assert.ok(promote >= 0 && del > promote && remove > del, "回收顺序必须是 promote → deleteRecord → removeSessionState");
-	// 删的是当前会话时切回引导页，不留悬空 currentSessionId
-	assert.match(controller, /store\.get\(currentSessionIdAtom\) === failedSessionId/);
+	// 删的是当前会话时必须把选中清空回引导页：`undefined` 是「没有当前会话」的唯一表达，
+	// 写 GUIDE_BOOTSTRAP_SESSION_ID 会让 App 给一个没有 catalog 记录的虚拟会话挂真实会话面板，
+	// 面板里 session=undefined → 渲染「开始新的 Session」空态（2026‑10 用户反馈：acp 首启失败后
+	// 「跳到了这个页面」，回填的草稿也看不见）。
+	assert.match(controller, /if\s*\(store\.get\(currentSessionIdAtom\)\s*===\s*failedSessionId\)\s*\{\s*\n\s*store\.set\(currentSessionIdAtom,\s*undefined\);/, "删当前会话必须清空选中，landing 在真正的引导页");
+	assert.doesNotMatch(controller, /store\.set\(currentSessionIdAtom,\s*GUIDE_BOOTSTRAP_SESSION_ID\)/, "currentSessionId 不得指向引导页虚拟会话（无 record，会渲染空态面板）");
 });

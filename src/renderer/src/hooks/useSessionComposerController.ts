@@ -1120,11 +1120,16 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			// 反序会让 promote 读不到源会话状态，用户输入丢失。
 			store.set(promoteSessionComposerStateAtom, { fromSessionId: failedSessionId, toSessionId: GUIDE_BOOTSTRAP_SESSION_ID });
 			await desktopApi.sessions.deleteRecord(failedSessionId).catch(() => undefined);
-			// 先切回引导页再删会话：removeSessionStateAtom 发现删的是当前会话会把
-			// currentSessionId 置 undefined，App 会渲染一帧空态引导页再被下一行设回 GUIDE，
-			// 视觉上就是「闪一下」（与用户报的首启闪烁同源）——先设 GUIDE 则 remove 判定不命中不清空。
+			// 先清空选中再删会话：被回收的会话记录消失后，仍指向它的 currentSessionId
+			// 会让 App 给一个查不到记录的会话挂真实面板（面板里 session=undefined →
+			// 渲染「开始新的 Session」空态）。目标状态必须是「没有当前会话」——引导页
+			// 就是 currentSessionId 为 undefined，不能写 GUIDE_BOOTSTRAP_SESSION_ID：
+			// 它只是引导页输入框的虚拟会话 id，同样没有 catalog 记录，写进去看到的
+			// 依旧是那个空态面板、回填的草稿也不可见（2026-10 用户反馈：acp 首启
+			// 失败后「跳到了这个页面」）。先设好再 remove：removeSessionStateAtom
+			// 发现删的不是当前会话就不会二次改写，不会闪。
 			if (store.get(currentSessionIdAtom) === failedSessionId) {
-				store.set(currentSessionIdAtom, GUIDE_BOOTSTRAP_SESSION_ID);
+				store.set(currentSessionIdAtom, undefined);
 			}
 			store.set(removeSessionStateAtom, failedSessionId);
 			return true;
