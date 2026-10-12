@@ -132,6 +132,8 @@ let previewSettings: AppSettings = {
 	autoSessionTitle: true,
 	// Ask 提问系统通知默认关闭：与主进程 SettingsStore 默认一致
 	askNotificationEnabled: false,
+	// 仅失焦提醒开关：与主进程 SettingsStore 默认一致（预览 mock 需覆盖 AppSettings 全部必填字段）
+	alertOnlyWhenUnfocused: false,
 	// 人文关怀提醒开关：与主进程 SettingsStore 默认值保持一致（预览 mock 需覆盖 AppSettings 全部必填字段）
 	agentCountReminderEnabled: true,
 	// 公告通知开关：与主进程 SettingsStore 默认一致（预览 mock 需覆盖 AppSettings 全部必填字段）
