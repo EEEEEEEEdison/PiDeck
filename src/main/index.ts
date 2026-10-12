@@ -358,6 +358,10 @@ import { registerPiDeckMcpIpc } from "./ipc/piDeckMcpIpc";
 import { PiDeckMcpService } from "./mcp/PiDeckMcpService";
 import { HostPluginSessions } from "./plugins/HostPluginSessions";
 import { HostPluginService } from "./plugins/HostPluginService";
+import { resolveBuiltinHostPluginDirectory } from "./plugins/builtinHostPlugins";
+import { BillionContextService } from "./localServices/billionContextService";
+import { LocalServiceRegistry } from "./localServices/LocalServiceRegistry";
+import { createLocalServiceCli, killLocalServiceProcess } from "./localServices/localServiceCli";
 import { HOST_PLUGIN_SCHEME } from "./plugins/hostPluginPolicy";
 import { hostPluginPartitionId, hostPluginWebviewBridge } from "./plugins/hostPluginWebviewPolicy";
 import { PluginDevService } from "./extensions/PluginDevService";
@@ -2646,7 +2650,18 @@ function registerIpc() {
 	registerThemesIpc();
 	// Desktop plugins run without AgentManager/RPC; failure leaves the rest of PiDeck untouched.
 	// 项目显示名闭包在面板挂载时才求值：此处 projectStore 尚未装配。
-	const hostPlugins = new HostPluginService(app.getPath("userData"), sessionCatalog, join(__dirname, "../preload/hostPlugin.js"), (projectId) => projectStore?.get(projectId)?.name);
+	// 本地服务（宿主插件可按名启停 + 开内置浏览器）：适配器与命令全在主进程，插件只能点名。
+	const localServices = new LocalServiceRegistry([
+		new BillionContextService({
+			cli: createLocalServiceCli({
+				command: "bili",
+				// pi 子进程同一套环境清洗：代理/自定义 PATH 都跟着 PiDeck 设置走。
+				env: () => (piLocator ? piLocator.createProcessEnv() : undefined),
+			}),
+			kill: (pid) => killLocalServiceProcess(pid),
+		}),
+	]);
+	const hostPlugins = new HostPluginService(app.getPath("userData"), sessionCatalog, join(__dirname, "../preload/hostPlugin.js"), localServices, (projectId) => projectStore?.get(projectId)?.name);
 	const unregisterHostPlugins = registerHostPluginsIpc(hostPlugins, () => mainWindow);
 	const mcpWarning = (code: string) => {
 		void appLogger.warn("pideck-mcp", "Optional MCP operation rejected", { code });
@@ -2666,7 +2681,8 @@ function registerIpc() {
 		unregisterHostPlugins();
 		hostPlugins.dispose();
 	});
-	void hostPlugins.initialize().catch(() => appLogger.warn("host-plugins", "Optional plugin host initialization failed"));
+	// 内置示例插件（billion-context）首次启动落位；目录已存在则不覆盖。
+	void hostPlugins.initialize(resolveBuiltinHostPluginDirectory(resolveBuiltInExtensionRoots())).catch(() => appLogger.warn("host-plugins", "Optional plugin host initialization failed"));
 	// 插件开发支持：demo/指南落 ~/.pi/agent/extensions（与扩展列表同一 home 来源）
 	const pluginDevService = new PluginDevService(resolveBuiltInExtensionRoots(), () => extensionManager?.userHomeDir ?? homedir());
 	registerPluginDevIpc(pluginDevService, {

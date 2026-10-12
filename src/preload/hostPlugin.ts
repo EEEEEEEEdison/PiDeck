@@ -30,6 +30,12 @@ const api: HostPluginApi = {
 		openExternal: (url) => request<void>({ method: "workbench.openExternal", url }),
 	},
 	network: { request: (input) => request({ method: "network.request", request: input }) },
+	services: {
+		status: (id) => request({ method: "service.status", id }),
+		start: (id) => request({ method: "service.start", id }),
+		stop: (id) => request({ method: "service.stop", id }),
+		openUi: (id) => request<void>({ method: "service.openUi", id }),
+	},
 	onEvent: (listener) => {
 		const handler = (_event: Electron.IpcRendererEvent, event: HostPluginEvent) => listener(event);
 		ipcRenderer.on(ipcChannels.hostPluginEvent, handler);

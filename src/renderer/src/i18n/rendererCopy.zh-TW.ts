@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: cd0668fcb47b3e73a672e37d9e9fd3c0a520e11ec9a0faad2104760355885dab（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: e87325e77d1ddcb87e5fe459287c29c3da8a87153af39f251f613897477cfc8f（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -34,6 +34,12 @@ export const zhTW: Record<TranslationKey, string> = {
 	"hostPlugins.networkDestinations": "允許請求的地址（其他域名和埠不可訪問）",
 	"hostPlugins.networkDataWarning": "此外掛同時申請會話讀取和聯網權限，可以將當前專案的會話內容傳送到宣告的地址。請確認程式碼及接收方可信；PiDeck 不會替外掛判斷上傳內容是否敏感。",
 	"hostPlugins.networkLocalWarning": "本地埠不等於可信服務。請核對監聽該埠的程式和它的介面；PiDeck 不會啟動它，也不會附帶瀏覽器 Cookie 或應用憑據。",
+	"hostPlugins.serviceLocal": "啟停指定本地服務",
+	"hostPlugins.scaffoldServiceLocalHint": "只允許啟停 PiDeck 已實現介面卡的本地服務（如 billion-context），並讓 PiDeck 用內建瀏覽器開啟它的 Web 面板。命令、引數和埠都由 PiDeck 決定，外掛只能點名服務。",
+	"hostPlugins.serviceDestinations": "可控制的本地服務（其他服務不可訪問）",
+	"hostPlugins.serviceLocalWarning": "此外掛可以啟動和停止上面的本地服務，並讓 PiDeck 開啟它的 Web 面板。服務面板通常只監聽 127.0.0.1 且無鑑權，請勿把埠暴露到公網或區域網。",
+	"hostPlugins.scaffoldServices": "可控制的本地服務",
+	"hostPlugins.scaffoldServicesHint": "至少選一個。PiDeck 已實現介面卡的服務才會列在這裡，未實現的寫進清單也會被拒。",
 	"hostPlugins.httpsOrigins": "允許的 HTTPS origin",
 	"hostPlugins.httpsOriginsHint": "只填協議、主機和可選埠，例如 https://api.example.com；不要填路徑、萬用字元或帳號密碼。多個地址用逗號或空格分隔，最多 16 個。",
 	"hostPlugins.localPorts": "允許的本地埠",

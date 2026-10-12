@@ -30,7 +30,7 @@
 }
 ```
 
-- `permissions` 白名单：`sessions.read`（读会话）、`workbench.navigate`（导航时间线）、`workbench.openExternal`（系统浏览器开 https）、`network.https`（受控公网 HTTPS）、`network.local`（受控固定端口本地 HTTP）；未知权限直接拒绝加载。网络权限必须配对应的 `network.httpsOrigins` / `network.localPorts`，每类 1–16 个不重复目的地。`storage` 不需要权限，每插件一个独立命名空间（见下）。
+- `permissions` 白名单：`sessions.read`（读会话）、`workbench.navigate`（导航时间线）、`workbench.openExternal`（系统浏览器开 https）、`network.https`（受控公网 HTTPS）、`network.local`（受控固定端口本地 HTTP）、`service.local`（按名启停 PiDeck 已实现适配器的本地服务）；未知权限直接拒绝加载。网络权限必须配对应的 `network.httpsOrigins` / `network.localPorts`，每类 1–16 个不重复目的地；`service.local` 必须配 `services`（1–8 个，且必须命中 `src/shared/localServices.ts` 白名单）。`storage` 不需要权限，每插件一个独立命名空间（见下）。
 - 资产上限：单文件 4 MiB、整包 16 MiB、100 个文件、目录深度 8；禁止符号链接。
 - 面板 `entry` 必须是包内相对路径且以 `.html` 结尾（拒 `../` 逃逸）；可服务扩展名固定为 `HOST_PLUGIN_MIME`：html/js/mjs/css/json/svg/png/jpg/webp/woff2，`pideck-plugin.json` 自身永不可服务（`asset-not-allowed`）。资产路径只允许 `^[a-zA-Z0-9_./-]+$`（空格/中文文件名无法引用）。可选 `icon` 走 `src/shared/hostPluginIcons.ts` 白名单，可选 `presentation` 只接受 `modal`/`page`，其余值 fail closed 拒装（`src/main/plugins/hostPluginManifest.ts`）。
 
@@ -39,7 +39,7 @@
 - 插件默认禁用。启用动作绑定**整包逐文件 sha256 指纹**（不是版本号）：任何文件变化都会使授权失效并要求重新确认（`plugin-changed`）。
 - manifest 只读一次——哈希与解析消费同一份字节，杜绝「两次读取之间改 permissions 复用旧授权」的 TOCTOU。
 - 运行时重新读取资产还会比对授权时记录的 digest（`plugin-code-changed`）。
-- 授权界面从 `HostPluginPermissionDetails` 的统一清单展示所有能力与精确 HTTPS origins / 本地端口。会话读取 + 联网同时存在时必须警告数据外发风险；本地端口授权必须警告服务可能有写入/管理能力。网络目的地变更同样改变指纹，不沿用旧授权。
+- 授权界面从 `HostPluginPermissionDetails` 的统一清单展示所有能力与精确 HTTPS origins / 本地端口 / 可控制的本地服务。会话读取 + 联网同时存在时必须警告数据外发风险；本地端口授权必须警告服务可能有写入/管理能力；服务控制授权必须警告被控服务的 Web 面板通常无鉴权、不得暴露端口。网络目的地变更同样改变指纹，不沿用旧授权。
 
 ## 运行环境
 
@@ -78,6 +78,17 @@
 - Broker 的请求 AbortController 属于实例 binding；update / unbind / 禁用 / 指纹变化 / dispose 都同步撤销，ViewHost 在 guest 已销毁时也必须 unbind。取消 socket 不回滚服务已经执行的操作。
 - HTTP 4xx/5xx 返回 `{ status, ok: false, body }`；策略/传输失败抛稳定错误码，不泄露 URL、凭据或操作系统诊断。不提供代理、Cookie 登录、流式消费、大文件或命令执行。
 - 独立静态 demo：`docs/examples/host-plugins/example.network/`，首次加载零请求、按钮触发两类网络，不读会话、不自动启动服务；回归只用替身网络。
+
+## 本地服务（`service.local`）
+
+- 链路：`pideck.services.status/start/stop/openUi(id)` → sender-bound Broker → `src/main/localServices/LocalServiceRegistry.ts` → 适配器（当前只有 `billion-context`）。
+- **能力面不扩大**：插件只能传 service id，命令名/参数/端口全部是主进程适配器里的常量（`localServiceCli.ts` 的命令与参数各自过字符白名单，Windows 走 `cmd.exe /d /s /c` 的 `.cmd` 垫片范式，不拼字符串 shell）。未在 `src/shared/localServices.ts` 白名单里的 id 在 manifest 校验阶段就被拒（`invalid-services`）。
+- 双重门：权限 + `manifest.services` 点名。Broker 里四个方法（`status`/`start`/`stop`/`openUi`）逐个登记，不用前缀推断——新增方法忘登记会报错而不是白拿权限。
+- 启停轮询跟着授权绑定走（Broker binding 的 AbortController）：插件被禁用 / 上下文更新 / 面板关闭时立即中断还在等的 `start`/`stop`。
+- 停止只能按 pid 终止（外部 CLI 没有 stop 子命令）：pid 一律来自 `bili doctor --json` 的报告，不猜、不按名字杀。UI 地址同样从报告里取，但只接受 `http://127.0.0.1|localhost:<port>`，防报告被改写成公网地址把内置浏览器带走。
+- 「打开面板」不走插件：Broker 转发 `onOpenBrowser` sink → `hostPluginOpenBrowser` IPC → 渲染层 `workspace.openDrawerForce("browser") + navigateTo(url)`。插件页 CSP 是 `frame-src 'none'`，本来就无法内嵌这类 SPA。
+- 内置示例：`resources/host-plugins/billion-context/` 随包分发（`extraResources` → `resources/host-plugins`），由 `HostPluginManager.seedBuiltin()` 在首次启动落位到 `userData/host-plugins/`；**目标目录已存在就永不覆盖**，且落位不等于授权（同样是 `requiresConsent`，仍需用户按指纹确认）。
+- 新增服务的成本：`src/main/localServices/` 加适配器 + 在 `src/shared/localServices.ts` 登记 ID，插件侧 manifest 校验随之放行。第三方插件无法自行扩展能力面。
 
 ## 存储（`storage`）
 

@@ -1,5 +1,6 @@
 /** Owns local discovery and exact-code consent, independently from pi extension discovery. */
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { join } from "node:path";
 import type { HostPluginCatalog, HostPluginInfo } from "../../shared/types/hostPlugin";
 import { renameWithRetry } from "../utils/fsRetry";
@@ -139,6 +140,36 @@ export class HostPluginManager {
 		}
 		if (previous) await rm(previous, { recursive: true, force: true }).catch(() => undefined);
 		return this.rescan();
+	}
+
+	/**
+	 * 随包内置的示例插件落位：目标目录不存在时复制一份，已存在（用户改过/删过/装过别的版本）永不覆盖。
+	 * 只决定「目录里有没有这个插件」，不影响信任判定——内置插件同样是 requiresConsent，
+	 * 仍需用户在设置页按指纹授权，所以落位本身不构成任何新授权。
+	 */
+	async seedBuiltin(sourceDirectory: string): Promise<void> {
+		await mkdir(this.directory, { recursive: true });
+		const entries: Dirent[] = await readdir(sourceDirectory, { withFileTypes: true }).catch(() => []);
+		for (const entry of entries.slice(0, 16)) {
+			if (!entry.isDirectory() || entry.name.startsWith(".") || !isHostPluginId(entry.name)) continue;
+			const target = join(this.directory, entry.name);
+			if (
+				await stat(target).then(
+					() => true,
+					() => false,
+				)
+			)
+				continue;
+			const temporary = this.temporaryDirectory(".seed");
+			try {
+				await copyHostPluginPackage(join(sourceDirectory, entry.name), temporary);
+				await renameWithRetry(temporary, target);
+			} catch {
+				/* 内置示例落位失败不影响插件系统其余功能 */
+			} finally {
+				await rm(temporary, { recursive: true, force: true }).catch(() => undefined);
+			}
+		}
 	}
 
 	catalog(): HostPluginCatalog {

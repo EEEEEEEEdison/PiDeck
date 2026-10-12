@@ -229,6 +229,7 @@ const hostPlugins: HostPluginDesktopApi = {
 	unmount: (id) => ipcRenderer.invoke(ipcChannels.hostPluginsUnmount, id),
 	onChanged: (callback) => subscribe(ipcChannels.hostPluginsChanged, callback),
 	onNavigate: (callback) => subscribe(ipcChannels.hostPluginNavigate, callback),
+	onOpenBrowser: (callback) => subscribe(ipcChannels.hostPluginOpenBrowser, callback),
 };
 
 const piDeckMcp: PiDeckMcpDesktopApi = {

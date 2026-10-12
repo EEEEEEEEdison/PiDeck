@@ -1,7 +1,14 @@
+import type { LocalServiceStatus } from "../localServices";
+
 /** PiDeck-owned browser plugins. This API never proxies pi SDK or runtime commands. */
-export type HostPluginPermission = "sessions.read" | "workbench.navigate" | "workbench.openExternal" | "network.https" | "network.local";
+export type HostPluginPermission = "sessions.read" | "workbench.navigate" | "workbench.openExternal" | "network.https" | "network.local" | "service.local";
 /** Declared destinations are part of the code fingerprint and require fresh consent when changed. */
 export type HostPluginNetworkPolicy = { httpsOrigins?: string[]; localPorts?: number[] };
+/**
+ * 可点名控制的本地服务（ID 必须命中 shared/localServices 白名单）。
+ * 插件只能给 ID：命令、参数、端口解析都在主进程适配器里，所以这不是「执行任意命令」的口子。
+ */
+export type HostPluginServicePolicy = { ids: string[] };
 /** Bounded text requests only: no browser cookies, Node handles, streams or executable responses. */
 export type HostPluginNetworkRequest = { url: string; method?: "GET" | "POST"; headers?: Record<string, string>; body?: string; timeoutMs?: number };
 export type HostPluginNetworkResponse = { url: string; status: number; ok: boolean; headers: Record<string, string>; body: string };
@@ -16,6 +23,8 @@ export type HostPluginManifest = {
 	description?: string;
 	permissions: HostPluginPermission[];
 	network?: HostPluginNetworkPolicy;
+	/** 与 `service.local` 权限互为必需：声明了权限就必须给服务 ID 列表，反之亦然。 */
+	services?: string[];
 	contributes: {
 		panels: Array<{ id: string; title: string; entry: string; icon?: string; presentation?: HostPluginPanelPresentation }>;
 		commands: Array<{ id: string; title: string; panelId: string }>;
@@ -78,6 +87,11 @@ export type HostPluginRequest =
 	| { method: "storage.delete"; key: string }
 	| { method: "workbench.navigate"; sessionId: string; entryId?: string }
 	| { method: "workbench.openExternal"; url: string }
+	| { method: "service.status"; id: string }
+	| { method: "service.start"; id: string }
+	| { method: "service.stop"; id: string }
+	/** 打开服务自己的 Web UI（不返回地址，由 PiDeck 用内置浏览器打开，避免插件把浏览器引到别处）。 */
+	| { method: "service.openUi"; id: string }
 	| { method: "network.request"; request: HostPluginNetworkRequest };
 export type HostPluginResponse = HostPluginResult<unknown>;
 export type HostPluginMountInput = { pluginId: string; panelId: string; context: HostPluginContext };
@@ -89,6 +103,8 @@ export type HostPluginScaffoldInput = {
 	name: string;
 	permissions: HostPluginPermission[];
 	network?: HostPluginNetworkPolicy;
+	/** 勾了 `service.local` 时必填：脚手架会把服务 ID 写进 manifest。 */
+	services?: string[];
 	presentation: HostPluginPanelPresentation;
 };
 
@@ -110,6 +126,8 @@ export type HostPluginDesktopApi = {
 	onChanged: (listener: () => void) => () => void;
 	/** Plugin-initiated navigation is dispatched by the desktop frame, never executed in the plugin view. */
 	onNavigate: (listener: (input: HostPluginNavigateInput) => void) => () => void;
+	/** 宿主插件要求打开某个本地服务的 Web UI：地址由主进程适配器给，渲染层只负责开内置浏览器。 */
+	onOpenBrowser: (listener: (url: string) => void) => () => void;
 };
 
 /** The only object exposed to a plugin page by its dedicated preload. */
@@ -139,6 +157,16 @@ export type HostPluginApi = {
 	};
 	/** Host-mediated requests to manifest-declared HTTPS origins or IPv4 loopback ports. */
 	network: { request: (input: HostPluginNetworkRequest) => Promise<HostPluginNetworkResponse> };
+	/**
+	 * 本地服务状态与启停；需 manifest 声明 `service.local` 且服务 ID 在白名单内。
+	 * openUi 不返回地址：由 PiDeck 用内置浏览器打开服务自己的 Web UI（面板 CSP 禁 connect/frame，无法内嵌）。
+	 */
+	services: {
+		status: (id: string) => Promise<LocalServiceStatus>;
+		start: (id: string) => Promise<LocalServiceStatus>;
+		stop: (id: string) => Promise<LocalServiceStatus>;
+		openUi: (id: string) => Promise<void>;
+	};
 	onEvent: (listener: (event: HostPluginEvent) => void) => () => void;
 };
 

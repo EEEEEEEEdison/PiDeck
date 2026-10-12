@@ -4,6 +4,7 @@ import { ipcChannels } from "../../shared/ipc";
 import type { HostPluginResult } from "../../shared/types/hostPlugin";
 import type { HostPluginService } from "../plugins/HostPluginService";
 import { isHostPluginId, isHostPluginPermission, isPluginRecord } from "../plugins/hostPluginManifest";
+import { isLocalServiceId } from "../../shared/localServices";
 import { createHostPluginScaffold } from "../plugins/hostPluginScaffold";
 import { parsePluginContext } from "../plugins/hostPluginPolicy";
 import { getAppLogger } from "../logging/sharedLogger";
@@ -86,9 +87,10 @@ export function registerHostPluginsIpc(service: HostPluginService, getWindow: ()
 			// 输入在边界收窄：id/name 只当文本用，权限走 manifest 的同一份白名单，模式只接受两个枚举。
 			if (!isPluginRecord(input) || typeof input.id !== "string" || input.id.length > 80) throw new Error("invalid-plugin");
 			if (typeof input.name !== "string" || input.name.trim().length === 0 || input.name.length > 160 || /[\u0000-\u001f]/.test(input.name)) throw new Error("invalid-plugin");
-			if (!Array.isArray(input.permissions) || input.permissions.length > 3 || !input.permissions.every(isHostPluginPermission)) throw new Error("invalid-plugin");
+			if (!Array.isArray(input.permissions) || input.permissions.length > 6 || !input.permissions.every(isHostPluginPermission)) throw new Error("invalid-plugin");
+			if (input.services !== undefined && (!Array.isArray(input.services) || input.services.length < 1 || input.services.length > 8 || !input.services.every(isLocalServiceId))) throw new Error("invalid-plugin");
 			if (input.presentation !== "modal" && input.presentation !== "page") throw new Error("invalid-plugin");
-			await createHostPluginScaffold(service.manager.directory, { id: input.id, name: input.name, permissions: input.permissions, presentation: input.presentation });
+			await createHostPluginScaffold(service.manager.directory, { id: input.id, name: input.name, permissions: input.permissions, ...(input.services !== undefined ? { services: input.services } : {}), presentation: input.presentation });
 			return service.manager.rescan();
 		}),
 	);
@@ -135,10 +137,15 @@ export function registerHostPluginsIpc(service: HostPluginService, getWindow: ()
 		if (window && !window.isDestroyed()) window.webContents.send(ipcChannels.hostPluginNavigate, input);
 	});
 	const unsubscribeOpenExternal = service.broker.onOpenExternal(openExternal);
+	const unsubscribeOpenBrowser = service.broker.onOpenBrowser((url) => {
+		const window = getWindow();
+		if (window && !window.isDestroyed()) window.webContents.send(ipcChannels.hostPluginOpenBrowser, url);
+	});
 	return () => {
 		unsubscribe();
 		unsubscribeNavigate();
 		unsubscribeOpenExternal();
+		unsubscribeOpenBrowser();
 		for (const channel of [...channels, ipcChannels.hostPluginRequest]) ipcMain.removeHandler(channel);
 	};
 }

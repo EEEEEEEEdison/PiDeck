@@ -1208,8 +1208,14 @@ export function App() {
 
 	const quickTask = useQuickTask({ ready: settingsLoaded, backend: effectiveAgentBackend, upsertSession, selectSession: selectSessionCommand, registerSession: workspaceChrome.registerOpenSession, refreshProjects, getSessionRecord });
 
+	// 外部链接与本地服务 Web UI 共用同一个出口：强制打开 browser 抽屉 + 内置浏览器新建 tab。
+	const openInBrowser = (url: string) => {
+		workspace.openDrawerForce("browser");
+		navigateTo(url);
+	};
+
 	// 桌面插件发起的会话导航：broker 已验权限/归属，这里只注入现有选中动作（复用唯一选中路径）
-	useHostPluginNavigation(selectSessionCommand);
+	useHostPluginNavigation(selectSessionCommand, openInBrowser);
 
 	// 关闭 Tab / 分屏退栏时的焦点切换：只改 currentSession，不碰 Tab 登记
 	useEffect(() => {
@@ -1411,12 +1417,7 @@ export function App() {
 			setSettings(next);
 			showToast(t("settings.restartNotice"));
 		},
-		onOpenInBrowser: (url: string) => {
-			// 外部链接必须强制打开 browser 面板（openDrawer 是 toggle 语义，
-			// 已是 browser 展开时会关抽屉，导致首次点击关抽屉、二次重复入栈）
-			workspace.openDrawerForce("browser");
-			navigateTo(url);
-		},
+		onOpenInBrowser: openInBrowser,
 		onTrustRequest: overlays.setTrustRequest,
 		// 主进程焦点目标（通知点击/右键打开项目）：sessionId 走旧链路选中会话；
 		// projectId/projectPath 由 useSessionWorkspaceChrome 的订阅处理（本回调只透传不重复消费）。

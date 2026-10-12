@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { FolderOpen, FolderPlus, PackagePlus, RefreshCw, Puzzle, BookOpen, FilePlus2 } from "lucide-react";
 import type { HostPluginInfo, HostPluginPermission } from "../../../shared/types/hostPlugin";
+import { LOCAL_SERVICE_IDS } from "../../../shared/localServices";
 import { hostPluginCatalogAtom, hostPluginPanelAtom } from "../atoms/host-plugin-atoms";
 import { settingsOpenAtom } from "../atoms/app-ui-atoms";
 import { desktopApi } from "../desktopApi";
@@ -89,7 +90,13 @@ export function HostPluginsTab() {
 			setBusy(false);
 		}
 	};
-	const togglePermission = (permission: HostPluginPermission, checked: boolean) => setDraft((current) => ({ ...current, permissions: checked ? [...current.permissions, permission] : current.permissions.filter((item) => item !== permission) }));
+	const togglePermission = (permission: HostPluginPermission, checked: boolean) =>
+		setDraft((current) => ({
+			...current,
+			permissions: checked ? [...current.permissions, permission] : current.permissions.filter((item) => item !== permission),
+			// 勾上服务控制时预置 PiDeck 已实现的服务（作者仍可逐个取消）；不预置会因缺 services 被 manifest 校验拒。
+			...(permission === "service.local" && checked && current.services.length === 0 ? { services: [...LOCAL_SERVICE_IDS] } : {}),
+		}));
 	const draftReady = hostPluginScaffoldInput(draft) !== null;
 	return (
 		<section className="flex flex-col gap-4">
@@ -300,6 +307,20 @@ export function HostPluginsTab() {
 								<span id="host-plugin-local-hint" className="text-xs text-muted-foreground">
 									{t("hostPlugins.localPortsHint")}
 								</span>
+							</div>
+						)}
+						{draft.permissions.includes("service.local") && (
+							<div className="flex flex-col gap-2">
+								<Label>{t("hostPlugins.scaffoldServices")}</Label>
+								{LOCAL_SERVICE_IDS.map((id) => (
+									<div key={id} className="flex items-start gap-2">
+										<Checkbox id={`host-plugin-service-${id}`} checked={draft.services.includes(id)} onCheckedChange={(value) => setDraft((current) => ({ ...current, services: value === true ? [...current.services, id] : current.services.filter((item) => item !== id) }))} />
+										<Label htmlFor={`host-plugin-service-${id}`} className="cursor-pointer font-mono text-sm">
+											{id}
+										</Label>
+									</div>
+								))}
+								<span className="text-xs text-muted-foreground">{t("hostPlugins.scaffoldServicesHint")}</span>
 							</div>
 						)}
 						<div className="flex flex-col gap-1.5">
