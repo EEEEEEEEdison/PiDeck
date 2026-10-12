@@ -337,7 +337,7 @@ import { SkillManager } from "./skills/SkillManager";
 import { readSkillContent } from "./skills/readSkillContent";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { BuiltInExtensionsUpdater } from "./extensions/builtInExtensionsUpdater";
-import { resolveBuiltInExtensionsDir, resolveBuiltInExtensionsOverlayDir, resolveVendorNodeModulesDir, type BuiltInExtensionPathRoots } from "./extensions/builtInExtensions";
+import { readEffectiveBuiltInExtensionsVersion, resolveBuiltInExtensionsDir, resolveBuiltInExtensionsOverlayDir, resolveVendorNodeModulesDir, type BuiltInExtensionPathRoots } from "./extensions/builtInExtensions";
 import { createPiProcessExtensionResolvers } from "./extensions/piProcessExtensionResolvers";
 import { registerBuiltInExtensionIpc } from "./ipc/builtInExtensionIpc";
 import { PROMPTS_STORE_CHANNELS, SKILLS_STORE_CHANNELS, registerContentStoreIpc } from "./ipc/contentStoreIpc";
@@ -2676,6 +2676,10 @@ function registerIpc() {
 		configPath: join(app.getPath("userData"), "pideck-mcp.json"),
 		projects: () => projectStore.list().map(({ id, name }) => ({ id, name })),
 		sessions: new HostPluginSessions(sessionCatalog),
+		// 宿主级只读视图（settings_get / extensions_list）：settingsStore 在启动后段才装配，
+		// 闭包在请求时才求值，未就绪返回 null 而不是抛错。
+		settings: () => settingsStore?.get() ?? null,
+		builtInExtensionsVersion: () => readEffectiveBuiltInExtensionsVersion(resolveBuiltInExtensionRoots()),
 		warn: mcpWarning,
 	});
 	const unregisterPiDeckMcp = registerPiDeckMcpIpc(piDeckMcp, () => mainWindow, mcpWarning);

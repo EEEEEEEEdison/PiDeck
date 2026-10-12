@@ -15,6 +15,9 @@ export function PiDeckMcpPanel({ existingNames, disabled, onAdd }: { existingNam
 	const [copied, setCopied] = useState(false);
 	const busy = disabled || host.busy;
 	const changed = host.state && (host.projectIds.length !== host.state.projectIds.length || host.projectIds.some((id) => !host.state?.projectIds.includes(id)));
+	// 「全选」只覆盖当前项目列表；今后新建的项目仍需再次授权（授权快照是显式白名单，不是跟随模式）。
+	const projectCount = host.state?.projects.length ?? 0;
+	const allSelected = projectCount > 0 && host.projectIds.length === projectCount;
 	return (
 		<section className="flex flex-col gap-3" aria-labelledby={`${prefix}-title`}>
 			<div className="flex items-center gap-2">
@@ -34,6 +37,17 @@ export function PiDeckMcpPanel({ existingNames, disabled, onAdd }: { existingNam
 			</p>
 			<fieldset disabled={busy || !host.state} className="flex flex-col gap-2">
 				<legend className="mb-2 text-control font-medium">{t("config.mcp.pideck.projects")}</legend>
+				<div className="flex shrink-0 items-center gap-1">
+					<p role="status" className="flex-1 text-micro text-muted-foreground">
+						{t("config.mcp.pideck.selected", { selected: host.projectIds.length, total: projectCount })}
+					</p>
+					<Button variant="ghost" size="xs" disabled={allSelected} onClick={() => host.setProjectIds(host.state?.projects.map((project) => project.id) ?? [])}>
+						{t("config.mcp.pideck.selectAll")}
+					</Button>
+					<Button variant="ghost" size="xs" disabled={!host.projectIds.length} onClick={() => host.setProjectIds([])}>
+						{t("config.mcp.pideck.selectNone")}
+					</Button>
+				</div>
 				<div className="flex max-h-60 flex-col gap-2 overflow-y-auto">
 					{host.state?.projects.map((project, index) => (
 						<div key={project.id} className="flex shrink-0 items-center gap-2">

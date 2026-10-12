@@ -10,6 +10,7 @@ import test from "node:test";
 
 const { PiDeckMcpService } = loadTsCommonJs("src/main/mcp/PiDeckMcpService.ts");
 const { HostPluginSessions } = loadTsCommonJs("src/main/plugins/HostPluginSessions.ts");
+const { createDefaultAppSettings } = loadTsCommonJs("src/shared/types/settings.ts");
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 async function fixture(t, override = {}) {
@@ -44,7 +45,7 @@ async function fixture(t, override = {}) {
 		{ id: "p2", name: "Private" },
 	];
 	const configPath = join(dir, "mcp-host.json");
-	const service = new PiDeckMcpService({ configPath, projects: () => projects, sessions, warn: () => undefined, ...override });
+	const service = new PiDeckMcpService({ configPath, projects: () => projects, sessions, settings: () => null, builtInExtensionsVersion: () => null, warn: () => undefined, ...override });
 	t.after(async () => {
 		await service.dispose();
 		await rm(dir, { recursive: true, force: true });
@@ -85,9 +86,49 @@ test("MCP is off by default, has no endpoint/credential and exports disabled con
 	assert.match(definition.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
 	assert.deepEqual(
 		(await client.listTools()).tools.map((v) => v.name),
-		["projects_list", "sessions_list", "sessions_get", "sessions_search", "sessions_entries"],
+		["projects_list", "settings_get", "extensions_list", "sessions_list", "sessions_get", "sessions_search", "sessions_entries"],
 	);
 	for (const tool of (await client.listTools()).tools) assert.equal(tool.annotations.readOnlyHint, true);
+});
+
+test("宿主级工具 settings_get / extensions_list 只要求服务授权，不绑定项目白名单", async (t) => {
+	const settings = createDefaultAppSettings();
+	settings.removedBuiltInExtensions = ["pi-deck-todo.ts"];
+	const { service } = await fixture(t, { settings: () => settings, builtInExtensionsVersion: () => "1.2.3" });
+	await service.setAccess({ enabled: true, projectIds: ["p1"] });
+	const { client } = await connect(t, service);
+
+	const hostSettings = await client.callTool({ name: "settings_get" });
+	assert.equal(hostSettings.isError, undefined);
+	assert.equal(hostSettings.structuredContent.data.agent.backend, settings.defaultAgentBackend);
+	assert.equal(hostSettings.structuredContent.data.app.language, settings.language);
+	const extensions = await client.callTool({ name: "extensions_list" });
+	assert.equal(extensions.structuredContent.data.builtInVersion, "1.2.3");
+	assert.equal(
+		extensions.structuredContent.data.builtIn.some((entry) => entry.id === "pi-deck-todo.ts" && entry.enabled),
+		false,
+	);
+	assert.equal(
+		extensions.structuredContent.data.builtIn.some((entry) => entry.id === "pi-deck-shell-proxy.ts" && entry.enabled),
+		true,
+	);
+
+	// 白名单收窄会同时轮换令牌（旧令牌立即失效），所以重新取一份连接；宿主级工具仍不要求项目。
+	await service.setAccess({ enabled: true, projectIds: ["p2"] });
+	const rotated = (await connect(t, service)).client;
+	assert.equal((await rotated.callTool({ name: "settings_get" })).isError, undefined);
+	assert.equal((await rotated.callTool({ name: "sessions_get", arguments: { projectId: "p1", sessionId: "s1" } })).isError, true);
+});
+
+test("宿主端口未就绪时宿主级工具返回空数据而不是报错或暴露内部错误码", async (t) => {
+	const { service } = await fixture(t);
+	await service.setAccess({ enabled: true, projectIds: ["p1"] });
+	const { client } = await connect(t, service);
+	for (const name of ["settings_get", "extensions_list"]) {
+		const result = await client.callTool({ name });
+		assert.equal(result.isError, undefined, `${name} 在宿主未就绪时不应报错`);
+		assert.equal(result.structuredContent.data, null);
+	}
 });
 
 test("real MCP client reads scoped metadata/search and bounded historical pages without image bytes or paths", async (t) => {
@@ -190,14 +231,14 @@ test("enabled consent survives restart with the same endpoint/token; disabled co
 	await service.setAccess({ enabled: true, projectIds: ["p1"] });
 	const initial = plain(await service.connection());
 	await service.dispose();
-	const restarted = new PiDeckMcpService({ configPath, projects: () => projects, sessions, warn: () => undefined });
+	const restarted = new PiDeckMcpService({ configPath, projects: () => projects, sessions, settings: () => null, builtInExtensionsVersion: () => null, warn: () => undefined });
 	t.after(() => restarted.dispose());
 	assert.deepEqual(plain(await restarted.connection()), initial);
 	const { client } = await connect(t, restarted);
 	assert.equal((await client.callTool({ name: "projects_list" })).structuredContent.data[0].id, "p1");
 	await restarted.setAccess({ enabled: false, projectIds: [] });
 	await restarted.dispose();
-	const stopped = new PiDeckMcpService({ configPath, projects: () => projects, sessions, warn: () => undefined });
+	const stopped = new PiDeckMcpService({ configPath, projects: () => projects, sessions, settings: () => null, builtInExtensionsVersion: () => null, warn: () => undefined });
 	t.after(() => stopped.dispose());
 	assert.equal((await stopped.getState()).running, false);
 	assert.equal(JSON.parse(await readFile(configPath, "utf8")).token, "");
@@ -208,7 +249,7 @@ test("corrupt and oversized consent files fail closed without overwriting them",
 	await service.dispose();
 	for (const contents of ["{corrupt", " ".repeat(256 * 1024 + 1)]) {
 		await writeFile(configPath, contents);
-		const broken = new PiDeckMcpService({ configPath, projects: () => projects, sessions, warn: () => undefined });
+		const broken = new PiDeckMcpService({ configPath, projects: () => projects, sessions, settings: () => null, builtInExtensionsVersion: () => null, warn: () => undefined });
 		try {
 			const state = await broken.getState();
 			assert.equal(state.running, false);
@@ -232,7 +273,7 @@ test("port conflict leaves saved consent visible so the user can disable it perm
 		blocker.listen(Number(port), "127.0.0.1", resolve);
 	});
 	t.after(() => new Promise((resolve) => blocker.close(resolve)));
-	const blocked = new PiDeckMcpService({ configPath, projects: () => projects, sessions, warn: () => undefined });
+	const blocked = new PiDeckMcpService({ configPath, projects: () => projects, sessions, settings: () => null, builtInExtensionsVersion: () => null, warn: () => undefined });
 	t.after(() => blocked.dispose());
 	const state = await blocked.getState();
 	assert.equal(state.running, false);
@@ -245,7 +286,7 @@ test("port conflict leaves saved consent visible so the user can disable it perm
 test("failed consent persistence closes the newly bound listener and returns a safe error", async (t) => {
 	const { service, dir, projects, sessions } = await fixture(t);
 	await service.dispose();
-	const failed = new PiDeckMcpService({ configPath: dir, projects: () => projects, sessions, warn: () => undefined });
+	const failed = new PiDeckMcpService({ configPath: dir, projects: () => projects, sessions, settings: () => null, builtInExtensionsVersion: () => null, warn: () => undefined });
 	t.after(() => failed.dispose());
 	await failed.getState();
 	await assert.rejects(failed.setAccess({ enabled: true, projectIds: ["p1"] }), /config-write-failed/);
@@ -274,7 +315,7 @@ test("revocation requested during initialization wins over persisted enabled sta
 	const { service, projects, sessions, configPath } = await fixture(t);
 	await service.setAccess({ enabled: true, projectIds: ["p1"] });
 	await service.dispose();
-	const restarted = new PiDeckMcpService({ configPath, projects: () => projects, sessions, warn: () => undefined });
+	const restarted = new PiDeckMcpService({ configPath, projects: () => projects, sessions, settings: () => null, builtInExtensionsVersion: () => null, warn: () => undefined });
 	t.after(() => restarted.dispose());
 	const state = await restarted.setAccess({ enabled: false, projectIds: [] });
 	assert.equal(state.enabled, false);
@@ -324,5 +365,5 @@ test("disconnected requests keep their IO budget until settled, then release slo
 	await new Promise((r) => setImmediate(r));
 	const recovered = await list();
 	assert.equal(recovered.status, 200, "SDK shutdown must not strand completed request slots");
-	assert.equal((await recovered.json()).result.tools.length, 5);
+	assert.equal((await recovered.json()).result.tools.length, 7);
 });

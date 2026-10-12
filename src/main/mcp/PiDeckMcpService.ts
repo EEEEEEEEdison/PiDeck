@@ -2,8 +2,10 @@
 import { randomBytes } from "node:crypto";
 import type { PiDeckMcpAccess, PiDeckMcpProject, PiDeckMcpState } from "../../shared/types/piDeckMcp";
 import type { McpConfigFile } from "../../shared/types/mcp";
+import type { AppSettings } from "../../shared/types/settings";
 import { emptyPiDeckMcpConfig, piDeckMcpAccessSchema, readPiDeckMcpConfig, writePiDeckMcpConfig, type PiDeckMcpConfig } from "../config/piDeckMcpConfig";
 import type { HostPluginSessions } from "../plugins/HostPluginSessions";
+import { buildPiDeckMcpExtensionsView, buildPiDeckMcpSettingsView } from "./piDeckMcpViews";
 import { createPiDeckMcpServer } from "./piDeckMcpTools";
 import { PiDeckMcpHttpServer } from "./PiDeckMcpHttpServer";
 
@@ -20,6 +22,9 @@ export class PiDeckMcpService {
 			configPath: string;
 			projects: () => PiDeckMcpProject[];
 			sessions: Pick<HostPluginSessions, "list" | "get" | "search" | "entries">;
+			/** 宿主级端口：设置存储晚于本服务构造，闭包只在请求时求值；未就绪返回 null。 */
+			settings: () => AppSettings | null;
+			builtInExtensionsVersion: () => string | null;
 			warn: (code: string) => void;
 		},
 	) {
@@ -98,6 +103,15 @@ export class PiDeckMcpService {
 				createPiDeckMcpServer({
 					sessions: this.deps.sessions,
 					projects: () => this.deps.projects().filter((p) => this.config.projectIds.includes(p.id)),
+					// 宿主级视图每次请求现算：设置改完无需重启服务即生效，也不会缓存敏感快照。
+					settings: () => {
+						const current = this.deps.settings();
+						return current ? buildPiDeckMcpSettingsView(current) : null;
+					},
+					extensions: () => {
+						const current = this.deps.settings();
+						return current ? buildPiDeckMcpExtensionsView({ settings: current, builtInVersion: this.deps.builtInExtensionsVersion() }) : null;
+					},
 					authorize,
 				}),
 			this.deps.warn,

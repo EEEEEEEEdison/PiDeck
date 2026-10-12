@@ -1,13 +1,13 @@
 # PiDeck MCP 服务（API v1）
 
-PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明确授权项目的只读会话数据**。它与宿主插件共用会话读取实现，但有独立的授权和生命周期，不借用插件身份、不启动或控制 pi 会话。
+PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明确授权项目的只读会话数据**，以及**宿主自身的配置摘要与内置扩展加载状态**（后者不属于任何项目）。它与宿主插件共用会话读取实现，但有独立的授权和生命周期，不借用插件身份、不启动或控制 pi 会话。
 
 服务已列入 PiDeck 的 MCP 推荐服务目录，**首次使用默认关闭**：不监听端口、不创建令牌、不自动改写 pi 的 `mcp.json`。这里的“公共服务”指公开的调用接口，不是公网服务。
 
 ## 启用与接入
 
 1. 在 PiDeck 的 MCP 配置页，选择推荐服务中的 **PiDeck（本地只读服务）**。
-2. 勾选允许读取的项目，再点击“授权并启用本地服务”。授权不跟随当前选中的项目或标签变化。
+2. 勾选允许读取的项目（列表上方有“全选 / 全不选”，只作用于当前列表），再点击“授权并启用本地服务”。授权不跟随当前选中的项目或标签变化，**也不会自动覆盖今后新建的项目**：新增项目后需重新进入本页勾选并应用。
 3. 接入 pi：点击“添加到当前 pi 配置（禁用）”。仅新增 `pideck` 条目，保留其他服务和配置；已存在本地或继承的同名条目时不覆盖。然后在 MCP 配置中单独启用该条目，由 **pi 原生 MCP 客户端**建立连接。
 4. 接入其他客户端：点击“复制连接配置”，按客户端要求填写 **Streamable HTTP URL** 和 `Authorization` 请求头。`enabled`、`exposure` 是 pi 配置项，其他客户端可能不接受它们。
 
@@ -41,6 +41,7 @@ PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明�
 - 项目只输出 `id`、`name`；会话元信息不暴露磁盘文件名。历史投影去掉 `cwd`、`parentSession`、`sessionFile`、`filePath` 字段与图片块中的二进制/引用，但**不是通用脱敏器**，不会清洗用户文字、工具结果中嵌入的秘密或路径。
 - 项目删除、会话归属改变或撤权后拒绝继续访问；异步历史读取返回前再次校验授权。fork 祖先沿用宿主插件的同项目校验，不合并其他项目的源文件。
 - 服务自身不执行终端命令、不读任意路径、不修改会话、不访问网络、不读取插件私有存储。没有启用服务、扩大权限或导出令牌的 MCP 工具。
+- `settings_get` / `extensions_list` 描述宿主自身，**不受项目白名单影响**（设置与内置扩展不属于任何项目）：只要服务处于授权状态就能读。两者只输出 `src/main/mcp/piDeckMcpViews.ts` 里的显式允许清单——不含令牌、代理 URL（可能带凭据）、pi/DSH/git 等可执行文件路径、自定义镜像地址、`acpTools` 环境变量、用户自写文本（快速消息）与任何插件私有存储；设置页新增字段默认不可见。它们也不跑 `pi` 进程、不扫扩展目录、不访问网络，只读保存的设置快照与内置清单常量。
 - 返回的是保存的历史条目投影，不是模型请求上下文重建。历史中的用户文字、工具输出等均为不可信数据，不应当作客户端的新指令。对 `context_edit`、compaction 等条目的解释不能等同于“这是模型当前收到的消息”。
 
 授权文件位于应用 `userData/pideck-mcp.json`，与 pi 客户端配置独立。文件仅由 `src/main/config/piDeckMcpConfig.ts` 读写，原子替换；POSIX 权限为 `0600`，Windows 依赖用户数据目录 ACL。损坏、格式不匹配或超过 256 KiB 时拒绝启动，不在读取阶段覆盖原文件。令牌不进入状态快照或日志。
@@ -48,6 +49,8 @@ PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明�
 ## 工具契约
 
 所有工具带 `readOnlyHint: true`、`destructiveHint: false`。项目和会话 ID 必须来自列表结果，不能传文件路径代替；对象入参拒绝未声明字段。
+
+`settings_get` 与 `extensions_list` 是**宿主级**工具：不接收 `projectId`，也不受项目白名单影响，只要求服务处于授权状态。`extensions_list.builtIn[].enabled` 表示“按当前设置是否会通过 `-e` 注入 pi 进程”（含用户移除与 opt-in 判定，与 `listActiveBuiltInExtensionPaths` 同口径），但**不检查扩展文件是否实际存在**；`injectionDisabled`（`piRpcNoExtensions`）为真时整批内置扩展都不注入，此时 `enabled` 只是配置状态而非生效状态。
 
 成功同时返回 MCP `content`（JSON 文本）和 `structuredContent`：
 
@@ -58,6 +61,8 @@ PiDeck 可作为本机 MCP 服务，向 pi 和其他兼容客户端开放**明�
 | 工具 | 参数 | `data` |
 | --- | --- | --- |
 | `projects_list` | 无；`arguments` 可省略或传 `{}` | `[{ id, name }]`，仅授权项目 |
+| `settings_get` | 无；`arguments` 可省略或传 `{}` | `{ app, agent, workspace }`，PiDeck 自身配置摘要；宿主未就绪时为 `null` |
+| `extensions_list` | 无；`arguments` 可省略或传 `{}` | `{ builtInVersion, injectionDisabled, builtIn, removedBuiltInExtensions, enabledBuiltInExtensions, disabledExtensions }`；宿主未就绪时为 `null` |
 | `sessions_list` | `projectId`，可选 `offset`（默认 0，整数 0–100000） | `{ sessions, nextOffset }`，每页最多 100 条，按更新时间倒序 |
 | `sessions_get` | `projectId`、`sessionId` | 单个会话元信息 |
 | `sessions_search` | `projectId`、`query`（1–500 字符），可选 `limit`（默认 20，1–100） | 会话元信息数组；标题的不区分大小写子串搜索，**不是全文搜索** |
@@ -128,11 +133,12 @@ try {
 - `src/main/mcp/PiDeckMcpService.ts`：授权、令牌、启动/关闭与重启恢复。
 - `src/main/mcp/PiDeckMcpHttpServer.ts`：回环 HTTP、认证、请求限额。
 - `src/main/mcp/piDeckMcpTools.ts`：API v1 工具；会话行为复用 `HostPluginSessions`。
+- `src/main/mcp/piDeckMcpViews.ts`：`settings_get` / `extensions_list` 的允许清单投影（纯函数，不产生副作用）。
 - `src/main/ipc/piDeckMcpIpc.ts`：只允许桌面主窗口主帧管理。
 - `src/renderer/src/config/PiDeckMcpPanel.tsx`、`src/renderer/src/hooks/usePiDeckMcp.ts`：显式授权与敏感配置交接。
 
 ```sh
-node --test tests/piDeckMcp.test.mjs tests/piDeckMcpIpc.test.mjs tests/piDeckMcpUi.test.mjs tests/mcpServiceCatalog.test.mjs
+node --test tests/piDeckMcp.test.mjs tests/piDeckMcpHostViews.test.mjs tests/piDeckMcpIpc.test.mjs tests/piDeckMcpUi.test.mjs tests/mcpServiceCatalog.test.mjs
 ```
 
 测试使用隔离临时目录、真实 MCP SDK 客户端和本机临时端口，不读写用户配置、不调用模型或连接外部服务。
