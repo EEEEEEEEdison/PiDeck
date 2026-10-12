@@ -27,6 +27,7 @@ import { isDevToolsShortcut, toggleMainWindowDevTools } from "./devTools";
 import { isShortcutInput, refreshShortcutBindings } from "./appShortcuts";
 // 主进程复用共享的接管型扩展识别规则（与渲染层横幅单一来源；纯函数无依赖）。
 import { detectThirdPartyMcpExtensions } from "../shared/mcpThirdParty";
+import { composeAppTitle } from "../shared/appTitle";
 import { PiResourceConfigService } from "./config/PiResourceConfigService";
 import { isPackageSource, projectExtensionEnabled, projectExtensionFiltered } from "./config/PiResourceConfigService";
 import { runPackageRootRuleRepair, type PackageRootRuleRepairDeps } from "./config/piPackageRootRuleRepair";
@@ -358,6 +359,10 @@ import { registerPiDeckMcpIpc } from "./ipc/piDeckMcpIpc";
 import { PiDeckMcpService } from "./mcp/PiDeckMcpService";
 import { HostPluginSessions } from "./plugins/HostPluginSessions";
 import { HostPluginService } from "./plugins/HostPluginService";
+import { resolveBuiltinHostPluginDirectory } from "./plugins/builtinHostPlugins";
+import { BillionContextService } from "./localServices/billionContextService";
+import { LocalServiceRegistry } from "./localServices/LocalServiceRegistry";
+import { createLocalServiceCli, killLocalServiceProcess } from "./localServices/localServiceCli";
 import { HOST_PLUGIN_SCHEME } from "./plugins/hostPluginPolicy";
 import { hostPluginPartitionId, hostPluginWebviewBridge } from "./plugins/hostPluginWebviewPolicy";
 import { PluginDevService } from "./extensions/PluginDevService";
@@ -1618,9 +1623,10 @@ focusExistingWindow = handleVersionFocusRequest;
 
 function setupTray() {
 	// 托盘图标跟随设置里的「Logo 风格」；resolveLogoImage 按风格选 build/icon.png 或 icon-pi-tui.png
-	// （均由 electron-vite 的 ?asset 后缀解析，打包后也能正确定位）。
+	// （均由 electron-vite 的 ?asset 后缀解析，打包后也能正确定位）；custom 风格读设置里的自定义图。
 	// 资源缺失时降级回 classic iconPath：托盘必须建得出来——closeToTray 开启时它是唯一的唤回入口。
-	const icon = resolveLogoImage(settingsStore.get().logoStyle)?.image ?? nativeImage.createFromPath(iconPath);
+	const trayLogoSettings = settingsStore.get();
+	const icon = resolveLogoImage(trayLogoSettings.logoStyle, trayLogoSettings.logoCustomImage)?.image ?? nativeImage.createFromPath(iconPath);
 
 	/** 创建托盘实例；首次创建与自愈重建共用同一条路径，避免两处行为漂移。 */
 	const createTrayInstance = (): Tray => {
@@ -1921,6 +1927,9 @@ function configureBrowserPanelWebviewHost(window: BrowserWindow): void {
 async function createWindow() {
 	applyNativeThemeSource(settingsStore.get());
 	const windowOptions = settingsStore.createWindowOptions();
+	// 窗口首帧图标必须在这里定：启动阶段的 applyWindowLogoStyle 早于建窗执行（那时 mainWindow 还是 null），
+	// 只靠那一处会永远落回 build/icon.png —— 冷启动时任务栏/Alt-Tab 图标跟不住 logoStyle。
+	const initialWindowLogo = resolveLogoImage(settingsStore.get().logoStyle, settingsStore.get().logoCustomImage);
 	const showMainWindowImmediately = shouldShowMainWindowImmediately();
 	const sourcePreloadPath = join(__dirname, "../preload/index.js");
 	const mainPreloadPath = await prepareMainPreloadPath();
@@ -1982,9 +1991,10 @@ async function createWindow() {
 		height: startupWindowBounds.height,
 		minWidth: MIN_WINDOW_WIDTH,
 		minHeight: MIN_WINDOW_HEIGHT,
-		// 多 worktree 并行 dev：标题带分支名，任务栏/Alt-Tab 一眼区分窗口
-		title: isolateDevByGitBranch && !isSharedDevBranch(devGitBranch) ? `PiDeck · ${devGitBranch}` : "PiDeck",
-		icon: iconPath,
+		// 多 worktree 并行 dev：标题带分支名，任务栏/Alt-Tab 一眼区分窗口；
+		// 显示名称走 composeAppTitle 与渲染层 document.title 同源（后者会覆盖此处的初值）
+		title: composeAppTitle(settingsStore.get().appDisplayName, isolateDevByGitBranch && !isSharedDevBranch(devGitBranch) ? devGitBranch : undefined),
+		icon: initialWindowLogo?.image ?? iconPath,
 		frame: windowOptions.frame,
 		titleBarStyle: windowOptions.titleBarStyle,
 		...(windowOptions.trafficLightPosition ? { trafficLightPosition: windowOptions.trafficLightPosition } : {}),
@@ -2646,7 +2656,18 @@ function registerIpc() {
 	registerThemesIpc();
 	// Desktop plugins run without AgentManager/RPC; failure leaves the rest of PiDeck untouched.
 	// 项目显示名闭包在面板挂载时才求值：此处 projectStore 尚未装配。
-	const hostPlugins = new HostPluginService(app.getPath("userData"), sessionCatalog, join(__dirname, "../preload/hostPlugin.js"), (projectId) => projectStore?.get(projectId)?.name);
+	// 本地服务（宿主插件可按名启停 + 开内置浏览器）：适配器与命令全在主进程，插件只能点名。
+	const localServices = new LocalServiceRegistry([
+		new BillionContextService({
+			cli: createLocalServiceCli({
+				command: "bili",
+				// pi 子进程同一套环境清洗：代理/自定义 PATH 都跟着 PiDeck 设置走。
+				env: () => (piLocator ? piLocator.createProcessEnv() : undefined),
+			}),
+			kill: (pid) => killLocalServiceProcess(pid),
+		}),
+	]);
+	const hostPlugins = new HostPluginService(app.getPath("userData"), sessionCatalog, join(__dirname, "../preload/hostPlugin.js"), localServices, (projectId) => projectStore?.get(projectId)?.name);
 	const unregisterHostPlugins = registerHostPluginsIpc(hostPlugins, () => mainWindow);
 	const mcpWarning = (code: string) => {
 		void appLogger.warn("pideck-mcp", "Optional MCP operation rejected", { code });
@@ -2666,7 +2687,8 @@ function registerIpc() {
 		unregisterHostPlugins();
 		hostPlugins.dispose();
 	});
-	void hostPlugins.initialize().catch(() => appLogger.warn("host-plugins", "Optional plugin host initialization failed"));
+	// 内置示例插件（billion-context）首次启动落位；目录已存在则不覆盖。
+	void hostPlugins.initialize(resolveBuiltinHostPluginDirectory(resolveBuiltInExtensionRoots())).catch(() => appLogger.warn("host-plugins", "Optional plugin host initialization failed"));
 	// 插件开发支持：demo/指南落 ~/.pi/agent/extensions（与扩展列表同一 home 来源）
 	const pluginDevService = new PluginDevService(resolveBuiltInExtensionRoots(), () => extensionManager?.userHomeDir ?? homedir());
 	registerPluginDevIpc(pluginDevService, {
@@ -3554,7 +3576,7 @@ function registerIpc() {
 			// 快捷键覆盖可能随备份一起被恢复：同步刷新主进程生效绑定，无需重启
 			refreshShortcutBindings(settingsStore.get());
 			// Logo 风格也可能随备份恢复：同步刷新窗口/Dock 图标
-			applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow);
+			applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow, settingsStore.get().logoCustomImage);
 			void piModelCapabilityCache?.refresh().catch(() => undefined);
 		},
 	});
@@ -4742,7 +4764,7 @@ app
 		// 快捷键覆盖从磁盘载入后立即刷新主进程生效绑定（此后 settings:update 路径实时刷新）
 		refreshShortcutBindings(settingsStore.get());
 		// Logo 风格：启动时按已加载设置刷新窗口/Dock 图标（此后 settings:update 路径实时刷新）
-		applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow);
+		applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow, settingsStore.get().logoCustomImage);
 		piModelCapabilityCache = new PiModelCapabilityCache({
 			// 模型能力水合分两档（详见 docs/pi-model-capability-plan.md）：
 			// - 快速档（默认，loadExtensions=false）：--no-extensions。实测 418 模型下

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile, copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ipcChannels } from "../../shared/ipc";
+import { APP_DISPLAY_NAME_MAX_LENGTH, CUSTOM_LOGO_DATA_URL_MAX_LENGTH } from "../../shared/types/settings";
 import { DEFAULT_IMAGE_GEN_OUTPUT_FORMAT, DEFAULT_IMAGE_GEN_SIZE, DEFAULT_IMAGE_GEN_WATERMARK, parseImageGenOutputFormat, parseImageGenSize, parseImageGenWatermark } from "../../shared/imageGenParams";
 import {
 	createDefaultExternalEditorSettings,
@@ -139,6 +140,9 @@ const defaultSettings: AppSettings = {
 	accent: "default",
 	themeSkin: "classic-green",
 	logoStyle: "pi-tui",
+	// 自定义 logo 图（data URL）与显示名称：默认空 = 未启用，旧 settings.json 缺这两个键也走这里
+	logoCustomImage: "",
+	appDisplayName: "",
 	customThemeOverrides: {},
 	backgroundImage: "",
 	backgroundImageOpacity: 0.8,
@@ -731,9 +735,24 @@ export class SettingsStore {
 		if ("sessionStatusPlacement" in safePatch && parseSessionStatusPlacement(safePatch.sessionStatusPlacement) !== safePatch.sessionStatusPlacement) {
 			delete safePatch.sessionStatusPlacement;
 		}
-		// Logo 风格只接受已知枚举，非法值保持原设置（缺省 classic 由默认值完成）。
-		if ("logoStyle" in safePatch && safePatch.logoStyle !== "classic" && safePatch.logoStyle !== "pi-tui") {
+		// Logo 风格只接受已知枚举，非法值保持原设置（缺省 pi-tui 由默认值完成）。
+		if ("logoStyle" in safePatch && safePatch.logoStyle !== "classic" && safePatch.logoStyle !== "pi-tui" && safePatch.logoStyle !== "custom") {
 			delete safePatch.logoStyle;
+		}
+		// 自定义 logo 图：只收内联 data:image/*（挡住本地路径/远程 URL），并封顶长度——base64 图会直接进设置文件。
+		if ("logoCustomImage" in safePatch) {
+			const logoImage = safePatch.logoCustomImage;
+			const usable = typeof logoImage === "string" && (logoImage === "" || (logoImage.startsWith("data:image/") && logoImage.length <= CUSTOM_LOGO_DATA_URL_MAX_LENGTH));
+			if (!usable) delete safePatch.logoCustomImage;
+		}
+		// 显示名称：非字符串/超长丢弃（保持原设置），两端空白裁掉；裁完为空 = 回落默认 PiDeck。
+		if ("appDisplayName" in safePatch) {
+			const displayName = safePatch.appDisplayName;
+			if (typeof displayName !== "string" || displayName.trim().length > APP_DISPLAY_NAME_MAX_LENGTH) {
+				delete safePatch.appDisplayName;
+			} else {
+				safePatch.appDisplayName = displayName.trim();
+			}
 		}
 		// 会话 Tab 最大宽度：非有限数值直接丢弃（保持原设置），合法值钳到 80–400。
 		if ("sessionTabMaxWidth" in safePatch) {

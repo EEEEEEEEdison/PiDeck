@@ -296,8 +296,10 @@ export function createPreviewApi(): PiDesktopApi {
 			mount: async () => ({ ok: false, code: "desktop-only" }),
 			update: async () => ({ ok: false, code: "desktop-only" }),
 			unmount: async () => ({ ok: false, code: "desktop-only" }),
+			remove: async () => ({ ok: false, code: "desktop-only" }),
 			onChanged: () => () => undefined,
 			onNavigate: () => () => undefined,
+			onOpenBrowser: () => () => undefined,
 		},
 		clipboard: clipboardStub,
 		// 资源管理器右键菜单预览桩：预览环境无注册表操作，一律报不支持

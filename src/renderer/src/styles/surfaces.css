@@ -324,13 +324,7 @@
   background: var(--color-bg-panel);
 }
 
-/* 标签栏 */
-.browser-tab.active {
-  background: var(--color-bg-panel);
-  color: var(--color-text-primary);
-  border-bottom: 2px solid var(--color-accent);
-  margin-bottom: -1px;
-}
+/* 标签栏：tab 自身外观走 Tailwind（对齐中间栏文件 tab），此处只保留原生关闭钮 */
 .browser-tab-close {
   width: 16px;
   height: 16px;

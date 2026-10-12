@@ -87,6 +87,10 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "customTheme", tab: "appearance", itemKey: "settings.sectionCustomThemes" },
 	{ field: "backgroundImage", tab: "appearance", itemKey: "settings.backgroundImage" },
 	{ field: "backgroundImageOpacity", tab: "appearance", itemKey: "settings.backgroundImage" },
+	// 品牌自定义三项：都紧跟「主题与背景」里的 Logo 行（自定义图与风格联动，但不合并——图与风格各自可单独改）
+	{ field: "logoStyle", tab: "appearance", itemKey: "settings.logoStyle" },
+	{ field: "logoCustomImage", tab: "appearance", itemKey: "settings.logoCustomImage" },
+	{ field: "appDisplayName", tab: "appearance", itemKey: "settings.appDisplayName" },
 	{ field: "zoomFactor", tab: "appearance", itemKey: "settings.zoomFactor" },
 	{ field: "fontSize", tab: "appearance", itemKey: "settings.fontSize" },
 	{ field: "uiFontSize", tab: "appearance", itemKey: "settings.uiFontSize" },

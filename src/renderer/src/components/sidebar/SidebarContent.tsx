@@ -301,7 +301,7 @@ export function SidebarContent(props: SidebarContentProps) {
 					{/* 定时任务入口：放在新建/搜索下面，避免藏在底栏 Dock 里不好找 */}
 					<AutomationDockButton />
 					{/* 宿主插件面板入口：与定时任务同区，无已启用面板时组件自身不渲染 */}
-					<HostPluginDockButtons />
+					<HostPluginDockButtons projectId={props.currentProjectId} sessionId={props.currentSessionId} />
 				</div>
 
 				{/* MorphingSearch 命令面板：锚点固定定位到视口水平居中、垂直约 1/5 处，
