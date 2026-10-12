@@ -49,6 +49,8 @@ export function StorageTab(props: { settings: AppSettings; onChange: (patch: Par
 	const [noticeHistorySize, setNoticeHistorySize] = useState<string>("");
 	const [clearing, setClearing] = useState<string | null>(null);
 	const [feedback, setFeedback] = useState("");
+	/** 应用日志清空信号：递增即让下方的 LogViewer 重查（它挂在同一个 tab 里，但看不到清空动作） */
+	const [logsRefreshSignal, setLogsRefreshSignal] = useState(0);
 	const [confirmDialog, setConfirmDialog] = useState<{
 		title: string;
 		message: string;
@@ -91,6 +93,10 @@ export function StorageTab(props: { settings: AppSettings; onChange: (patch: Par
 				await window.piDesktop.rpcLogs.clear();
 				await window.piDesktop.pasteFiles.clearAll();
 				await window.piDesktop.noticeHistory.clear();
+			}
+			if (target === "app" || target === "all") {
+				// 只递增、不重置：信号值必须单调变化，查看器的 effect 才认得出这是一次新清空
+				setLogsRefreshSignal((value) => value + 1);
 			}
 			setFeedback(t("settings.storage.clearSuccess"));
 		} catch (e) {
@@ -244,7 +250,7 @@ export function StorageTab(props: { settings: AppSettings; onChange: (patch: Par
 						</Button>
 					</div>
 				</div>
-				<LogViewer />
+				<LogViewer refreshSignal={logsRefreshSignal} />
 			</SettingsSection>
 			{feedback && (
 				<div className="px-0.5 pb-1 pt-2">
