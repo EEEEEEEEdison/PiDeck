@@ -51,7 +51,7 @@ export const webZhTW: Record<WebTranslationKey, string> = {
 	"webError.requestIdRequired": "requestId 不能為空",
 	"webError.messageRequired": "message 或 images 不能為空",
 	"webError.runtimeTargetRequired": "需要匹配當前會話的執行目標",
-	"webError.runtimeUnavailable": "會話運行時激活不可用",
+	"webError.runtimeUnavailable": "會話執行時啟用不可用",
 	"webError.apiNotFound": "API 不存在",
 	"webError.internal": "Web 服務發生內部錯誤",
 	"webError.unauthorized": "缺少或錯誤的 Web 服務訪問令牌",
