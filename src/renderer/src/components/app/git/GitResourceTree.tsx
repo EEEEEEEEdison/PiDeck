@@ -168,7 +168,22 @@ export function FileTree(props: {
 				group: resource.status === GitStatus.UNTRACKED ? ("untracked" as const) : ("workingTree" as const),
 			}));
 		return (
-			<div key={dir || "root"} className="group/dir flex cursor-pointer items-center gap-1 rounded-xs px-2 py-[3px] select-none hover:bg-[var(--git-panel-hover)]" style={{ paddingLeft: DIR_ROW_BASE_PADDING + depth * CHANGE_TREE_INDENT_PX }} onClick={() => props.onToggleDir(dir)}>
+			<div
+				key={dir || "root"}
+				className="group/dir flex cursor-pointer items-center gap-1 rounded-xs px-2 py-[3px] select-none hover:bg-[var(--git-panel-hover)] focus-visible:shadow-[inset_var(--focus-ring)] focus-visible:outline-none"
+				style={{ paddingLeft: DIR_ROW_BASE_PADDING + depth * CHANGE_TREE_INDENT_PX }}
+				/* 折叠是目录展开的唯一入口，键盘必须可达（GitGraph 行同款 inset 焦点环） */
+				role="button"
+				tabIndex={0}
+				aria-expanded={!props.collapsedDirs.has(dir)}
+				onKeyDown={(e) => {
+					if (e.key === "Enter" || e.key === " ") {
+						e.preventDefault();
+						props.onToggleDir(dir);
+					}
+				}}
+				onClick={() => props.onToggleDir(dir)}
+			>
 				<ChevronDown size={12} className={`shrink-0 text-text-tertiary transition-transform duration-fast${props.collapsedDirs.has(dir) ? " -rotate-90" : " rotate-0"}`} />
 				<span className="min-w-0 flex-1 truncate text-xs text-text-secondary" title={dir || "/"}>
 					{label}

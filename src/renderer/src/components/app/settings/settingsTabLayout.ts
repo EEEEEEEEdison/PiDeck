@@ -33,6 +33,7 @@ export const SETTINGS_TAB_LAYOUT: readonly SettingsTabLayoutEntry[] = [
 	{ id: "pet" },
 	{ id: "vision" },
 	{ id: "imagegen" },
+	{ id: "videogen" },
 	{ id: "acp" },
 	{ id: "hostplugins" },
 	{ id: "web", dividerBefore: true },
@@ -75,6 +76,7 @@ export const SETTINGS_TAB_LABEL_KEYS: Record<SettingsTabId, TranslationKey> = {
 	process: "settings.tabs.process",
 	vision: "settings.tabs.vision",
 	imagegen: "settings.tabs.imagegen",
+	videogen: "settings.tabs.videogen",
 	acp: "settings.tabs.acp",
 	hostplugins: "settings.tabs.hostplugins",
 };
@@ -102,6 +104,7 @@ export const SETTINGS_TAB_KEYWORDS: Record<SettingsTabId, readonly string[]> = {
 	process: ["进程", "监控", "内存", "process", "monitor"],
 	vision: ["视觉", "图片识别", "视觉桥", "vision", "multimodal"],
 	imagegen: ["生图", "画图", "图片生成", "imagegen", "image"],
+	videogen: ["生视频", "视频生成", "videogen", "video"],
 	acp: ["acp", "agent", "cli", "工具", "外部 agent", "gemini", "kimi", "claude code", "opencode"],
 	hostplugins: ["插件", "宿主插件", "工作台插件", "plugin", "host plugin", "扩展安装", "pideck 插件"],
 };

@@ -357,7 +357,7 @@ export type AppSettings = {
 	chatContentWidthPct: number;
 	/**
 	 * 会话状态（待办 / 修改文件 / 子代理）显示位置：右侧边栏下半区或输入框上方，二选一。
-	 * 缺省 sidebar；解析见 shared/sessionStatusPlacement.ts。
+	 * 缺省 composer；解析见 shared/sessionStatusPlacement.ts。
 	 */
 	sessionStatusPlacement: SessionStatusPlacement;
 	/**
@@ -996,7 +996,7 @@ export function createDefaultAppSettings(): AppSettings {
 		workspaceContentOpenMode: "split",
 		contentMaxWidth: 1800,
 		chatContentWidthPct: 80,
-		sessionStatusPlacement: "sidebar",
+		sessionStatusPlacement: "composer",
 		navigationMode: "tabs",
 		sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
 		maxEditorFileSizeMB: 5,

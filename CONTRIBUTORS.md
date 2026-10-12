@@ -31,6 +31,8 @@
 ## 💖 特别支持
 
 - **微时佬友** ([@weishiair](https://github.com/weishiair)) — 提供 Grok 模型服务，用于 PiDeck 的软件开发 🎉
+- **橙子** — 提供订阅服务，用于 PiDeck 的软件开发 🎉
+- **罪** — 提供模型服务，用于 PiDeck 的软件开发 🎉
 
 ---
 

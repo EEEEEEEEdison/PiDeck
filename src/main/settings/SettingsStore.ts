@@ -233,8 +233,8 @@ Gitmoji 对应关系：
 	// 内容区宽度默认 80%：轻微留白兼顾阅读舒适（1826px 面板 → 内容 1461px）；
 	// 分屏窄栏时由容器查询自动收敛，详见 foundation.css --chat-content-pct。
 	chatContentWidthPct: 80,
-	// 会话状态默认显示在右侧边栏下半区（另一选项：输入框上方折叠条）
-	sessionStatusPlacement: "sidebar",
+	// 会话状态默认显示在输入框上方折叠条（另一选项：右侧边栏下半区）
+	sessionStatusPlacement: "composer",
 	// 会话 Tab 最大宽度默认 104px：与旧硬编码 max-w-[104px] 一致，迁移零回归。
 	navigationMode: "tabs",
 	sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,

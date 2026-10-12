@@ -6,9 +6,11 @@ import { resolveBusySendDelivery } from "../../../shared/busySendDelivery";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../../shared/fileTree";
 import { classifyCompactError, compactOwnerReason, compactRoutedCommand, type CompactNoticeKind } from "../../../shared/compactFeedback";
 import { findImageGenProvider } from "../../../shared/imageGenConfig";
+import { findVideoGenProvider } from "../../../shared/videoGenConfig";
 import { resolveEnhanceTargetModel } from "../../../shared/enhanceModelPreference";
 import { collectPromptEnhanceContext } from "../utils/promptEnhanceContext";
 import type { ImageGenMeta } from "../../../shared/types/imagegen";
+import type { VideoGenMeta } from "../../../shared/types/videogen";
 import {
 	busySendDeliveryAtom,
 	cacheSessionMessagesAtom,
@@ -36,6 +38,7 @@ import {
 	setSessionDraftAtom,
 	setSessionPasteFilesAtom,
 	setSessionSendStateAtom,
+	videoGenConfigAtom,
 	upsertSessionAtom,
 	promoteSessionComposerStateAtom,
 	removeSessionStateAtom,
@@ -309,6 +312,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const messageCache = useAtomValue(messageCacheAtom);
 	const imageGenConfig = useAtomValue(imageGenConfigAtom);
 	const setImageGenConfig = useSetAtom(imageGenConfigAtom);
+	// 生视频配置独立落盘（videogen.json），与生图同构：composer 只读这份，不碰会话 LLM 模型。
+	const videoGenConfig = useAtomValue(videoGenConfigAtom);
+	const setVideoGenConfig = useSetAtom(videoGenConfigAtom);
 	const setDraftAtom = useSetAtom(setSessionDraftAtom);
 	const setAttachmentsAtom = useSetAtom(setSessionAttachmentsAtom);
 	const setPasteFilesAtom = useSetAtom(setSessionPasteFilesAtom);
@@ -330,18 +336,22 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const [guideAcpToolOverride, setGuideAcpToolOverride] = useState<string | undefined>(() => (isGuideBootstrapSession ? readWelcomeAcpToolPreference() : undefined));
 	const isDshBackend = record?.backend === "dsh" || runtime?.backend === "dsh" || (isGuideBootstrapSession && guideBackendOverride === "dsh");
 	const hasImageGenHistory = (messageCache?.messages ?? []).some((message) => Boolean(message.meta?.imageGen));
+	// 生视频不存在 legacy 混排（videogen 是新后端，只有它自己会写 meta.videoGen），不需要历史锁。
+	const isVideoGenBackend = record?.backend === "videogen";
 	// 生图供应商/模型来自独立 imagegen.json，与会话 LLM 模型无关。
 	const activeImageGenProviderId = imageGenConfig.activeProviderId;
 	const activeImageGenModelId = imageGenConfig.activeModel;
 	const mode: ComposerAgentMode =
 		record?.backend === "imagegen" || hasImageGenHistory
 			? "imagegen"
-			: deriveComposerAgentMode({
-					backend: isDshBackend ? "dsh" : "pi",
-					localMode: localMode,
-					planModeActive: runtime?.state?.planModeActive === true,
-					goalPhase: runtime?.state?.goal?.phase,
-				});
+			: isVideoGenBackend
+				? "videogen"
+				: deriveComposerAgentMode({
+						backend: isDshBackend ? "dsh" : "pi",
+						localMode: localMode,
+						planModeActive: runtime?.state?.planModeActive === true,
+						goalPhase: runtime?.state?.goal?.phase,
+					});
 	// DSH 部署默认模型选择（settings.yaml agent-default-model）：草稿/未激活会话
 	// 的底栏与选择器用它展示默认模型/思考档位（host 会话创建前没有 runtime state）。
 	// settings.yaml 未配 reasoningEffort 时，回退到默认模型自身的 defaultEffort
@@ -456,6 +466,11 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const [previewImage, setPreviewImage] = useState<ImageContent | null>(null);
 	// 生图进行中：置 true 时发送按钮禁用（避免并发多次生图），完成后图片进附件栏
 	const [generatingImage, setGeneratingImage] = useState(false);
+	// 生视频「提交中」门禁：submit 受理即复位（异步任务终态由 videogen:event 事件驱动，不占用发送按钮）。
+	const [submittingVideo, setSubmittingVideo] = useState(false);
+	// 成本确认闸（默认开）：首次提交只完起待确认态，ComposerArea 渲染确认弹层，确认后才真正发请求。
+	// 放在 controller 而不是按钮里：Enter/发送按钮/追问入口全部经 submitVideo，只有这里能统一拦住。
+	const [videoConfirmPending, setVideoConfirmPending] = useState(false);
 	// 生图尺寸/水印记在 AppSettings，跨会话复用；非法磁盘值回落到默认。
 	const [imageGenSize, setImageGenSizeState] = useState<string>(DEFAULT_IMAGE_GEN_SIZE);
 	const [imageGenWatermark, setImageGenWatermarkState] = useState(DEFAULT_IMAGE_GEN_WATERMARK);
@@ -521,6 +536,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			// 生图历史是独立消息协议，普通/计划/目标模式的命令语义不适用；
 			// 同一会话一旦产生生图记录（或本身是 imagegen 后端），必须保持生图模式，避免误发普通请求。
 			if ((hasImageGenHistory || record?.backend === "imagegen") && nextMode !== "imagegen") return;
+			// videogen 同为独立后端：会话一旦是生视频后端，不允许切回普通/计划/目标（命令语义不适用）。
+			if (record?.backend === "videogen" && nextMode !== "videogen") return;
 			// DSH：plan 走 host /plan；goal 走 create/resume/pause IPC（切回普通暂停，不清除）。
 			// 本地 atom 仍写入 goal，让选择器立刻切到目标模式；首条用户消息再 /goal 创建。
 			if (isDshBackend) {
@@ -1261,6 +1278,107 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		}
 	}, [activeImageGenModelId, activeImageGenProviderId, attachments, draft, generatingImage, imageGenConfig, imageGenOutputFormat, imageGenSize, imageGenWatermark, record?.noSession, sessionId, setAttachmentsAtom, setCacheMessages, setDraft, store]);
 
+	// 生视频提交：与生图的同步等待不同，submit 受理即返回，占位消息由 videogen:event
+	// 事件原地推进（useVideoGenEvents 按 messageId 命中）；本地只负责门禁、上屏与受理回填。
+	const submitVideo = useCallback(
+		async (confirmed = false) => {
+			const prompt = draft.trim();
+			if (!prompt || submittingVideo) return;
+			const provider = findVideoGenProvider(videoGenConfig, videoGenConfig.activeProviderId);
+			const modelId = provider?.models.includes(videoGenConfig.activeModel) ? videoGenConfig.activeModel : "";
+			if (!provider?.id || !modelId || !provider.baseUrl.trim() || !provider.apiKey.trim()) {
+				showNotice(t("videogen.error.notConfigured"), 5000);
+				return;
+			}
+			// 一期纯文生视频：附件不支持作为参考素材，显式拦下而不是静默丢弃用户已贴的内容。
+			if (attachments.length > 0) {
+				showNotice(t("videogen.error.attachmentsUnsupported"), 5000);
+				return;
+			}
+			// 成本确认闸：未确认且开关开启时只完起弹层，不发请求；确认后走同一条函数提交。
+			if (videoGenConfig.costConfirm && !confirmed) {
+				setVideoConfirmPending(true);
+				return;
+			}
+			setVideoConfirmPending(false);
+			if (record?.noSession === true) {
+				showNotice(t("videogen.transientHint"), 6000);
+			}
+			setSubmittingVideo(true);
+			const appendTimelineMessage = (message: ChatMessage) => {
+				const previous = store.get(sessionMessagesCacheAtom)?.[sessionId]?.messages ?? [];
+				setCacheMessages({ sessionId, messages: [...previous, message], source: "runtime" });
+			};
+			const updateTimelineMessage = (id: string, patch: (m: ChatMessage) => ChatMessage) => {
+				const previous = store.get(sessionMessagesCacheAtom)?.[sessionId]?.messages ?? [];
+				setCacheMessages({ sessionId, messages: previous.map((m) => (m.id === id ? patch(m) : m)), source: "runtime" });
+			};
+			const params = videoGenConfig.activeParams;
+			// 参数回退链：用户改过的 activeParams → 供应商 defaults（切供应商时底栏预填）
+			const resolution = params.resolution ?? provider.defaults?.resolution;
+			const duration = params.duration ?? provider.defaults?.duration;
+			const ratio = params.ratio ?? provider.defaults?.ratio;
+			appendTimelineMessage({
+				id: crypto.randomUUID(),
+				agentId: "",
+				role: "user",
+				text: prompt,
+				timestamp: Date.now(),
+			});
+			// 占位 messageId 由本地生成并随请求带给主进程：事件快照沿用同一 id 才能原地命中本条。
+			const videoMessageId = crypto.randomUUID();
+			const placeholderMeta: VideoGenMeta = { status: "queued", prompt, resolution, duration, ratio };
+			appendTimelineMessage({
+				id: videoMessageId,
+				agentId: "",
+				role: "assistant",
+				text: "",
+				stopReason: "stop",
+				timestamp: Date.now(),
+				meta: { videoGen: placeholderMeta },
+			});
+			setDraft("");
+			try {
+				const result = await desktopApi.videogen.submit({
+					provider: provider.id,
+					model: modelId,
+					prompt,
+					sessionId,
+					messageId: videoMessageId,
+					resolution,
+					duration,
+					ratio,
+				});
+				if (result.ok) {
+					// 受理回填 jobId：事件到达前取消入口/按钮态即可用；后续状态由事件原地推进。
+					updateTimelineMessage(videoMessageId, (m) => ({
+						...m,
+						meta: { ...m.meta, videoGen: { ...placeholderMeta, jobId: result.jobId } },
+					}));
+					showNotice(t("videogen.submitted"), 4000);
+				} else {
+					updateTimelineMessage(videoMessageId, (m) => ({
+						...m,
+						meta: { ...m.meta, videoGen: { ...placeholderMeta, status: "error", errorDetail: mapVideoGenError(result.error, result.detail) } },
+					}));
+				}
+			} catch {
+				updateTimelineMessage(videoMessageId, (m) => ({
+					...m,
+					meta: { ...m.meta, videoGen: { ...placeholderMeta, status: "error", errorDetail: t("videogen.error.network") } },
+				}));
+			} finally {
+				setSubmittingVideo(false);
+			}
+		},
+		[attachments.length, draft, record?.noSession, sessionId, setCacheMessages, setDraft, store, submittingVideo, videoGenConfig],
+	);
+	// 确认/取消成本弹层：确认后携 confirmed 直发（绕过闸门）；取消只清待确认态，草稿不动。
+	const confirmVideoGen = useCallback(() => {
+		void submitVideo(true);
+	}, [submitVideo]);
+	const cancelVideoGen = useCallback(() => setVideoConfirmPending(false), []);
+
 	// 统一发送入口：先晋升预览 Tab 再投递（幂等，非预览无副作用）。
 	// 发送按钮 / 追问按钮 / Enter 键 / 无 Agent 时的 /compact 直发都会走这里，
 	// 避免新增发送路径时漏掉 promote 导致预览 Tab 不常驻（曾因此回归）。
@@ -1269,6 +1387,11 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		async (behavior?: "steer" | "followUp", overrideText?: string) => {
 			if (mode === "imagegen") {
 				void generateImage();
+				return;
+			}
+			// 生视频模式：所有发送入口统一转生视频提交（不晋升预览 Tab、不发普通消息）。
+			if (mode === "videogen") {
+				void submitVideo();
 				return;
 			}
 			// 粘贴文件折叠：把 chip 里的文件引用/内容并进草稿再发送。
@@ -1296,7 +1419,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			options.onPromoteSession?.(sessionId);
 			return send(behavior, overrideText);
 		},
-		[draft, mode, generateImage, options.onPromoteSession, pasteFiles, send, sessionId, setDraft, setPasteFiles],
+		[draft, mode, generateImage, submitVideo, options.onPromoteSession, pasteFiles, send, sessionId, setDraft, setPasteFiles],
 	);
 
 	const selectSuggestion = useCallback(
@@ -1872,13 +1995,18 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const upsertSession = useSetAtom(upsertSessionAtom);
 
 	/**
-	 * 切换后端（pi ↔ dsh）：仅草稿期可用。
-	 * 会话一旦激活（有 runtime 或 record 已 active）即锁定后端——pi 会话文件（JSONL）
-	 * 与 DSH 会话（host session log）格式不同，中途切换会导致时间线消息来源混乱、
-	 * 同步渲染不可靠。激活后 UI 不再渲染切换器（changeBackend 返回 undefined）。
-	 * imagegen 后端同样锁定：生图会话不可切回 pi/dsh（互不影响）。
+	 * 切换后端（pi ↔ dsh ↔ imagegen/videogen/acp）：仅「未开始对话」期可用。
+	 * 锁定判据是「会话已有真实内容」——catalog 抬 active（= 已发出第一条消息并落盘，
+	 * dsh/acp 由 prompt dispatch 显式 promoteToActive，pi/imagegen 由首次落盘触发）
+	 * 或消息缓存里已出现用户消息（覆盖落盘前的窗口）。
+	 * 一旦有内容即锁定：pi 会话文件（JSONL）、DSH host session log、生图/生视频历史
+	 * 格式互不相同，中途切换会导致时间线消息来源混乱、同步渲染不可靠。
+	 * 不再看 runtime 绑定：预热/认领出来的进程还没产生任何消息，此时切换是安全的
+	 * （旧实现把「Agent 已启动」当锁定条件，导致新建会话一切到生图/生视频就永久锁死，
+	 * 连生视频模式都无法退出）。
 	 */
-	const backendLocked = Boolean(runtime?.agentId) || record?.status === "active" || record?.backend === "imagegen";
+	const hasUserMessage = (messageCache?.messages ?? []).some((message) => message.role === "user");
+	const backendLocked = record?.status === "active" || hasUserMessage;
 	const changeBackend = useCallback(
 		async (next: AgentBackend, explicitAcpToolId?: string) => {
 			if (backendLocked) return;
@@ -1911,6 +2039,19 @@ export function useSessionComposerController(options: UseSessionComposerControll
 				}
 				return;
 			}
+			// 未开始对话的会话允许换后端：先把预热/认领出来的 runtime 停掉再改 record。
+			// 主进程边界防御要求「无绑定 runtime」才接受 backend 变更
+			// （sessionIpc 的 sessionsCatalogUpdate 守卫），且停掉没人用的进程正是用户诉求
+			// ——否则预热出来的 pi 进程会一直挂到会话被删。
+			// 停不掉不拦：交给主进程守卫给出与旧行为一致的报错。
+			const boundAgentId = runtime?.agentId;
+			if (boundAgentId) {
+				try {
+					await desktopApi.system.stopAgent(boundAgentId);
+				} catch {
+					// 忽略：主进程仍会以「后端已锁定」拒绝本次变更，用户能看到明确原因
+				}
+			}
 			try {
 				// ACP：切换时必须带上工具预选（激活链 spawn 按工具表取命令行），
 				// 默认沿用会话已选或登记表第一项；工具表为空（开关刚被关）不切换。
@@ -1941,7 +2082,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 				showNotice(error instanceof Error ? error.message : String(error), 4000);
 			}
 		},
-		[backendLocked, isGuideBootstrapSession, record, sessionId, store, upsertSession],
+		[backendLocked, isGuideBootstrapSession, record, runtime?.agentId, sessionId, store, upsertSession],
 	);
 
 	/**
@@ -2203,6 +2344,25 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			imageGenWatermark,
 			imageGenOutputFormat,
 			imageGenModeLocked: hasImageGenHistory || record?.backend === "imagegen",
+			videoGenConfig,
+			videoGenModeLocked: isVideoGenBackend,
+			submittingVideo,
+			submitVideo,
+			videoConfirmPending,
+			confirmVideoGen,
+			cancelVideoGen,
+			setVideoGenSelection: (providerId: string, modelId: string) => {
+				const nextProvider = findVideoGenProvider(videoGenConfig, providerId);
+				if (!nextProvider?.models.includes(modelId)) return;
+				const next = { ...videoGenConfig, activeProviderId: nextProvider.id, activeModel: modelId, activeParams: { ...nextProvider.defaults } };
+				setVideoGenConfig(next);
+				void desktopApi.videogen.saveConfig(next).catch(() => undefined);
+			},
+			setVideoGenParam: (key: "resolution" | "duration" | "ratio", value: string | undefined) => {
+				const next = { ...videoGenConfig, activeParams: { ...videoGenConfig.activeParams, [key]: value } };
+				setVideoGenConfig(next);
+				void desktopApi.videogen.saveConfig(next).catch(() => undefined);
+			},
 			setImageGenSelection: (providerId: string, modelId: string) => {
 				const nextProvider = findImageGenProvider(imageGenConfig, providerId);
 				if (!nextProvider?.models.includes(modelId)) return;
@@ -2228,7 +2388,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			unknownError: sendState.error,
 			acknowledgeUnknown: acknowledgeUnknownDelivery,
 			// DSH 只在 host 明确报告 routable=false 时锁住发送；undefined 代表尚未确认或目录加载失败。
-			canSend: hasContent && !isStarting && !generatingImage && (!isDshBackend || runtime?.state?.modelRoutable !== false),
+			canSend: hasContent && !isStarting && !generatingImage && !submittingVideo && (!isDshBackend || runtime?.state?.modelRoutable !== false),
 			generatingImage,
 		},
 		pickers: {
@@ -2275,5 +2435,32 @@ function mapImageGenError(error: string, detail?: string): string {
 			return t("imagegen.error.responseTooLarge");
 		default:
 			return t("imagegen.error.network");
+	}
+}
+
+/** 生视频错误码 → 用户可见文案（与 mapImageGenError 同构，多出轮询/下载/取消三段）。 */
+function mapVideoGenError(error: string, detail?: string): string {
+	const extra = detail?.trim() ?? "";
+	switch (error) {
+		case "notConfigured":
+			return t("videogen.error.notConfigured");
+		case "invalidKey":
+			return extra ? t("videogen.error.invalidKeyDetail", { detail: extra }) : t("videogen.error.invalidKey");
+		case "badBaseUrl":
+			return extra ? t("videogen.error.badBaseUrlDetail", { detail: extra }) : t("videogen.error.badBaseUrl");
+		case "empty":
+			return t("videogen.error.empty");
+		case "timeout":
+			return t("videogen.error.timeout");
+		case "downloadFailed":
+			return t("videogen.error.downloadFailed");
+		case "generationFailed":
+			return extra ? t("videogen.error.generationFailedDetail", { detail: extra }) : t("videogen.error.generationFailed");
+		case "cancelled":
+			return t("videogen.error.cancelled");
+		case "http":
+			return extra ? t("videogen.error.http", { detail: extra }) : t("videogen.status.error");
+		default:
+			return t("videogen.error.network");
 	}
 }

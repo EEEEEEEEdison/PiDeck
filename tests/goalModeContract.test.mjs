@@ -12,7 +12,7 @@ const sendHook = readFileSync("src/renderer/src/hooks/useSessionSend.ts", "utf8"
 const timelineCss = readFileSync("src/renderer/src/styles/timeline.css", "utf8");
 
 test("goal mode is a first-class ComposerAgentMode", () => {
-	assert.match(agentTypes, /ComposerAgentMode = "normal" \| "plan" \| "imagegen" \| "goal"/);
+	assert.match(agentTypes, /ComposerAgentMode = "normal" \| "plan" \| "imagegen" \| "videogen" \| "goal"/);
 	assert.equal(existsSync("resources/extensions/pi-deck-goal-mode.ts"), true);
 	assert.match(builtIns, /"pi-deck-goal-mode.ts"/);
 });
@@ -56,9 +56,12 @@ test("goal/plan composer chrome：模式身份只用边框着色 + 单枚 chip�
 	// 身份仍可见：plan/goal 非聚焦态就有 1px 边框着色（focus-within 另有加强）
 	assert.match(timelineCss, /\.composer-box\.plan-mode \{[\s\S]*?border-color:\s*color-mix\(\s*in srgb,\s*var\(--color-brand-green\) 34%/);
 	assert.match(timelineCss, /\.composer-box\.goal-mode \{[\s\S]*?border-color:\s*color-mix\(\s*in srgb,\s*var\(--color-accent\) 34%/);
-	// 退出×只在模式 chip 缺席时兜底（生图会话 / 设置里隐藏了选择器），不与 chip 同时出现
+	// 退出×只在模式 chip 缺席时兜底（设置里隐藏了选择器 / 只剩 normal 一项），不与 chip 同时出现；
+	// 生图/生视频后端（mediaModeIsBackend）的 mode 由 record.backend 推导、setMode 直接 return，
+	// 点×不会有任何反应，必须一并排除（用户反馈「选中视频模式后没办法退出」）。
 	assert.match(composerComponents, /modeSwitcherVisible/);
-	assert.match(composerComponents, /isSpecialMode && !props\.imageGenLocked && !modeSwitcherVisible/);
+	assert.match(composerComponents, /isSpecialMode && !props\.imageGenLocked && !mediaModeIsBackend && !modeSwitcherVisible/);
+	assert.match(composerComponents, /const mediaModeIsBackend = props\.backend === "imagegen" \|\| props\.backend === "videogen"/);
 	assert.match(composerComponents, /composer-mode-cluster/);
 	assert.match(composerComponents, /composer-mode-exit/);
 	assert.match(composerComponents, /<X size=\{12\}/);

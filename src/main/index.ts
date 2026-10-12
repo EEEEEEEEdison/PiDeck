@@ -359,6 +359,14 @@ import { ImageSessionStore } from "./imagegen/ImageSessionStore";
 import { ImageBlobStore } from "./imagegen/ImageBlobStore";
 import { registerImageGenImageProtocol } from "./imagegen/ImageGenImageProtocol";
 import { ImageGenConfigStore } from "./imagegen/ImageGenConfigStore";
+import { registerVideoGenIpc } from "./ipc/videogenIpc";
+import { VideoGenConfigStore } from "./videogen/VideoGenConfigStore";
+import { VideoBlobStore } from "./videogen/VideoBlobStore";
+import { VideoSessionStore } from "./videogen/VideoSessionStore";
+import { VideoJobStore } from "./videogen/VideoJobStore";
+import { VideoJobRunner } from "./videogen/VideoJobRunner";
+import { registerVideoGenProtocol } from "./videogen/VideoGenProtocol";
+import type { VideoGenJobSnapshot } from "../shared/types/videogen";
 import { registerVoiceTranscriptionIpc } from "./ipc/voiceTranscriptionIpc";
 import { VoiceTranscriptionConfigStore } from "./voice/VoiceTranscriptionConfigStore";
 import { VoiceTranscriptionService } from "./voice/VoiceTranscriptionService";
@@ -998,6 +1006,15 @@ async function copyCatalogSession(sessionId: string) {
 function resolveImageGenStorageRoots(): { sessions: string; blobs: string } {
 	const root = join(app.getPath("userData"), "imagegen");
 	return { sessions: join(root, "sessions"), blobs: join(root, "blobs") };
+}
+
+/**
+ * 生视频独立存储的磁盘根：与生图同构（sessions + blobs），根目录 userData/videogen。
+ * 同样统一在此解析，避免读写漂移；任务表 jobs.json 单独放根目录（高频重写，不入 sessions）。
+ */
+function resolveVideoGenStorageRoots(): { sessions: string; blobs: string; jobs: string } {
+	const root = join(app.getPath("userData"), "videogen");
+	return { sessions: join(root, "sessions"), blobs: join(root, "blobs"), jobs: join(root, "jobs.json") };
 }
 
 async function exportCatalogSessionHtml(sessionId: string): Promise<{ path: string }> {
@@ -2888,6 +2905,72 @@ function registerIpc() {
 		},
 	});
 
+	// ── 生视频域：与生图平行的独立信任域（userData/videogen.json），异步任务生命周期在 VideoJobRunner ──
+	const videoGenConfigStore = new VideoGenConfigStore({
+		getConfigPath: () => join(app.getPath("userData"), "videogen.json"),
+		log: (message, ...args) => appLogger.info("videogen", message, ...args),
+	});
+	const videoGenRoots = resolveVideoGenStorageRoots();
+	const videoBlobStore = new VideoBlobStore({ getBlobsPath: () => videoGenRoots.blobs });
+	void videoBlobStore.ensureDir();
+	const videoSessionStore = new VideoSessionStore({
+		getStorePath: () => videoGenRoots.sessions,
+		blobs: videoBlobStore,
+	});
+	const videoJobStore = new VideoJobStore({
+		getJobsPath: () => videoGenRoots.jobs,
+		log: (message, ...args) => appLogger.info("videogen", message, ...args),
+	});
+	// pideck-video:// 必须在 app ready 后注册；视频产物只经协议流式吐给 <video>，不进 IPC
+	registerVideoGenProtocol(videoBlobStore);
+	const sendVideoGenEvent = (snapshot: VideoGenJobSnapshot) => {
+		const window = mainWindow;
+		if (window && !window.isDestroyed()) {
+			window.webContents.send(ipcChannels.videogenEvent, snapshot);
+		}
+	};
+	const videoJobRunner = new VideoJobRunner({
+		loadJobs: () => videoJobStore.load(),
+		saveJobs: (jobs) => videoJobStore.save(jobs),
+		getCredentials: async (providerId) => {
+			const creds = await videoGenConfigStore.getCredentials(providerId);
+			if (!creds) return null;
+			return { baseUrl: creds.baseUrl, apiKey: creds.apiKey, protocol: creds.protocol, name: creds.provider.name };
+		},
+		putVideo: (response) => videoBlobStore.putFromResponse(response),
+		persistMessages: (sessionId, messages) => videoSessionStore.append(sessionId, messages),
+		emit: sendVideoGenEvent,
+		log: (message, ...args) => appLogger.info("videogen", message, ...args),
+	});
+	registerVideoGenIpc({
+		submit: async (request) => {
+			const result = await videoJobRunner.submit(request);
+			// 与生图同策略：任务受理即把会话提升为 active + 首行命名，防 staleDrafts 清理丢入口
+			if (result.ok && request.sessionId) {
+				const entry = sessionCatalog?.get(request.sessionId);
+				if (entry) {
+					const project = projectStore.get(entry.projectId);
+					if (project && isDefaultAgentTitle(entry.title, project, mainCopy as never)) {
+						const firstLine = request.prompt.split(/\r?\n/, 1)[0]?.trim() ?? "";
+						if (firstLine) {
+							await sessionCatalog.applyAutomaticTitle(request.sessionId, firstLine, "fallback");
+							mainWindow?.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: entry.projectId });
+						}
+					}
+					await sessionCatalog.promoteToActive(request.sessionId);
+				}
+			}
+			return result;
+		},
+		cancel: (jobId) => videoJobRunner.cancel(jobId),
+		getConfig: () => videoGenConfigStore.getConfig(),
+		saveConfig: (input) => videoGenConfigStore.saveConfig(input),
+		listJobs: (sessionId) => videoJobRunner.listJobsForSession(sessionId),
+		log: (message, ...args) => appLogger.info("videogen", message, ...args),
+	});
+	// 重启恢复：24h 窗口内未终态的任务继续轮询（终态立即结清旧任务）
+	void videoJobRunner.resume();
+
 	registerSessionIpc({
 		projectStore,
 		settingsStore,
@@ -2919,6 +3002,8 @@ function registerIpc() {
 		readCatalogSessionReferenceMessages,
 		// 无 pi 会话文件（纯生图草稿）历史读取回退：ImageSession 独立存储
 		readImageSessionMessages: (sessionId) => imageSessionStore.readMessages(sessionId),
+		// videogen 后端会话历史回退：VideoSession 独立存储（同生图策略）
+		readVideoSessionMessages: (sessionId) => videoSessionStore.readMessages(sessionId),
 		copyCatalogSession,
 		exportCatalogSessionHtml,
 		replaceAgentSession,
@@ -4856,47 +4941,53 @@ app
 		ensurePiResourceMigration = ensureResourceMigration;
 		agentManager.configureResourceMigrationGate(ensureResourceMigration);
 		// 多后端网关装配：pi + dsh + acp（DSH 在窗口创建后后台预热，失败时按需重试）。
-		// ACP 是 opt-in（settings.acpEnabled，默认 false）：关闭时完全不创建 AcpAgentManager、
-		// 不注册进合成器——pi 用户零成本；开启后每次 create 即 spawn 对应 CLI，无预热。
-		// 变更开关重启生效，故只需启动时读一次。
-		if (settingsStore.get().acpEnabled === true) {
-			acpAgentManager = new AcpAgentManager({
-				piLocator,
-				getProject: (projectId) => projectStore.get(projectId),
-				getTools: () => settingsStore.get().acpTools ?? [],
-				// configOptions 变更推送：set_config_option 响应/config_option_update 通知都走同一事件,
-				// 渲染层按 agentId 隔离(旧 agent 迟到事件写旧 atom,不再被读)。
-				onConfigOptionsChanged: (tab, options) => {
-					if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ipcChannels.acpSessionConfigChanged, { agentId: tab.id, options });
-				},
-				// 图片物化落盘：ACP 消息里的 base64 图复用生图 blob 存储（ref 形态回填消息；
-				// imagegen 装配在另一段完成，经模块级 ref 延迟取实例）。
-				imageStore: {
-					put: (data, mimeType) => acpImageBlobStore?.put(data, mimeType) ?? Promise.resolve(null),
-				},
-				// ACP 会话标题（session_info_update）写回 catalog：ACP 无本地文件，标题在 agent 侧。
-				onTitleChanged: (deckSessionId, title) => {
-					const entry = sessionCatalog?.get(deckSessionId);
-					if (!entry || entry.title === title) return;
-					void sessionCatalog
-						.update(entry.id, { title })
-						.then(() => {
-							if (mainWindow && !mainWindow.isDestroyed()) {
-								mainWindow.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: entry.projectId });
-							}
-						})
-						.catch((error: unknown) => {
-							void appLogger.warn("session", "ACP title sync to catalog failed", { deckSessionId, title, error: error instanceof Error ? error.message : String(error) });
-						});
-				},
-				logger: appLogger,
-			});
-			quitCleanup.register("acp", async () => {
-				await acpAgentManager?.stopAll();
-			});
-		}
-		compositeAgentGateway = new CompositeAgentGateway(acpAgentManager ? [agentManager, dshAgentManager, acpAgentManager] : [agentManager, dshAgentManager]);
+		// ACP 是 opt-in（settings.acpEnabled，默认 false）：网关常驻注册，但开关是运行时读的
+		// （deps.isEnabled），关闭时 create 直接拒绝——既保证「关闭就不 spawn 任何 CLI」，
+		// 又让设置页开关立即生效（不必重启）。
+		// 不按启动时的开关决定是否注册：合成器的事件订阅（onOutput）与能力并集在启动时一次成形，
+		// 启动后才补注册的网关收不到事件转发，ACP 时间线会静默无输出；
+		// 而 AcpAgentManager 构造函数不 spawn 任何进程，常驻注册本身零运行时成本。
+		// 开启后每次 create 即 spawn 对应 CLI，无预热。
+		acpAgentManager = new AcpAgentManager({
+			piLocator,
+			getProject: (projectId) => projectStore.get(projectId),
+			getTools: () => settingsStore.get().acpTools ?? [],
+			isEnabled: () => settingsStore.get().acpEnabled === true,
+			// configOptions 变更推送：set_config_option 响应/config_option_update 通知都走同一事件,
+			// 渲染层按 agentId 隔离(旧 agent 迟到事件写旧 atom,不再被读)。
+			onConfigOptionsChanged: (tab, options) => {
+				if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ipcChannels.acpSessionConfigChanged, { agentId: tab.id, options });
+			},
+			// 图片物化落盘：ACP 消息里的 base64 图复用生图 blob 存储（ref 形态回填消息；
+			// imagegen 装配在另一段完成，经模块级 ref 延迟取实例）。
+			imageStore: {
+				put: (data, mimeType) => acpImageBlobStore?.put(data, mimeType) ?? Promise.resolve(null),
+			},
+			// ACP 会话标题（session_info_update）写回 catalog：ACP 无本地文件，标题在 agent 侧。
+			onTitleChanged: (deckSessionId, title) => {
+				const entry = sessionCatalog?.get(deckSessionId);
+				if (!entry || entry.title === title) return;
+				void sessionCatalog
+					.update(entry.id, { title })
+					.then(() => {
+						if (mainWindow && !mainWindow.isDestroyed()) {
+							mainWindow.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: entry.projectId });
+						}
+					})
+					.catch((error: unknown) => {
+						void appLogger.warn("session", "ACP title sync to catalog failed", { deckSessionId, title, error: error instanceof Error ? error.message : String(error) });
+					});
+			},
+			logger: appLogger,
+		});
+		quitCleanup.register("acp", async () => {
+			await acpAgentManager?.stopAll();
+		});
+		compositeAgentGateway = new CompositeAgentGateway([agentManager, dshAgentManager, acpAgentManager]);
 		sessionRuntimeCoordinator = new SessionRuntimeCoordinator(sessionCatalog, compositeAgentGateway, sendAgentPromptWithIntegrations, appLogger);
+		// 终态惰性解绑（getAgentId → unbindTerminalAgent）发生在查询路径里，必须把解绑推给渲染层：
+		// 否则渲染层快照停在 error，红点常亮且「关闭 Agent」永远对不上存在的运行实例。
+		sessionRuntimeCoordinator.setDetachedNotifier((binding) => emitSessionRuntimeDetach(binding));
 		// catalog 外部删除清理的活性探针：预热激活后 pi 可能尚未写出会话文件，
 		// 有活跃绑定的记录不得被扫描当「外部删除」剔掉。
 		sessionCatalog.setSessionLivenessProbe((sessionId) => sessionRuntimeCoordinator?.hasLiveRuntime(sessionId) === true);
@@ -5201,8 +5292,6 @@ app
 		// 🆕 自动连接：如果已有 Bot 配置，自动启动飞书连接
 		autoConnectFeishu();
 
-		sendTelemetryHeartbeat();
-
 		// 内存分析模式（PIDECK_MEMORY_PROFILE=1）：尽早开始采样，覆盖窗口创建/加载全过程。
 		// 采样失败不阻塞启动（诊断工具降级为不可用）。
 		if (isMemoryProfileEnabled()) {
@@ -5229,6 +5318,10 @@ app
 		// 已收录目录也会被当成新目录弹「添加为项目」（实测右键打开两次都走了 add 链路）。
 		const projectStoreLoadPromise = projectStore.load();
 		projectStoreReady = projectStoreLoadPromise.catch(() => undefined);
+		// 心跳快照里的 projects_total 取自 projectStore.list()，必须等项目表加载结束再发，
+		// 否则恒为空表、projects_total 恒为 0（2026-10 线上 389 条快照全部为 0 即此因）。
+		// projectStoreReady 已吞掉加载失败，失败时也照发（快照按空表上报）。
+		void projectStoreReady.then(() => sendTelemetryHeartbeat());
 		void projectStoreLoadPromise
 			.then(async () => {
 				// load() 已丢掉 e2e 临时项目；对应 catalog 映射一并清掉，侧栏会话不会再挂回来。

@@ -191,6 +191,13 @@ export type SessionRuntimeBinding = {
 	runtimeGeneration: number;
 };
 
+/**
+ * coordinator 自己发起的解绑必须让渲染层知道（主进程注入 `emitSessionRuntimeDetach`）。
+ * 只服务「终态惰性解绑」：stop/restart/删除/fork 换绑的解绑由调用方推送 detach，
+ * 这里重复推会打乱渲染层的代际判定（`SessionRuntimeEvent` 的 detach 分支）。
+ */
+export type SessionRuntimeDetachNotifier = (binding: SessionRuntimeBinding) => void;
+
 type RuntimeReplacement = SessionRuntimeBinding & {
 	replacementId: number;
 };
@@ -288,6 +295,7 @@ export class SessionRuntimeCoordinator {
 	/** Serializes model/effort changes so a slower earlier get_state cannot overwrite a newer choice. */
 	private readonly preferenceMutationTails = new Map<string, Promise<void>>();
 	private readonly lastRequestedThinkingBySession = new Map<string, { agentId: string; level: string }>();
+	private detachedNotifier: SessionRuntimeDetachNotifier | undefined;
 
 	constructor(
 		private readonly catalog: SessionCatalogGateway,
@@ -369,8 +377,35 @@ export class SessionRuntimeCoordinator {
 		// A terminal process cannot safely receive a delayed prompt result. Remove
 		// the binding even if its dispatch lease has not unwound yet, which makes
 		// that result fail closed instead of reviving a dead runtime association.
+		//
+		// 这条解绑发生在查询路径里（读历史/翻页、空闲释放器的聚焦探针都会走到），
+		// 必须把解绑推送出去：之前静默丢绑定，渲染层快照就永远停在 error——红点常亮、
+		// 「关闭 Agent」对着一个已不存在的运行实例反复失败（2026-10 实测日志的根因）。
+		const binding = this.getRuntimeBinding(agentId);
 		this.unbindTerminalAgent(agentId);
+		// getRuntimeBinding 只回 sessionId/generation（不包含 agentId），解绑通知要把身份补全。
+		if (binding) this.notifyRuntimeDetached({ ...binding, agentId });
 		return undefined;
+	}
+
+	/**
+	 * 注入 detach 通知（主进程 `emitSessionRuntimeDetach`）。见 `SessionRuntimeDetachNotifier`。
+	 */
+	setDetachedNotifier(notifier: SessionRuntimeDetachNotifier | undefined): void {
+		this.detachedNotifier = notifier;
+	}
+
+	/**
+	 * 推送解绑通知。这里吞异常并留 warn：解绑发生在查询路径中（历史读取等 IPC 会走到），
+	 * 推送失败不能连带让用户的读盘请求失败——渲染层下次激活时仍会用新绑定自然收敛。
+	 */
+	private notifyRuntimeDetached(binding: SessionRuntimeBinding): void {
+		if (!this.detachedNotifier) return;
+		try {
+			this.detachedNotifier(binding);
+		} catch (error) {
+			void this.logger?.warn("session-runtime", "Runtime detach notification failed", { ...binding, error: errorMessage(error) });
+		}
 	}
 
 	getSessionId(agentId: string): string | undefined {

@@ -1,5 +1,7 @@
 export type ChatRole = "user" | "assistant" | "tool" | "system" | "error";
 
+import type { VideoContent } from "./videogen";
+
 export type I18nParams = Record<string, string | number | boolean | null | undefined>;
 
 /** Structured copy crosses process boundaries without forcing main to choose a locale. */
@@ -18,6 +20,8 @@ export type ChatMessage = {
 	timestamp: number;
 	meta?: Record<string, unknown> & I18nDescriptor;
 	images?: ImageContent[]; // 用户消息中附加的图片
+	/** 生视频产物（meta.videoGen 消息）：只有落盘 ref 形态，展示走 pideck-video:// 协议 */
+	videos?: VideoContent[];
 	/** 思考内容：来自 thinking 内容块，用于展示模型推理过程 */
 	thinking?: string;
 	/** 思考段开始时间（可选；缺省回退 message.timestamp） */

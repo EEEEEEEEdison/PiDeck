@@ -100,8 +100,8 @@ test("IPC 入参校验：model/prompt 非空，prompt ≤ 4000，provider 可空
 	assert.match(imagegenIpc, /parseImageGenReferenceImages/);
 });
 
-test("ComposerAgentMode 含 imagegen 与 goal", () => {
-	assert.match(agentTypes, /ComposerAgentMode = "normal" \| "plan" \| "imagegen" \| "goal"/);
+test("ComposerAgentMode 含 imagegen、videogen 与 goal", () => {
+	assert.match(agentTypes, /ComposerAgentMode = "normal" \| "plan" \| "imagegen" \| "videogen" \| "goal"/);
 });
 
 test("composer 生图底栏用独立配置，不读会话 LLM", () => {
@@ -111,7 +111,7 @@ test("composer 生图底栏用独立配置，不读会话 LLM", () => {
 	const configUi = readFileSync("src/renderer/src/components/config/ImageGenSection.tsx", "utf8");
 	assert.match(composerComponents, /imageGenOptions\?:/);
 	assert.match(composerComponents, /ComposerImageGenOptions/);
-	assert.match(composerComponents, /isImageGenMode \? null/);
+	assert.match(composerComponents, /isImageGenMode \|\| isVideoGenMode \? null/);
 	assert.match(options, /IMAGE_GEN_SIZE_PRESETS/);
 	assert.match(options, /IMAGE_GEN_SIZE_UNSET/);
 	assert.match(options, /ImageGenSizeCombobox/);

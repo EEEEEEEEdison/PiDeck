@@ -68,6 +68,11 @@ type AcpManagerDeps = {
 	getProject: (id: string) => { path: string } | undefined;
 	/** 读取用户登记的 ACP 工具表(settings.acpTools)。 */
 	getTools: () => AcpToolConfig[];
+	/**
+	 * ACP 总开关(settings.acpEnabled)的运行时读口。
+	 * 必须每次 create 时实时读:设置页变更立即生效,不需要重启应用。
+	 */
+	isEnabled: () => boolean;
 	onTitleChanged?: (deckSessionId: string, title: string) => void;
 	/** configOptions 变更推送(set_config_option 响应/config_option_update 通知)。 */
 	onConfigOptionsChanged?: (tab: AgentTab, options: AcpConfigOption[]) => void;
@@ -186,6 +191,9 @@ export class AcpAgentManager implements SessionAgentGateway {
 	// ── SessionAgentGateway ────────────────────────────────────────────────
 
 	async create(input: CreateAgentInput): Promise<AgentTab> {
+		// 开关运行时判定:关闭时拒绝 spawn(渲染层已隐藏 ACP 入口,这里是边界防御;
+		// 也覆盖「从历史恢复 ACP 会话」这类不经过后端下拉的启动路径)。
+		if (!this.deps.isEnabled()) throw new Error("ACP backend is disabled in settings");
 		const project = this.deps.getProject(input.projectId);
 		if (!project) throw new Error(`Project not found: ${input.projectId}`);
 		// 工具选择:agentPreset 字段承载 AcpToolConfig.id(coordinator 已归一传入)。

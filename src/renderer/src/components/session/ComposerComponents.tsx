@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
 import { useAtomValue } from "jotai";
-import { dshModuleHiddenAtom, imageGenModuleHiddenAtom, composerModesHiddenAtom, acpEnabledAtom, acpToolsAtom } from "../../atoms";
-import { AlertCircle, BrainCircuit, Check, ChevronDown, ChevronLeft, ChevronRight, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, ListChecks, Loader2, Paperclip, Plus, RefreshCw, Settings2, Sparkles, Star, Target, Terminal, X, Zap } from "lucide-react";
+import { dshModuleHiddenAtom, imageGenModuleHiddenAtom, videoGenModuleHiddenAtom, composerModesHiddenAtom, acpEnabledAtom, acpToolsAtom } from "../../atoms";
+import { AlertCircle, BrainCircuit, Check, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, ListChecks, Loader2, Paperclip, Plus, RefreshCw, Settings2, Sparkles, Star, Target, Terminal, X, Zap } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import type { PromptEnhanceView } from "../../hooks/usePromptEnhance";
 import { PromptEnhanceControls } from "./PromptEnhanceControls";
@@ -14,8 +14,10 @@ import { ModelThinkingChip } from "./ModelThinkingChip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
 import { ConfirmDialog } from "../app/AppParts";
 import { ComposerImageGenOptions } from "./ComposerImageGenOptions";
+import { ComposerVideoGenOptions } from "./ComposerVideoGenOptions";
 import { useComposerModeAvailability } from "../../hooks/useComposerModeAvailability";
 import type { ImageGenConfigFile } from "../../../../shared/imageGenConfig";
+import type { VideoGenConfigFile } from "../../../../shared/videoGenConfig";
 import { ProviderUsageInline } from "../app/ProviderUsageInline";
 import { useProviderUsageBatchRefresh } from "../../hooks/useProviderUsage";
 import { DshLogo, PiLogo } from "./SessionSourceBadge";
@@ -37,13 +39,15 @@ const MODE_LABEL: Record<ComposerAgentMode, TranslationKey> = {
 	goal: "app.composerModeGoal",
 	plan: "app.composerModePlan",
 	imagegen: "app.composerModeImagegen",
+	videogen: "app.composerModeVideogen",
 };
 
-/** 模式图标：普通=闪电（直接执行），规划=清单，目标=靶心，生图=图片。
+/** 模式图标：普通=闪电（直接执行），规划=清单，目标=靶心，生图=图片，生视频=场记板。
  * 普通模式原为扳手，2026-10 用户反馈不好看且与设置类扳手语义相近，改用闪电表达「直接执行」。 */
 function modeGlyph(mode: ComposerAgentMode) {
 	if (mode === "plan") return <ListChecks size={14} strokeWidth={2} aria-hidden="true" />;
 	if (mode === "imagegen") return <ImageIcon size={14} strokeWidth={2} aria-hidden="true" />;
+	if (mode === "videogen") return <Clapperboard size={14} strokeWidth={2} aria-hidden="true" />;
 	if (mode === "goal") return <Target size={14} strokeWidth={2} aria-hidden="true" />;
 	return <Zap size={14} strokeWidth={2} aria-hidden="true" />;
 }
@@ -206,6 +210,7 @@ function currentValueName(entry: { option: import("../../../../shared/types/acp"
 export function ComposerBackendPicker(props: { backend: AgentBackend; acpToolId?: string; disabled?: boolean; onChangeBackend: (backend: AgentBackend, acpToolId?: string) => void }) {
 	const dshHidden = useAtomValue(dshModuleHiddenAtom);
 	const imageGenHidden = useAtomValue(imageGenModuleHiddenAtom);
+	const videoGenHidden = useAtomValue(videoGenModuleHiddenAtom);
 	// ACP 是 opt-in：开关开启且登记了工具才列入口；已是 acp 会话时始终保留
 	//（同 dsh/imagegen 的「+当前后端」规则，避免切走后回不来）。
 	const acpEnabled = useAtomValue(acpEnabledAtom);
@@ -213,6 +218,7 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; acpToolId?
 	const showAcp = (acpEnabled && acpTools.length > 0) || props.backend === "acp";
 	const showDsh = !dshHidden || props.backend === "dsh";
 	const showImageGen = !imageGenHidden || props.backend === "imagegen";
+	const showVideoGen = !videoGenHidden || props.backend === "videogen";
 	// 单层下拉 + 选项组：Agent CLI 组下直接列工具项（value 携带工具 id），
 	// 选中即切换后端+工具，radix 正常关弹层——不做两页式跳转（radix 选中项
 	// 会强制关弹层，受控拦截在异步 setState 下时序不稳，实测点选后弹层闪退）。
@@ -243,6 +249,8 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; acpToolId?
 					<DshLogo className="size-[15px] shrink-0" />
 				) : props.backend === "imagegen" ? (
 					<ImageIcon className="size-[15px] shrink-0 text-muted-foreground" />
+				) : props.backend === "videogen" ? (
+					<Clapperboard className="size-[15px] shrink-0 text-muted-foreground" />
 				) : props.backend === "acp" ? (
 					<Terminal className="size-[15px] shrink-0 text-muted-foreground" />
 				) : (
@@ -258,6 +266,12 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; acpToolId?
 					<SelectItem value="dsh">
 						<DshLogo className="size-3.5 shrink-0" />
 						{t("sessionBackend.dsh")}
+					</SelectItem>
+				) : null}
+				{showVideoGen ? (
+					<SelectItem value="videogen">
+						<Clapperboard className="size-3.5 shrink-0 text-muted-foreground" />
+						{t("sessionBackend.videogen")}
 					</SelectItem>
 				) : null}
 				{showImageGen ? (
@@ -411,6 +425,17 @@ export function ComposerBottomBar(props: {
 		onOutputFormatChange: (format: string) => void;
 		onWatermarkChange: (watermark: boolean) => void;
 	};
+	/** 生视频模式底栏参数；非 videogen 时不传。凭据来自独立 videogen.json。 */
+	videoGenOptions?: {
+		config: VideoGenConfigFile;
+		providerId: string;
+		modelId: string;
+		resolution?: string;
+		duration?: string;
+		ratio?: string;
+		onSelectionChange: (providerId: string, modelId: string) => void;
+		onParamChange: (key: "resolution" | "duration" | "ratio", value: string | undefined) => void;
+	};
 }) {
 	// 真实会话以 runtime / catalog record 为准；只有无 record 的引导页虚拟会话
 	// 才读取 welcome localStorage。这样用户点选模型/思考档位后能立即看到结果，
@@ -465,8 +490,18 @@ export function ComposerBottomBar(props: {
 	// 圆球面板必须与 DSH 卡片/选择器同一 backend，否则查的是另一条 usage-probes.json。
 	const isPlanMode = props.composerAgentMode === "plan";
 	const isImageGenMode = props.composerAgentMode === "imagegen";
+	const isVideoGenMode = props.composerAgentMode === "videogen";
+	// 生图/生视频底栏的「媒体后端」判据：模式 or 后端任一命中。
+	// 只按 mode 判会漏屏蔽引导页窗口——引导页没有 record，mode 由 record.backend 推导
+	// （controller 的 mode 三态分支），选了生图/生视频后端时 mode 仍是 normal，
+	// 于是权限（pi 安全等级 / DSH 权限预设）、飞书镜像、会话 LLM 模型 chip 全部照旧显示。
+	const isMediaComposer = isImageGenMode || isVideoGenMode || props.backend === "imagegen" || props.backend === "videogen";
+	// 模式 = 后端身份（生图/生视频后端）：mode 由 record.backend 推导，controller 的 setMode
+	// 对这两个后端直接 return，退出×点了也不会生效（用户反馈「选中视频模式后没办法退出」）。
+	// 此时退出要走后端选择器（未开始对话）或新建会话（已锁定），不摆一个点了没反应的按钮。
+	const mediaModeIsBackend = props.backend === "imagegen" || props.backend === "videogen";
 	const isGoalMode = props.composerAgentMode === "goal";
-	const isSpecialMode = isPlanMode || isImageGenMode || isGoalMode;
+	const isSpecialMode = isPlanMode || isImageGenMode || isVideoGenMode || isGoalMode;
 	// 模式选择器常驻底栏（外移自「+」菜单，2026-10 用户要求直接可见）；可用性（plan/goal 扩展开关、
 	// imagegen 仅 pi、imageGenLocked 锁定）由专用 hook 统一维护（原 ComposerModeSelect 逻辑）。
 	const { visibleModes, refreshAvailability } = useComposerModeAvailability({
@@ -506,11 +541,10 @@ export function ComposerBottomBar(props: {
 							<ComposerBackendPicker backend={props.backend ?? "pi"} acpToolId={props.acpTool?.toolId} disabled={props.disabled} onChangeBackend={props.onChangeBackend} />
 						</>
 					) : props.backend ? (
-						/* 后端已锁定（会话激活后不可切换：pi 文件与 DSH session log 格式不同，
+						/* 后端已锁定（已发出第一条消息：pi 文件、DSH session log 与生图/生视频历史格式互不相同，
 						   中途切换会导致消息同步渲染不可靠）：只读标识，只显示官方 logo 不重复文字。
 						   inline-flex 居中：span 默认 inline，svg 按 baseline 排会偏上，
 						   与底栏其它按钮（flex 居中 15px 图标）水平不平齐。
-						   用户输入时 Agent 可能已被自动启动、后端随之锁定，但用户不一定知情；
 						   点击时弹提示说明锁定原因与换后端的途径（新建会话）。 */
 						<button
 							type="button"
@@ -523,6 +557,8 @@ export function ComposerBottomBar(props: {
 								<DshLogo className="size-[15px] shrink-0" />
 							) : props.backend === "imagegen" ? (
 								<ImageIcon className="size-[15px] shrink-0 text-muted-foreground" />
+							) : props.backend === "videogen" ? (
+								<Clapperboard className="size-[15px] shrink-0 text-muted-foreground" />
 							) : props.backend === "acp" ? (
 								<Terminal className="size-[15px] shrink-0 text-muted-foreground" />
 							) : (
@@ -530,17 +566,18 @@ export function ComposerBottomBar(props: {
 							)}
 						</button>
 					) : null}
-					{/* 特殊模式退出×：只在模式 chip 缺席时渲染（生图会话 / 设置里隐藏了选择器 /
-					    只剩 normal 一项）——chip 在场时它自己就是开关，下拉里选「普通模式」即可退出，
+					{/* 特殊模式退出×：只在模式 chip 缺席时渲染（设置里隐藏了选择器 / 只剩 normal 一项 /
+					    plan+goal 扩展都关了）——chip 在场时它自己就是开关，下拉里选「普通模式」即可退出，
 					    与这里的 setMode("normal") 同一条路径，不再重复摆第二个按钮。
-					    imageGenLocked 时无法切走，故一律不显示。 */}
-					{isSpecialMode && !props.imageGenLocked && !modeSwitcherVisible && (
+					    imageGenLocked（legacy pi 生图会话）与 mediaModeIsBackend（生图/生视频后端）
+					    两种情况下 setMode 都会被 controller 直接拦回，一律不显示。 */}
+					{isSpecialMode && !props.imageGenLocked && !mediaModeIsBackend && !modeSwitcherVisible && (
 						<div className="composer-mode-cluster inline-flex h-7 min-w-0 items-center rounded-md bg-bg-hover pr-0.5">
 							<button
 								type="button"
 								className="composer-mode-exit mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-text-tertiary transition-[color,background-color] duration-fast hover:bg-bg-active hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
-								aria-label={isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : t("app.composerModeCancelPlan")}
-								title={isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : t("app.composerModeCancelPlan")}
+								aria-label={isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : isVideoGenMode ? t("app.composerModeCancelVideogen") : t("app.composerModeCancelPlan")}
+								title={isGoalMode ? t("app.composerModeCancelGoal") : isImageGenMode ? t("app.composerModeCancelImagegen") : isVideoGenMode ? t("app.composerModeCancelVideogen") : t("app.composerModeCancelPlan")}
 								disabled={props.disabled}
 								onClick={props.onCancelPlan}
 							>
@@ -596,8 +633,8 @@ export function ComposerBottomBar(props: {
 							</Button>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="start" sideOffset={4} className="min-w-44">
-							{/* 生图模式用图片粘贴添加参考图，不需要文件选择器上传附件 */}
-							{!isImageGenMode && (
+							{/* 生图模式用图片粘贴添加参考图，不需要文件选择器上传附件；生视频一期不支持参考素材，附件无落点，同样不提供上传 */}
+							{!isMediaComposer && (
 								<DropdownMenuItem onSelect={() => props.onAttachFile()}>
 									<Paperclip size={14} strokeWidth={2} aria-hidden="true" />
 									{t("app.composerAddAttach")}
@@ -613,18 +650,19 @@ export function ComposerBottomBar(props: {
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
-					{props.feishuIndicator}
-					{/* 生图模式无 pi/DSH runtime：安全等级（pi 安全门）与 DSH 权限预设都对图片生成无意义，
+					{/* 生图/生视频后端无 pi/DSH runtime：安全等级（pi 安全门）与 DSH 权限预设都对图片/视频生成无意义，
 					   且 SecurityControl 按 backend 分发时没有 imagegen 分支会误显示成 pi 安全等级菜单；
-					   快捷消息同理（正文是给对话模型的指令），两个控制位一起屏蔽。 */}
-					{isImageGenMode ? null : (
+					   飞书镜像把输入同步到 IM，生图/生视频的 prompt 不走会话 runtime；
+					   快捷消息同理（正文是给对话模型的指令），四个控制位一起屏蔽。 */}
+					{isMediaComposer ? null : (
 						<>
+							{props.feishuIndicator}
 							{props.securityControl}
 							{props.quickMessagesControl}
 						</>
 					)}
 				</div>
-				<div className={`composer-bottom-center flex min-w-0 flex-1 items-center justify-center gap-4${isImageGenMode ? " overflow-x-auto overflow-y-hidden [scrollbar-width:none]" : " overflow-hidden"}`}>
+				<div className={`composer-bottom-center flex min-w-0 flex-1 items-center justify-center gap-4${isImageGenMode || isVideoGenMode ? " overflow-x-auto overflow-y-hidden [scrollbar-width:none]" : " overflow-hidden"}`}>
 					{isImageGenMode && props.imageGenOptions ? (
 						<ComposerImageGenOptions
 							config={props.imageGenOptions.config}
@@ -640,10 +678,23 @@ export function ComposerBottomBar(props: {
 							onWatermarkChange={props.imageGenOptions.onWatermarkChange}
 						/>
 					) : null}
-					{/* 生图模式用独立供应商/模型下拉，不展示会话 LLM chip，避免两套配置混用。
+					{isVideoGenMode && props.videoGenOptions ? (
+						<ComposerVideoGenOptions
+							config={props.videoGenOptions.config}
+							providerId={props.videoGenOptions.providerId}
+							modelId={props.videoGenOptions.modelId}
+							resolution={props.videoGenOptions.resolution}
+							duration={props.videoGenOptions.duration}
+							ratio={props.videoGenOptions.ratio}
+							disabled={props.disabled}
+							onSelectionChange={props.videoGenOptions.onSelectionChange}
+							onParamChange={props.videoGenOptions.onParamChange}
+						/>
+					) : null}
+					{/* 生图/生视频模式用独立供应商/模型下拉，不展示会话 LLM chip，避免两套配置混用。
 					    ACP 同理：模型/思考由 agent CLI 自持（session/config options 或各自 /model 命令），
 					    PiDeck 维护的 models.json 对 agent CLI 无意义，隐藏 chip 防止两套语义混用。 */}
-					{isImageGenMode || props.backend === "acp" ? null : (
+					{isMediaComposer || props.backend === "acp" ? null : (
 						<ModelThinkingChip modelLabel={modelLabel} modelPendingTo={modelDisplay.pending && modelTo ? modelTo.modelName || modelTo.modelId : undefined} modelPendingTitle={modelPendingTitle} disabled={props.modelDisabled ?? props.disabled} onPickModel={props.onPickModel} thinkingControl={props.thinkingControl} />
 					)}
 					{/* ACP：模型/思考档/模式选择器,枚举来自 agent 回传的 configOptions

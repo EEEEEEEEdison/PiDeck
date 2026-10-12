@@ -2034,6 +2034,11 @@
 .rpc-log-entry:hover {
   background: var(--color-bg-hover);
 }
+/* role=button 后键盘可达：补焦点环（与仓库 inset 环惯例一致） */
+.rpc-log-entry:focus-visible {
+  outline: none;
+  box-shadow: inset var(--focus-ring);
+}
 .rpc-log-entry.log-send {
   color: var(--rpc-log-send);
 }

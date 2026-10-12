@@ -14,6 +14,7 @@ import type { DataEnvChoiceFailure, DataEnvChoiceResult, DataEnvInfo, DataEnvMod
 import type { GitExecutableInfo } from "../shared/types/git";
 import type { DshRunnerNodeInfo, DshRunnerNodeInstallResult } from "../shared/types/dshRunnerNode";
 import type { ImageBlobPayload, ImageGenConfigFile, ImageGenRequest, ImageGenResult, ImageGenSaveResult } from "../shared/types/imagegen";
+import type { VideoGenConfigFile, VideoGenRequest, VideoGenSaveResult, VideoGenSubmitResult, VideoGenJobSnapshot } from "../shared/types/videogen";
 import type { CustomThemeListItem } from "../shared/customThemes";
 import type { CatalogCheckResult, CatalogUpdateResult, CatalogUpdateStatus } from "../shared/types/catalog";
 import type { BuiltInExtensionsCheckResult, BuiltInExtensionsUpdateResult, BuiltInExtensionsUpdateStatus } from "../shared/types/extensionsUpdate";
@@ -1574,6 +1575,18 @@ const api = {
 		saveConfig: (config: ImageGenConfigFile) => ipcRenderer.invoke(ipcChannels.imagegenSaveConfig, config) as Promise<ImageGenSaveResult>,
 		/** 按 blob 引用名取回落盘图片 base64（历史消息只带 ref，展示走 pideck-img://） */
 		readImageBlob: (ref: string) => ipcRenderer.invoke(ipcChannels.imagegenReadImageBlob, ref) as Promise<ImageBlobPayload | null>,
+	},
+
+	// ── 生视频：独立 videogen.json 凭据 + 提交/轮询异步协议（与生图同域不同生命周期） ──
+	videogen: {
+		submit: (request: VideoGenRequest) => ipcRenderer.invoke(ipcChannels.videogenSubmit, request) as Promise<VideoGenSubmitResult>,
+		cancel: (jobId: string) => ipcRenderer.invoke(ipcChannels.videogenCancel, jobId) as Promise<{ ok: boolean }>,
+		getConfig: () => ipcRenderer.invoke(ipcChannels.videogenGetConfig) as Promise<VideoGenConfigFile>,
+		saveConfig: (config: VideoGenConfigFile) => ipcRenderer.invoke(ipcChannels.videogenSaveConfig, config) as Promise<VideoGenSaveResult>,
+		/** 重启后恢复：某会话全部任务快照（渲染层重建进行中占位） */
+		listJobs: (sessionId: string) => ipcRenderer.invoke(ipcChannels.videogenListJobs, sessionId) as Promise<VideoGenJobSnapshot[]>,
+		/** 任务状态推送（主进程 → 渲染层；组件卸载必须退订） */
+		onEvent: (callback: (snapshot: VideoGenJobSnapshot) => void) => subscribe(ipcChannels.videogenEvent, callback),
 	},
 
 	// ── 提示词增强：独立 sidecar 复用用户那套 pi 的 ModelRuntime，流式事件按 runId 推送 ──

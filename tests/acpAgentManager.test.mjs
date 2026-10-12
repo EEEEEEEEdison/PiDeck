@@ -96,6 +96,7 @@ function harness(t, cliOptions, depsExtra = {}) {
 		piLocator: { createInvocation: (command, args) => ({ command, args, shell: false }), createProcessEnv: () => ({}) },
 		getProject: (id) => ({ path: `D:/proj-${id}` }),
 		getTools: () => [{ id: "gemini", name: "Gemini CLI", command: "gemini", args: ["--experimental-acp"], enabled: true }],
+		isEnabled: () => true,
 		onTitleChanged: () => {},
 		...depsExtra,
 	});
@@ -113,6 +114,30 @@ function harness(t, cliOptions, depsExtra = {}) {
 }
 
 const TOOL = { id: "gemini", name: "Gemini CLI", command: "gemini", args: ["--experimental-acp"], enabled: true };
+
+test("总开关运行时判定:关闭时拒绝 spawn,打开后同一实例立即可用(不必重启应用)", async (t) => {
+	let enabled = false;
+	const { createAgent, spawnCalls, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+				if (frame.method === "session/new") return { sessionId: "sess-1" };
+				return {};
+			},
+		},
+		{ isEnabled: () => enabled },
+	);
+	// 开关在 create 边界实时判定：关闭时既不起进程，也覆盖「从历史恢复 ACP 会话」这条不经过后端下拉的路径
+	await assert.rejects(() => createAgent(), /ACP backend is disabled in settings/);
+	assert.equal(spawnCalls.length, 0, "关闭时不得 spawn 任何 CLI");
+	// 设置页打开开关后同一 manager 实例立即生效（网关启动时已常驻注册，开关不需要重启）
+	enabled = true;
+	const tab = await createAgent();
+	assert.equal(tab.backend, "acp");
+	assert.equal(spawnCalls.length, 1, "打开后立即允许 spawn");
+	assert.equal(lastProc().methodFrames("initialize").length, 1, "新进程完成握手");
+});
 
 test("握手:initialize → session/new;工具命令与项目 cwd 传给 spawn", async (t) => {
 	const calls = [];

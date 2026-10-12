@@ -1864,3 +1864,91 @@ test("catalog mutation returns success when runtime re-activates mid-write (file
 	assert.equal(result.ok, true, "文件已持久化的变更应按成功返回，而不是误导性的 BUSY");
 	assert.equal(harness.calls.mutatePersisted.length, 1);
 });
+
+/** 记录 coordinator 自己发起的 detach 推送（拷贝一份，避免断言时读到被后续改写的对象）。 */
+function collectDetachedBindings(coordinator) {
+	const detached = [];
+	coordinator.setDetachedNotifier((binding) => detached.push({ ...binding }));
+	return detached;
+}
+
+/** 绑定 session-1 → agent-a 的测试前置：catalog 有文件路径，agent 行按用例给状态。 */
+function bindTerminalHarness(tabs, logger) {
+	const { SessionRuntimeCoordinator } = loadCoordinator();
+	const harness = createHarness({ entry: catalogEntry({ filePath: "C:/sessions/session-1.jsonl", status: "active" }), tabs });
+	const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender, logger);
+	const runtimeGeneration = coordinator.bindExistingAgent("session-1", "agent-a");
+	return { harness, coordinator, runtimeGeneration };
+}
+
+for (const [label, tabs] of [
+	["error 且进程已死", [{ id: "agent-a", status: "error", sessionPath: "C:/sessions/session-1.jsonl", createdAt: 1 }]],
+	["closed", [{ id: "agent-a", status: "closed", sessionPath: "C:/sessions/session-1.jsonl", createdAt: 1 }]],
+	["agent 已从列表消失", []],
+]) {
+	test(`终态惰性解绑推 detach：${label}`, () => {
+		// 回归（2026-10）：getAgentId 在查询路径里静默解绑终态 agent，渲染层快照因而永远停在
+		// error——红点常亮、「关闭 Agent」对着不存在的运行实例反复失败。解绑必须推 detach。
+		const { coordinator, runtimeGeneration } = bindTerminalHarness(tabs);
+		const detached = collectDetachedBindings(coordinator);
+
+		assert.equal(coordinator.getTarget("session-1"), undefined);
+		assert.deepEqual(detached, [{ sessionId: "session-1", agentId: "agent-a", runtimeGeneration }]);
+
+		// 幂等：绑定已丢，重复查询不得反复推（渲染层不需要重复收敛）
+		assert.equal(coordinator.getAgentId("session-1"), undefined);
+		assert.equal(detached.length, 1);
+	});
+}
+
+test("live runtime 与「复活成功」的 error runtime 都不推 detach", () => {
+	const live = bindTerminalHarness([{ id: "agent-a", status: "idle", sessionPath: "C:/sessions/session-1.jsonl", createdAt: 1 }]);
+	const liveDetached = collectDetachedBindings(live.coordinator);
+	assert.equal(live.coordinator.getTarget("session-1").agentId, "agent-a");
+	assert.deepEqual(liveDetached, []);
+
+	// 回复级错误（Issue #218）进程仍存活：先复活复用原进程，同样不得推 detach 把绑定打掉
+	const revived = bindTerminalHarness([{ id: "agent-a", status: "error", sessionPath: "C:/sessions/session-1.jsonl", createdAt: 1 }]);
+	revived.harness.agents.reviveIfProcessAlive = (agentId) => {
+		const tab = revived.harness.tabs.find((candidate) => candidate.id === agentId);
+		if (!tab) return false;
+		tab.status = "idle";
+		return true;
+	};
+	const revivedDetached = collectDetachedBindings(revived.coordinator);
+	assert.equal(revived.coordinator.getTarget("session-1").agentId, "agent-a");
+	assert.deepEqual(revivedDetached, []);
+});
+
+test("detach 推送抛错不连带让查询失败（解绑发生在读写盘 IPC 路径里）", () => {
+	const warns = [];
+	const logger = {
+		info: () => {},
+		warn: (scope, message, detail) => warns.push({ scope, message, detail }),
+		error: () => {},
+	};
+	const { coordinator, runtimeGeneration } = bindTerminalHarness([{ id: "agent-a", status: "closed", sessionPath: "C:/sessions/session-1.jsonl", createdAt: 1 }], logger);
+	coordinator.setDetachedNotifier(() => {
+		throw new Error("webContents destroyed");
+	});
+
+	assert.doesNotThrow(() => coordinator.getTarget("session-1"));
+	assert.equal(coordinator.getRuntimeBinding("agent-a"), undefined);
+	assert.equal(warns.length, 1);
+	assert.equal(warns[0].scope, "session-runtime");
+	assert.equal(warns[0].message, "Runtime detach notification failed");
+	assert.deepEqual({ ...warns[0].detail, error: undefined }, { sessionId: "session-1", agentId: "agent-a", runtimeGeneration, error: undefined });
+	// 沙箱内 Error 与本进程不是同一构造器，错误文本按 String(error) 形态断言
+	assert.match(String(warns[0].detail.error), /webContents destroyed/);
+});
+
+test("main 装配把惰性解绑接成 sessions:runtime-detach 推送", () => {
+	const mainSource = readFileSync("src/main/index.ts", "utf8");
+	const coordinatorSource = readFileSync("src/main/sessions/SessionRuntimeCoordinator.ts", "utf8");
+
+	// 装配层必须注入通知器，且走既有的 detach 信封（渲染层只认这一条协议）
+	assert.match(mainSource, /sessionRuntimeCoordinator\.setDetachedNotifier\(\(binding\)\s*=>\s*emitSessionRuntimeDetach\(binding\)\)/);
+	// 只在终态惰性解绑这一处推：stop/restart/删除的解绑由调用方推送，重复推会打乱代际判定
+	assert.match(coordinatorSource, /this\.unbindTerminalAgent\(agentId\);\s*\/\/[^\n]*\n\s*if \(binding\) this\.notifyRuntimeDetached\(\{ \.\.\.binding, agentId \}\);/);
+	assert.equal(coordinatorSource.match(/notifyRuntimeDetached\(/g).length, 2, "notifyRuntimeDetached 只应有定义 + 终态解绑一处调用");
+});

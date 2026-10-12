@@ -159,7 +159,7 @@ export function StorageTab(props: { settings: AppSettings; onChange: (patch: Par
 				<ConfirmDialog title={confirmDialog.title} message={confirmDialog.message} danger onConfirm={confirmDialog.onConfirm} onCancel={() => setConfirmDialog(null)} />
 			)}
 			{/* 操作（清理全部）放最上面，日志相关内容依次下移 */}
-			<SettingsSection title={t("settings.storage.actions")}>
+			<SettingsSection id="settings-section-storage-actions" title={t("settings.storage.actions")}>
 				<SettingRow level={1} title={<span>{t("settings.storage.clearAll")}</span>} description={t("settings.storage.clearAllDesc")}>
 					<Button variant="destructive" loading={clearing === "all"} disabled={clearing !== null} onClick={() => confirmClear("all", `${t("settings.storage.appLogs")} + ${t("settings.storage.rpcLogs")} + ${t("settings.storage.pasteFiles")} + ${t("settings.storage.noticeHistory")}`)}>
 						{t("settings.storage.clearAllButton")}
@@ -173,7 +173,7 @@ export function StorageTab(props: { settings: AppSettings; onChange: (patch: Par
 					</Button>
 				</SettingRow>
 			</SettingsSection>
-			<SettingsSection title={t("settings.storage.rpcLogs")}>
+			<SettingsSection id="settings-section-storage-rpc-logs" title={t("settings.storage.rpcLogs")}>
 				<div className="flex items-center justify-between gap-3 px-0.5 py-1.5">
 					<span className="text-caption text-muted-foreground">
 						{t("settings.storage.rpcLogsSize")}：
@@ -190,7 +190,7 @@ export function StorageTab(props: { settings: AppSettings; onChange: (patch: Par
 				</div>
 			</SettingsSection>
 			{/* 粘贴文件：输入框长文本自动转文件的落盘位置（userData/paste-files，另含各项目遗留 .pideck-paste） */}
-			<SettingsSection title={t("settings.storage.pasteFiles")} description={t("settings.storage.pasteFilesDesc")}>
+			<SettingsSection id="settings-section-storage-paste-files" title={t("settings.storage.pasteFiles")} description={t("settings.storage.pasteFilesDesc")}>
 				<div className="flex items-center justify-between gap-3 px-0.5 py-1.5">
 					<span className="text-caption text-muted-foreground">
 						{t("settings.storage.pasteFilesSize")}：
@@ -207,7 +207,7 @@ export function StorageTab(props: { settings: AppSettings; onChange: (patch: Par
 				</div>
 			</SettingsSection>
 			{/* 通知历史：toast 落盘存档（userData/notice-history.json，重启后仍可在通知历史面板回看） */}
-			<SettingsSection title={t("settings.storage.noticeHistory")} description={t("settings.storage.noticeHistoryDesc")}>
+			<SettingsSection id="settings-section-storage-notice-history" title={t("settings.storage.noticeHistory")} description={t("settings.storage.noticeHistoryDesc")}>
 				<div className="flex items-center justify-between gap-3 px-0.5 py-1.5">
 					<span className="text-caption text-muted-foreground">
 						{t("settings.storage.noticeHistorySize")}：
@@ -224,7 +224,7 @@ export function StorageTab(props: { settings: AppSettings; onChange: (patch: Par
 				</div>
 			</SettingsSection>
 			{/* 应用日志（最底部）：管理行 + 查看器；不套淡色框，避免日志多时在刷新区形成多余框边 */}
-			<SettingsSection title={t("settings.storage.appLogs")} boxed={false}>
+			<SettingsSection id="settings-section-storage-app-logs" title={t("settings.storage.appLogs")} boxed={false}>
 				<div className="flex items-center justify-between gap-3 px-0.5 py-1.5">
 					<span className="text-caption text-muted-foreground">
 						{t("settings.storage.appLogsSize")}：

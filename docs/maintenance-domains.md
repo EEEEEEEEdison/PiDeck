@@ -84,6 +84,8 @@
 - 指南 `AI-PLUGIN-GUIDE.md` 由 `pluginDevGuide.ts` 双语生成、写入用户扩展目录并覆盖旧版（生成物不备份）；demo 插件 `resources/plugin-dev/pi-deck-demo-plugin.ts` 复制到同目录，**已存在不覆盖**（用户改过的模板）。落盘路径固定 `~/.pi/agent/extensions/`，home 与 `ExtensionManager.userHomeDir` 同源（WSL 跟随扩展列表解析），保证复制进去的文件一定被扩展页本地扫描发现。
 - `resources/plugin-dev` 必须在 `extraResources`（filter `*.ts`）里，漏了打包版「复制 demo」直接报错（源缺失显式抛错，不静默）；demo **不在** `BUILT_IN_EXTENSIONS` 白名单（不是 `-e` 注入的内置扩展，是拷给用户的起步文件）。
 - 架构/文件地图/更新步骤详见 `docs/plugin-dev-guide.md`；无热重载（改插件重启会话），这是文档化的有意取舍。
+- **应用内入口已隐藏**（宿主插件系统接替）：`ExtensionsTab` 不再渲染「插件开发」页签（`PluginDevSection.tsx`、`pluginDev:*` IPC、`PluginDevService` 与 i18n 文案全部保留，只是没有入口）。
+- 同时下线的还有桥与扩展点面板两个内置扩展：`HIDDEN_BUILT_IN_EXTENSIONS`（`pi-deck-gui-bridge.ts`、`pi-deck-ext-points.ts`）——它们仍在 `BUILT_IN_EXTENSIONS` 表内（白名单校验与启动时清理历史部署副本要用），但 `listActiveBuiltInExtensionPaths` 无条件跳过、`ExtensionManager.list` 也不补行，因此**不注入 `-e`、不上扩展页**。刻意**不**走 `removedBuiltInExtensions` 禁用机制：那条路会写用户设置并参与命令行白名单计算，属于本需求不需要的副作用；隐藏是硬开关，历史 `enabledBuiltInExtensions` 残留（opt-in）也复活不了它们。
 
 ## 宿主插件（userData/host-plugins：独立于 pi 进程的 PiDeck 原生插件）
 

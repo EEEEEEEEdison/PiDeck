@@ -1,8 +1,8 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
-import { useAtom } from "jotai";
+import { useAtom, useSetAtom } from "jotai";
 import { Plus, Trash2 } from "lucide-react";
 import { desktopApi } from "../../../desktopApi";
-import { acpToolsAtom } from "../../../atoms";
+import { acpEnabledAtom, acpToolsAtom } from "../../../atoms";
 import { t } from "../../../i18n";
 import type { AcpToolConfig } from "../../../../../shared/types/acp";
 import type { AcpToolPreset } from "../../../../../shared/acpToolPresets";
@@ -42,8 +42,10 @@ function envFromText(text: string): Record<string, string> | undefined {
  * 设置弹窗「ACP 工具」tab:总开关(opt-in)+ 预设工具生命周期(检测/安装/卸载)+ settings.acpTools 表。
  *
  * 数据流(与 pi/dsh 设置无关的独立持久层,模式同生图 tab):
- * - 总开关即时写盘(settings.acpEnabled,同 WebRemoteAccessSection 模式),变更重启生效;
- *   关闭态只显示引导文案——opt-in,pi 用户零运行时成本(主进程不注册 ACP 网关)。
+ * - 总开关即时写盘(settings.acpEnabled,同 WebRemoteAccessSection 模式),并同步回
+ *   acpEnabledAtom：后端下拉/新建会话菜单读的就是这个 atom，不同步就得重启应用才看得到 ACP 入口。
+ *   主进程侧网关常驻注册、开关在 create 边界实时读，所以「改开关 → 立即能用」整条链路成立；
+ *   关闭态只显示引导文案——opt-in,pi 用户零运行时成本(不 spawn 任何 CLI)。
  * - 预设芯片(AcpPresetChips)管「本机 CLI 装没装」:检测只读,npm 安装/卸载经确认弹窗。
  * - 工具表初值来自 acpToolsAtom(App 挂载时经 acpToolsList IPC 拉取),保存走
  *   acpToolsSave(主进程 sanitizeAcpTools 消毒落盘,返回规范化表),成功后
@@ -56,6 +58,7 @@ export type AcpToolsTabHandle = { save: () => Promise<boolean> };
 
 export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirty: boolean) => void }>(function AcpToolsTab(props, ref) {
 	const [saved, setSaved] = useAtom(acpToolsAtom);
+	const setAcpEnabledAtom = useSetAtom(acpEnabledAtom);
 	const [rows, setRows] = useState<AcpToolRow[]>([]);
 	const [hydrated, setHydrated] = useState(false);
 	const [saving, setSaving] = useState(false);
@@ -79,15 +82,21 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 		};
 	}, []);
 
-	const toggleEnabled = useCallback(async (next: boolean) => {
-		setEnabled(next);
-		try {
-			await desktopApi.settings.update({ acpEnabled: next });
-		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : String(cause));
-			setEnabled(!next);
-		}
-	}, []);
+	const toggleEnabled = useCallback(
+		async (next: boolean) => {
+			setEnabled(next);
+			// 同步快照，否则后端下拉/新建会话菜单要重启应用才看得到 ACP 入口
+			setAcpEnabledAtom(next);
+			try {
+				await desktopApi.settings.update({ acpEnabled: next });
+			} catch (cause) {
+				setError(cause instanceof Error ? cause.message : String(cause));
+				setEnabled(!next);
+				setAcpEnabledAtom(!next);
+			}
+		},
+		[setAcpEnabledAtom],
+	);
 
 	// 挂载时以 atom 快照为初值;之后只经保存回写,弹窗开关不重复拉 IPC
 	useEffect(() => {
