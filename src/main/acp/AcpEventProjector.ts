@@ -7,7 +7,8 @@
  *
  * 投影规则(与渲染层既有卡片契约对齐,见 dshEventProjector 的 meta 约定):
  * - user_message_chunk:user 消息回显(渲染层对 acp 后端不本地 append,靠投影回显,
- *   与 DSH 同策略——避免发送方与 agent 回显双条)。
+ *   与 DSH 同策略——避免发送方与 agent 回显双条)。agent 不回显时由 appendAcpUserPrompt
+ *   在 prompt 派发处本地落条目(见该函数:ACP 规范里回显是 agent 的可选行为)。
  * - agent_message_chunk / agent_thought_chunk:聚合进「当前回合」的一条 assistant
  *   流式消息;thoughtChunk 写 thinking 字段(渲染层思考折叠块)。
  * - tool_call:role="tool" 卡片消息,meta.status 驱动旋转动画;同一 toolCallId 的
@@ -17,6 +18,7 @@
  * - unknown update:忽略(前向兼容,规范允许新增 update 类型)。
  */
 import type { AcpSessionUpdate, AcpToolCallUpdate } from "./acpProtocol";
+import { fallbackSessionTitle } from "../dsh/dshSessionTitleFold";
 import type { TodoItem } from "../../shared/types/todo";
 import type { ChatMessage } from "../../shared/types/session";
 import type { PiCommand } from "../../shared/types/app";
@@ -34,6 +36,12 @@ export type AcpProjectionState = {
 	commands: PiCommand[];
 	/** 最近一次 session_info_update 的标题(供 catalog 回写)。 */
 	title?: string;
+	/**
+	 * 本地 prompt 回显待去重队列（文本 + agent 已回显的字符数）。
+	 * 见 appendAcpUserPrompt：agent 回显 user_message_chunk 时按前缀消费，
+	 * 避免同一条用户消息在时间线上出现两次。
+	 */
+	localUserEchoes?: Array<{ text: string; echoed: number }>;
 	/**
 	 * 投影侧信道：本次 update 触及的 messages 下标（无消息变更时为 undefined）。
 	 *
@@ -104,7 +112,23 @@ export function projectAcpSessionUpdate(state: AcpProjectionState, update: AcpSe
 			const content = update.content as { type?: string; text?: string; data?: string; mimeType?: string } | undefined;
 			if (!content || typeof content !== "object") return state;
 			if (content.type === "text" && typeof content.text === "string" && content.text) {
-				next.messages = [...state.messages, { id: nextMessageId(), agentId, role: "user", text: content.text, timestamp: Date.now() }];
+				const chunkText = content.text;
+				// 本地回显去重：prompt 派发时 appendAcpUserPrompt 已把用户消息写进投影，
+				// agent 再把同文回显一遍就会双条。按「前缀」匹配而不是整串相等——
+				// 有的 agent 把用户消息也按 chunk 分片流式回显。
+				const pending = state.localUserEchoes ?? [];
+				const echoIndex = pending.findIndex((entry) => entry.text.slice(entry.echoed).startsWith(chunkText));
+				if (echoIndex >= 0) {
+					const entry = pending[echoIndex];
+					const echoed = entry.echoed + chunkText.length;
+					// 回显完就出队；未回完保留进度，后续分片继续消费。
+					next.localUserEchoes = echoed >= entry.text.length ? [...pending.slice(0, echoIndex), ...pending.slice(echoIndex + 1)] : [...pending.slice(0, echoIndex), { text: entry.text, echoed }, ...pending.slice(echoIndex + 1)];
+					return next;
+				}
+				// 与本地条目都不同文：是 agent 自己的用户侧消息(如注入的上下文)，照常追加；
+				// 本地未回显条目不再期待回显（否则后续同文回显会被误吞），只留下回显到一半的。
+				next.localUserEchoes = pending.filter((entry) => entry.echoed > 0);
+				next.messages = [...state.messages, { id: nextMessageId(), agentId, role: "user", text: chunkText, timestamp: Date.now() }];
 				next.lastTouched = [state.messages.length];
 				return next;
 			}
@@ -255,4 +279,57 @@ export function acpPromptBlocks(text: string, images?: ReadonlyArray<{ type: str
 		}
 	}
 	return blocks;
+}
+
+export function rollbackAcpUserPrompt(state: AcpProjectionState, index: number): AcpProjectionState {
+	// 撤回条件：本次 prompt 落的条目仍是最后一条，且 agent 没有在回显中途
+	// （有回显进度说明它已经收到 prompt，撤掉本地条目会与 agent 侧会话不一致）。
+	if (index < 0 || state.messages.length !== index + 1) return state;
+	if (state.messages[index]?.role !== "user") return state;
+	const echoes = state.localUserEchoes ?? [];
+	if (echoes.some((entry) => entry.echoed > 0)) return state;
+	return { ...state, messages: state.messages.slice(0, index), localUserEchoes: echoes.slice(0, -1), lastTouched: undefined };
+}
+
+/**
+ * 把用户发出的 prompt 写进投影（本地回显）+ 首条提示兜底标题。
+ *
+ * 为什么主进程要自己写：ACP 的 `user_message_chunk` 是 agent 的**可选**回显
+ * （规范只说 agent 需要时把用户输入回放给 client），OpenCode 等实现根本不发，
+ * 而 ACP 的 `agents:message` 是**全量替换**语义（渲染层缓存整段被覆盖），
+ * 于是渲染层发出的乐观用户气泡会被第一次 flush 抹掉——表现为「只显示 AI 回复，
+ * 用户消息不见了」。条目落在主进程侧，时间线（含渲染层、导出、重载）才与
+ * agent 是否回显无关。
+ *
+ * 标题：ACP 会话没有本地文件，agent 只在自己愿意时发 `session_info_update`，
+ * 因此首条 prompt 就按确定性规则兜底一个标题（与 DSH 的回退标题同一套截断规则，
+ * 不另起第二套），agent 后续给出的标题仍会覆盖它（last-wins）。
+ *
+ * 调用方在派发失败且 agent 未产出任何内容时用 rollbackAcpUserPrompt 撤回本条。
+ */
+export function appendAcpUserPrompt(state: AcpProjectionState, text: string, images: ReadonlyArray<{ type: string; mimeType?: string; data?: string }> | null | undefined, agentId: string): AcpProjectionState {
+	const imageBlocks: Array<{ type: "image"; mimeType: string; data: string }> = [];
+	for (const image of images ?? []) {
+		if (image?.type === "image" && typeof image.data === "string" && typeof image.mimeType === "string") imageBlocks.push({ type: "image", mimeType: image.mimeType, data: image.data });
+	}
+	if (!text && imageBlocks.length === 0) return state;
+	const message: ChatMessage = {
+		id: nextMessageId(),
+		agentId,
+		role: "user",
+		text,
+		...(imageBlocks.length ? { images: imageBlocks } : {}),
+		timestamp: Date.now(),
+	};
+	const title = state.title ?? (text ? fallbackSessionTitle(text) : "");
+	return {
+		...state,
+		messages: [...state.messages, message],
+		// 队列只保留「回显到一半」的条目 + 本条：agent 全程不回显时（OpenCode 等）
+		// 不会每条 prompt 都留一个永不消费的条目。
+		localUserEchoes: [...(state.localUserEchoes ?? []).filter((entry) => entry.echoed > 0), { text, echoed: 0 }],
+		...(title ? { title } : {}),
+		lastTouched: [state.messages.length],
+		replayed: true,
+	};
 }

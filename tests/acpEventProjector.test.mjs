@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { initialAcpProjection, projectAcpSessionUpdate, settleAcpTurn, ACP_TOOL_RESULT_MAX_CHARS } = loadTsCommonJs("src/main/acp/AcpEventProjector.ts");
+const { initialAcpProjection, projectAcpSessionUpdate, settleAcpTurn, appendAcpUserPrompt, rollbackAcpUserPrompt, ACP_TOOL_RESULT_MAX_CHARS } = loadTsCommonJs("src/main/acp/AcpEventProjector.ts");
 
 const AGENT = "agent-1";
 
@@ -161,4 +161,90 @@ test("lastTouched reports the message indices touched by this update (materializ
 	// 与消息无关的 update:不报 touched
 	state = step(state, { sessionUpdate: "session_info_update", sessionTitle: "t" });
 	assert.equal(state.lastTouched, undefined);
+});
+
+/**
+ * 本地 prompt 回显（2026-10 用户反馈：ACP 时间线只有 AI 回复，用户消息不见了）。
+ * ACP 的 user_message_chunk 是 agent 的可选回显，OpenCode 等不发；条目必须由主进程
+ * 在 prompt 派发处落下，否则渲染层的乐观气泡会被 agents:message 全量替换抹掉。
+ */
+test("appendAcpUserPrompt seeds the user message and a fallback title", () => {
+	const state = appendAcpUserPrompt(initialAcpProjection(), "帮我修复登录页面的 bug", null, AGENT);
+	assert.equal(state.messages.length, 1);
+	assert.equal(state.messages[0].role, "user");
+	assert.equal(state.messages[0].text, "帮我修复登录页面的 bug");
+	assert.equal(state.messages[0].agentId, AGENT);
+	assert.equal(state.replayed, true);
+	assert.ok(state.title && state.title.length > 0, "首条 prompt 必须兜底一个标题，否则 ACP 会话标题永远不变");
+	assert.deepEqual([...state.lastTouched], [0], "图片物化需要知道新条目下标");
+});
+
+test("appendAcpUserPrompt keeps image blocks and skips empty prompts", () => {
+	const empty = appendAcpUserPrompt(initialAcpProjection(), "", [], AGENT);
+	assert.equal(empty.messages.length, 0, "空 prompt 不落条目");
+	assert.equal(empty.title, undefined, "空 prompt 不产生标题");
+	const withImage = appendAcpUserPrompt(initialAcpProjection(), "看图", [{ type: "image", mimeType: "image/png", data: "abcd" }], AGENT);
+	assert.equal(withImage.messages[0].images[0].mimeType, "image/png");
+});
+
+test("un-echoed prompts do not accumulate pending echo entries", () => {
+	let state = appendAcpUserPrompt(initialAcpProjection(), "first", null, AGENT);
+	state = appendAcpUserPrompt(state, "second", null, AGENT);
+	state = appendAcpUserPrompt(state, "third", null, AGENT);
+	assert.equal(state.messages.length, 3);
+	assert.equal(state.localUserEchoes.length, 1, "全程不回显的 agent 不应每条 prompt 留一个永不消费的条目");
+	assert.equal(state.localUserEchoes[0].text, "third");
+});
+
+test("agent echo of the seeded prompt is deduped by prefix, not appended twice", () => {
+	let state = appendAcpUserPrompt(initialAcpProjection(), "hello world", null, AGENT);
+	// 流式回显：分片也要能被前缀消费（否则每条分片都会变成一条新用户消息）
+	state = step(state, { sessionUpdate: "user_message_chunk", content: { type: "text", text: "hello" } });
+	state = step(state, { sessionUpdate: "user_message_chunk", content: { type: "text", text: " world" } });
+	assert.equal(state.messages.length, 1, "agent 回显同文不得追加第二条");
+	assert.equal(state.messages[0].text, "hello world");
+	assert.equal(state.localUserEchoes.length, 0, "消费完的回显条目必须出队");
+});
+
+test("user_message_chunk with different text stays a separate message", () => {
+	let state = appendAcpUserPrompt(initialAcpProjection(), "my prompt", null, AGENT);
+	// agent 自己注入的用户侧消息（如上下文拼接）：不能误吞
+	state = step(state, { sessionUpdate: "user_message_chunk", content: { type: "text", text: "[injected context]" } });
+	assert.equal(state.messages.length, 2);
+	assert.equal(state.messages[1].text, "[injected context]");
+	assert.equal(state.localUserEchoes.length, 0, "不同文说明 agent 不回显，不再等待同文回显");
+});
+
+test("agent-provided title overrides the prompt fallback (last wins)", () => {
+	let state = appendAcpUserPrompt(initialAcpProjection(), "first prompt here", null, AGENT);
+	const fallback = state.title;
+	state = step(state, { sessionUpdate: "session_info_update", sessionTitle: "Agent Title" });
+	assert.equal(state.title, "Agent Title");
+	// 第二条 prompt 不得把 agent 给的标题改回去
+	state = appendAcpUserPrompt(state, "second prompt", null, AGENT);
+	assert.equal(state.title, "Agent Title");
+	assert.notEqual(fallback, "Agent Title");
+});
+
+test("rollbackAcpUserPrompt drops the seeded message only when nothing was produced", () => {
+	// 派发失败（JSON-RPC 拒绝）且 agent 未产出：撤回，避免幽灵用户消息
+	let failed = appendAcpUserPrompt(initialAcpProjection(), "rejected", null, AGENT);
+	failed = rollbackAcpUserPrompt(failed, 0);
+	assert.equal(failed.messages.length, 0);
+	assert.equal(failed.localUserEchoes.length, 0);
+	// agent 已回复：保留现场
+	let answered = appendAcpUserPrompt(initialAcpProjection(), "answered", null, AGENT);
+	answered = step(answered, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "ok" } });
+	answered = rollbackAcpUserPrompt(answered, 0);
+	assert.equal(answered.messages.length, 2, "已产生回复时不得抽掉用户消息");
+	// agent 回显到一半（已收到 prompt，还没回完）：不得撤回
+	let echoed = appendAcpUserPrompt(initialAcpProjection(), "hello world", null, AGENT);
+	echoed = step(echoed, { sessionUpdate: "user_message_chunk", content: { type: "text", text: "hello" } });
+	echoed = rollbackAcpUserPrompt(echoed, 0);
+	assert.equal(echoed.messages.length, 1, "agent 已开始回显时不得撤回");
+	assert.equal(echoed.localUserEchoes[0].echoed, 5, "回显进度不得被回滚清掉");
+	// 空 prompt（未落条目，index -1）：不动任何已有消息
+	let untouched = step(initialAcpProjection(), { sessionUpdate: "user_message_chunk", content: { type: "text", text: "old" } });
+	untouched = rollbackAcpUserPrompt(untouched, -1);
+	assert.equal(untouched.messages.length, 1);
 });

@@ -20,7 +20,7 @@ import type { SessionAgentGateway } from "../sessions/SessionRuntimeCoordinator"
 import type { PiLocator } from "../pi/PiLocator";
 import { ACP_ERROR_CODE, type AcpAgentCapabilities, type AcpConfigOption, type AcpContentBlock, type AcpIncomingRequest, type AcpPermissionRequestParams, type AcpSessionPromptResult, type AcpSessionSetupResult, type AcpSessionUpdateNotification } from "./acpProtocol";
 import { AcpConnection, AcpRpcError, AcpTimeoutError, ACP_DEFER_RESPONSE } from "./AcpConnection";
-import { acpPromptBlocks, initialAcpProjection, projectAcpSessionUpdate, settleAcpTurn, type AcpProjectionState } from "./AcpEventProjector";
+import { acpPromptBlocks, appendAcpUserPrompt, initialAcpProjection, projectAcpSessionUpdate, rollbackAcpUserPrompt, settleAcpTurn, type AcpProjectionState } from "./AcpEventProjector";
 
 /** ACP 协议握手版本(v1)。 */
 const ACP_PROTOCOL_VERSION = 1;
@@ -399,11 +399,21 @@ export class AcpAgentManager implements SessionAgentGateway {
 		// 图片物化:投影器产出的 base64 图在进消息缓存前落盘成 ref(同生图「base64 不进历史」契约);
 		// 失败保留 data 形态展示(ACP 不写 JSONL,内联形态只是内存开销,不违反存储约束)。
 		await this.materializeTouchedImages(runtime);
-		if (runtime.projection.title && runtime.projection.title !== runtime.title) {
-			runtime.title = runtime.projection.title;
-			if (runtime.tab.deckSessionId) this.deps.onTitleChanged?.(runtime.tab.deckSessionId, runtime.projection.title);
-		}
+		this.applyProjectionTitle(runtime);
 		this.scheduleFlush(runtime);
+	}
+
+	/**
+	 * 投影标题 → runtime / tab / catalog 同步。
+	 * 两个来源：agent 的 session_info_update（last-wins）与首条 prompt 的兜底标题
+	 * （见 appendAcpUserPrompt）；catalog 回写由 deps.onTitleChanged 完成。
+	 */
+	private applyProjectionTitle(runtime: AcpAgentRuntime): void {
+		const title = runtime.projection.title;
+		if (!title || title === runtime.title) return;
+		runtime.title = title;
+		runtime.tab.title = title;
+		if (runtime.tab.deckSessionId) this.deps.onTitleChanged?.(runtime.tab.deckSessionId, title);
 	}
 
 	/** 把本轮投影 touched 消息里的 data 形态图片替换成落盘 ref;仅替换成功项,失败保留原样。 */
@@ -448,6 +458,16 @@ export class AcpAgentManager implements SessionAgentGateway {
 			return { accepted: false, error: "ACP agent is still responding; stop or wait for the current turn", delivery: "rejected" };
 		}
 		const prompt = acpPromptBlocks(input.message, input.images);
+		// 用户消息先落投影并立刻 flush：ACP 的 agents:message 是全量替换语义，
+		// agent 不回显 user_message_chunk 时（OpenCode 等）渲染层的乐观气泡会被第一次
+		// flush 抹掉。条目落在主进程侧后，无论 agent 是否回显，用户消息都在时间线上。
+		// 顺序：先物化图片（base64 → ref）再 flush，避免快照里带 base64。
+		const messagesBeforeSeed = runtime.projection.messages.length;
+		runtime.projection = appendAcpUserPrompt(runtime.projection, input.message, input.images, runtime.tab.id);
+		const seededIndex = runtime.projection.messages.length > messagesBeforeSeed ? messagesBeforeSeed : -1;
+		this.applyProjectionTitle(runtime);
+		await this.materializeTouchedImages(runtime);
+		this.flushMessages(runtime, true);
 		runtime.turnActive = true;
 		runtime.status = "running";
 		runtime.tab.status = "running";
@@ -464,6 +484,9 @@ export class AcpAgentManager implements SessionAgentGateway {
 			runtime.projection = settleAcpTurn(runtime.projection, result?.stopReason ?? "end_turn");
 		} catch (error) {
 			await runtime.updateChain;
+			// 派发失败（JSON-RPC 拒绝 / 连接死）且 agent 未产出任何内容：撤回刚落的用户条目，
+			// 否则时间线会留一条没有回复的「幽灵消息」，而渲染层已把草稿回填输入框（会重发）。
+			runtime.projection = rollbackAcpUserPrompt(runtime.projection, seededIndex);
 			runtime.projection = settleAcpTurn(runtime.projection, "error");
 			runtime.turnActive = false;
 			// 请求超时 ≠ agent 侧回合结束:agent 仍在跑旧回合,后续 session/prompt 会一直
