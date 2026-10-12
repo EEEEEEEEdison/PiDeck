@@ -34,6 +34,9 @@ export type McpCatalogTextKey =
 	| "config.mcp.catalog.supabase"
 	| "config.mcp.catalog.linear"
 	| "config.mcp.catalog.notion"
+	| "config.mcp.catalog.baizhi"
+	| "config.mcp.catalog.baizhiHint"
+	| "config.mcp.catalog.baizhiKey"
 	| "config.mcp.catalog.braveSearch"
 	| "config.mcp.catalog.firecrawl"
 	| "config.mcp.catalog.figma"
@@ -331,6 +334,18 @@ export const MCP_SERVICE_CATALOG: readonly McpServiceCatalogEntry[] = [
 		docsUrl: "https://github.com/Joooook/12306-mcp",
 		auth: "none",
 		base: { command: "npx", args: ["-y", "12306-mcp"] },
+	},
+	{
+		id: "baizhi",
+		defaultName: "baizhi",
+		titleKey: "config.mcp.catalog.baizhi",
+		hintKey: "config.mcp.catalog.baizhiHint",
+		category: "search",
+		endpointDisplay: "https://agent-toolkit.app.baizhi.cloud/mcp",
+		docsUrl: "https://agent-toolkit.app.baizhi.cloud/access-guide",
+		auth: "header-key",
+		credentials: [{ labelKey: "config.mcp.catalog.baizhiKey", credential: { kind: "header", header: "Authorization", scheme: "Bearer" } }],
+		base: { url: "https://agent-toolkit.app.baizhi.cloud/mcp" },
 	},
 	{
 		id: "brave-search",

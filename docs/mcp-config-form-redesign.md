@@ -1,6 +1,6 @@
 # MCP 配置表单、服务目录与 AI 代配
 
-> 状态：内置服务目录（23 个）+ 认证驱动表单 + AI 配置助手技能已实现。目录条目的接入方式逐项按服务官方文档核实；「已按官方文档核实」不等于「已在 PiDeck 真实环境逐项连接验证」。
+> 状态：内置服务目录（25 个：24 个外部服务 + PiDeck 本机服务）+ 认证驱动表单 + AI 配置助手技能已实现。目录条目的接入方式逐项按服务官方文档核实；「已按官方文档核实」不等于「已在 PiDeck 真实环境逐项连接验证」。
 
 ## 调研结论（2026-10，业界客户端）
 
@@ -9,13 +9,13 @@
 | VS Code | `MCP: Add Server` 向导 + `.mcpb` 一键安装 + mcp.json IntelliSense | 启动时该登录就弹登录 | `MCP: Browse MCP Servers` gallery |
 | Cursor | 概览列表 + Marketplace 官方插件一键装 | OAuth 全自动；`${env:}` 引用密钥 | cursor.directory「Add to Cursor」深链 |
 | Claude | Connectors（远程审核制）+ `.mcpb`（本地一键装） | OAuth 内联 | 官方连接器目录 |
-| **PiDeck 取法** | 目录条目（推荐）+ 粘贴识别（智能添加）+ 手动高级表单 | 认证由条目声明：none 直接用 / OAuth 点登录 / 密钥写声明位置 | 内置 23 个精选目录，按分类分组 |
+| **PiDeck 取法** | 目录条目（推荐）+ 粘贴识别（智能添加）+ 手动高级表单 | 认证由条目声明：none 直接用 / OAuth 点登录 / 密钥写声明位置 | 内置 25 个精选目录，按分类分组 |
 
 共同答案：① 目录/向导优先，字段最少化；② 认证是声明/检测出来的，不是让用户猜的；③ 高级字段进折叠或 JSON。AI 辅助配置的业界形态是 **Agent Skills**（Claude Code / Cursor / VS Code / pi 共用同一 SKILL.md 规范）——PiDeck 据此内置 `mcp-setup` 技能。
 
 ## 第一部分：新增服务交互（三条入口）
 
-1. **目录推荐（默认）**：左栏下方按「开发 / 协作 / 商业数据 / 出行 / 搜索 / 设计」分组列出 23 个服务；已配置（与默认名同名）打 ✓。点选后右栏出现该服务的专属表单，字段由条目的认证声明驱动：
+1. **目录推荐（默认）**：左栏下方按「开发 / 协作 / 商业数据 / 出行 / 搜索 / 设计」分组列出 25 个服务；已配置（与默认名同名）打 ✓。点选后右栏出现该服务的专属表单，字段由条目的认证声明驱动：
    - `none`：只有名称，直接「添加并保存」；
    - `oauth`：只有名称 + 「保存后在状态区点登录」提示（Linear/Notion/Sentry/Supabase/Figma）；
    - `header-key` / `env-key`（必填）：名称 + 遮罩密钥框，提示密钥落点（`Authorization: Bearer <key>` / 原样写入的指定头 / 指定环境变量）与明文存储（GitHub/Brave/腾讯文档/Exa/企查查/百度网盘）；
@@ -25,7 +25,7 @@
 
 模板只创建新条目，不覆盖同名服务；名称冲突自动追加序号。添加后写入当前作用域的 Pi 原生 `mcp.json` 并刷新连接状态。
 
-## 第二部分：内置服务目录（23 个，接入方式按官方文档核实）
+## 第二部分：外部服务目录（24 个，接入方式按官方文档核实）
 
 ### 国际服务（首批）
 
@@ -61,11 +61,18 @@
 
 | 服务 | 分类 | 传输 | 认证 | 凭据落点 | 官方参考 |
 |---|---|---|---|---|---|
+| 百智云 Agent 工具包 | 搜索 | `https://agent-toolkit.app.baizhi.cloud/mcp` | API Key 必填 | `Authorization: Bearer` | [百智云接入指南](https://agent-toolkit.app.baizhi.cloud/access-guide) |
 | Tavily Search | 搜索 | `https://mcp.tavily.com/mcp/?tavilyApiKey=<KEY>` | API Key 必填 | query `tavilyApiKey` | [Tavily MCP](https://docs.tavily.com/documentation/mcp) |
 | Exa Search | 搜索 | `https://mcp.exa.ai/mcp` | `x-api-key` 头（可留空，keyless 限速） | `x-api-key`（**原值**） | [Exa MCP](https://docs.exa.ai/reference/exa-mcp) |
 | 腾讯文档 | 协作 | `https://docs.qq.com/openapi/mcp` | MCP Token 必填 | `Authorization`（**原值，加 Bearer 会被判 400006**） | [腾讯文档开放平台 · 获取 MCP token](https://docs.qq.com/open/document/mcp/get-token) |
 | 百度网盘 | 协作 | `npx -y mcp-remote@latest https://mcp-pan.baidu.com/sse`（桥接） | OAuth Access Token 必填 | env `BAIDU_NETDISK_ACCESS_TOKEN`（args 里 `${...}` 引用） | [baidu-netdisk/mcp](https://github.com/baidu-netdisk/mcp) |
 | 企查查（工商信息） | 商业数据 | `https://agent.qcc.com/mcp/company/stream` | API Key 必填 | `Authorization: Bearer` | [企查查智能体数据平台](https://agent.qcc.com/guide) |
+
+**百智云接入说明**：官方接入指南以工具包站点 origin + `/mcp` 生成远程地址，要求 `Authorization: Bearer <API Key>`（2026-10-12 核对）。在目录「搜索」分类选中条目，输入原始 Key，再点击「添加并保存」；需要百智云账号和服务积分，工具调用会发送输入并可能扣减积分。密钥沿用下述当前作用域明文存储方式。官方端点的真实服务连接、工具调用及计费未在本次离线验证中验收。
+
+![百智云目录与认证表单](images/baizhi-mcp-catalog.png)
+
+截图来自上述真实目录和表单组件的隔离浏览器验证，使用合成密钥与保存回调；不是完整 Electron 桌面端或真实百智服务验收。
 
 **第二批调研备注**：企业微信官方 MCP 配置由客户端按权限逐条生成（工作台 → 智能机器人 → 编辑 → 可使用权限 → 复制 MCP url / JSON），没有固定端点，只能走「智能添加」粘贴官方复制出来的配置；携程问道与东方财富妙想官方只有 Skill / API Key 形态（`WENDAO_API_KEY`、`EASTMONEY_APIKEY`），不提供 MCP 端点，均未收入目录。百度网盘官方远程端点只有 SSE（`/sse` + `/message` 是旧传输），pi 只支持 streamable HTTP，所以条目用 `mcp-remote` 桥接（先试 streamable HTTP，405 回退 SSE，`Authorization` 由 `--header` 同时交给两条路）；上传本地文件仍需按官方文档另部署 Python stdio 服务。企查查按模块提供 10 个 streamable 端点（company/risk/ipr/operation/history/executive/regulation/case/tender/document），目录只收工商信息一条，其余复制条目改地址后缀即可。
 
