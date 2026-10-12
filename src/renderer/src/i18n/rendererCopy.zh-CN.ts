@@ -4301,6 +4301,8 @@ export const zhCN = {
 	"settings.channelSwitchToStable": "切换回稳定版",
 	"settings.channelSwitchDialogTitle": "切换更新通道",
 	"settings.channelSwitchQuerying": "正在查询目标通道最新版本…",
+	"settings.channelSwitchUpToDate": "已是最新版本，无需切换",
+	"settings.channelSwitchUpToDateDetail": "当前 v{version} 已是最新版本，{channel} 通道没有更新的版本。",
 	"settings.channelSwitchTargetVersion": "目标版本：v{version}",
 	"settings.channelSwitchNotes": "更新说明",
 	"settings.channelSwitchDataModeNotice": "安装后首次启动会让你选择数据模式",

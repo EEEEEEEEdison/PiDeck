@@ -4315,6 +4315,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.channelSwitchToStable": "Switch back to Stable",
 	"settings.channelSwitchDialogTitle": "Switch Update Channel",
 	"settings.channelSwitchQuerying": "Checking the latest version for the target channel…",
+	"settings.channelSwitchUpToDate": "Already up to date, no switch needed",
+	"settings.channelSwitchUpToDateDetail": "Current v{version} is already the latest; the {channel} channel has nothing newer.",
 	"settings.channelSwitchTargetVersion": "Target version: v{version}",
 	"settings.channelSwitchNotes": "Release notes",
 	"settings.channelSwitchDataModeNotice": "After installing, you'll be asked to choose a data mode on first launch",

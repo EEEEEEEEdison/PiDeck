@@ -14,6 +14,7 @@
 - **Resend failures now explain "history was rolled back"** - A toast after a failed send clarifies that history was rolled back, so you don't assume the message never went out.
 - **Model selector group headers align name and count on the baseline**
 - **Mobile web interaction & rendering polish** - Send button, file preview, menu icons and streaming status improvements; the composer drops the camera button and tightens toolbar spacing.
+- **Channel switch no longer offers an older dev build** - With a stable version newer than the latest dev prerelease (e.g. 0.9.0 vs 0.8.0-beta.9), the "Switch to Dev" dialog used to still offer that older prerelease for download. Version comparison now follows full semver prerelease rules (0.8.0-beta.9 < 0.8.0), and the dialog reports "Already up to date, no switch needed" instead of offering a downgrade.
 
 ### 🙏 Acknowledgements
 
