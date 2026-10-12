@@ -18,10 +18,7 @@ export class AcpRpcError extends Error {
  *  session/cancel」的超时与普通失败——不取消的话,下一个 session/prompt 会一直
  *  排队在旧回合之后反复超时(opencode 卡死实测)。 */
 export class AcpTimeoutError extends Error {
-	constructor(
-		method: string,
-		timeoutMs: number,
-	) {
+	constructor(method: string, timeoutMs: number) {
 		super(`ACP request timed out after ${timeoutMs}ms: ${method}`);
 		this.name = "AcpTimeoutError";
 	}

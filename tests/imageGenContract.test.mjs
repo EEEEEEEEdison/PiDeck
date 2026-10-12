@@ -111,7 +111,12 @@ test("composer 生图底栏用独立配置，不读会话 LLM", () => {
 	const configUi = readFileSync("src/renderer/src/components/config/ImageGenSection.tsx", "utf8");
 	assert.match(composerComponents, /imageGenOptions\?:/);
 	assert.match(composerComponents, /ComposerImageGenOptions/);
-	assert.match(composerComponents, /isImageGenMode \|\| isVideoGenMode \? null/);
+	// 生图/生视频底栏屏蔽会话 LLM 控件：判据 2026-10（222f19abd）从「只按 mode」扩到
+	// 「mode 或 backend」——引导页没有 record，选了生图/生视频后端时 mode 仍是 normal，
+	// 只看 mode 会漏屏蔽（见 ComposerComponents.tsx 里 isMediaComposer 的注释）。
+	// 断言写到新判据上并做空白容忍，避免再被格式化/换行弄红。
+	assert.match(composerComponents, /const\s+isMediaComposer\s*=[^;]*isImageGenMode\s*\|\|\s*isVideoGenMode[^;]*"imagegen"/);
+	assert.match(composerComponents, /\{\s*isMediaComposer\s*\?\s*null\s*:/);
 	assert.match(options, /IMAGE_GEN_SIZE_PRESETS/);
 	assert.match(options, /IMAGE_GEN_SIZE_UNSET/);
 	assert.match(options, /ImageGenSizeCombobox/);

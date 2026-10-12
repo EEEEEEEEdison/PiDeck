@@ -473,7 +473,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 				try {
 					runtime.conn.notify("session/cancel", { sessionId: runtime.acpSessionId, reason: "turn_timeout" });
 				} catch {
-				// 通知失败只能放弃:连接层随后会自行死亡/关闭并结算。
+					// 通知失败只能放弃:连接层随后会自行死亡/关闭并结算。
 				}
 			}
 			// 连接死亡等外部终态(error/closed)由 closed handler 结算,不回 idle;

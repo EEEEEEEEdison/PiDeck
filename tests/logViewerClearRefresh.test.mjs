@@ -52,9 +52,7 @@ function setup() {
 			getSize: async () => 144,
 			listPage: async (query) => {
 				queries.push(query);
-				return cleared
-					? { entries: [logEntry({ id: "audit", message: "Logs cleared" })], total: 1, page: 0, pageSize: 20, hasMore: false }
-					: { entries: [logEntry({ id: "old-1", message: "old entry one" }), logEntry({ id: "old-2", message: "old entry two" })], total: 2, page: 0, pageSize: 20, hasMore: false };
+				return cleared ? { entries: [logEntry({ id: "audit", message: "Logs cleared" })], total: 1, page: 0, pageSize: 20, hasMore: false } : { entries: [logEntry({ id: "old-1", message: "old entry one" }), logEntry({ id: "old-2", message: "old entry two" })], total: 2, page: 0, pageSize: 20, hasMore: false };
 			},
 		},
 		// 「清理全部」联动清空的三类：只要可调用即可（本次回归只关心应用日志查看器）
