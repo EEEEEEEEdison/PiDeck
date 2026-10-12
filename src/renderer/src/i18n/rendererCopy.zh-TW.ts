@@ -4431,6 +4431,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.customThemesReadFailed": "主題檔案讀取失敗，可能已被刪除",
 	"settings.customThemesDelete": "刪除主題檔案（入回收站）",
 	"settings.customThemesDeleteConfirmAgain": "再點一次確認刪除（入回收站）",
+	"settings.customThemesDeleteFailed": "刪除失敗：{id}（檔案可能已被外部移除，或回收站不可用）",
 	"settings.customThemesDeletedToast": "已刪除主題檔案：{id}",
 	"settings.customThemesSavedToast": "主題已儲存：{id}",
 	"settings.customThemesSave": "校驗並儲存",

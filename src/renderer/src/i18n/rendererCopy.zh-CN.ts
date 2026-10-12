@@ -4426,6 +4426,7 @@ export const zhCN = {
 	"settings.customThemesReadFailed": "主题文件读取失败，可能已被删除",
 	"settings.customThemesDelete": "删除主题文件（入回收站）",
 	"settings.customThemesDeleteConfirmAgain": "再点一次确认删除（入回收站）",
+	"settings.customThemesDeleteFailed": "删除失败：{id}（文件可能已被外部移除，或回收站不可用）",
 	"settings.customThemesDeletedToast": "已删除主题文件：{id}",
 	"settings.customThemesSavedToast": "主题已保存：{id}",
 	"settings.customThemesSave": "校验并保存",

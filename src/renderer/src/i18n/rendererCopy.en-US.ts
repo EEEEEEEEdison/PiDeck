@@ -4440,6 +4440,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.customThemesReadFailed": "Failed to read the theme file; it may have been deleted",
 	"settings.customThemesDelete": "Delete theme file (to trash)",
 	"settings.customThemesDeleteConfirmAgain": "Click again to confirm deletion (to trash)",
+	"settings.customThemesDeleteFailed": "Delete failed: {id} (the file may have been removed externally, or the recycle bin is unavailable)",
 	"settings.customThemesDeletedToast": "Theme file deleted: {id}",
 	"settings.customThemesSavedToast": "Theme saved: {id}",
 	"settings.customThemesSave": "Validate & save",
