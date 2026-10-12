@@ -3,11 +3,14 @@
 > 本文档承接 AGENTS.md 移出的领域运维细节。AGENTS.md 只保留每域一行硬约束速查；
 > 动手改对应模块前，先读本文对应小节。
 
+持久数据迁移统一登记在 [数据迁移台账](data-migrations.md)：新增、调整或退役迁移时，同次更新其触发条件、完成判据、失败/冲突行为、验证证据与退役条件。
+
 ## 应用命名与历史数据目录迁移
 
 - 三平台显示名统一 `PiDeck`，Dev 通道为 `PiDeck Dev`；npm 包名为 `pideck`，Linux 可执行文件为 `pideck` / `pideck-dev`。Linux 必须显式配置 `linux` / `deb` / `appImage` 的产物名，不能让 `.deb` 回退到 npm 历史名称；Dev 单独覆盖三者，避免空格或继承 stable 的 Debian 替代关系。
 - 正式安装版根为 Windows `%APPDATA%\PiDeck`、macOS `~/Library/Application Support/PiDeck`、Linux `~/.config/PiDeck`（遵循 Electron/XDG 路径）；调试态为 `PiDeck-dev[-<branch>]`，Dev 独立环境为 `PiDeck-channel-dev`。便携版仍为 exe 同级 `data/` / `data-channel-dev/`，显式目录不更名。
 - `userDataNameMigration.ts` 负责正式根与开发根的整目录更名、设置/自动化/目录记录/草稿/飞书配置里的绝对路径和会话 token 改写、pi 会话目录迁移与 `header.cwd` 修复；历史消息正文不改。`devUserDataMigration.ts` 必须在读取 Dev 决策指针之前调用，防止升级后独立环境被误判为未选择。
+- 完成状态存于各新根的 `user-data-name-migration.json`（`userDataMigrationState.ts`）：目录、列出的持久化配置路径和适用会话修复全部成功后才原子发布；绑定迁移版本、旧/新根、会话根与平台。命中有效记录后跳过扫描；没有记录的存量用户继续补修，读写失败或会话目录冲突不发布新完成记录、下次重试。根改名失败用旧根，根已改名后的补修失败继续用新根；会话目录两代并存时保留两边、不合并。此记录只证明本条迁移链，不代表飞书子目录/Bot 格式/凭据及其它迁移已验收；完整登记及当前验收状态见 [UD-001](data-migrations.md#ud-001本次补齐的完成状态)。
 - 飞书子目录由 `pi-desktop/` 整体迁到 `feishu/`，保留密文和绑定；路径在实际读写时解析，不在模块导入时缓存，避免早于 `app.setPath`。环境导入兼容两种子目录。改名失败继续旧目录并重试；两代目录并存时使用新目录，但不覆盖、删除或自动合并旧数据。
 - `appBrand.initializeAppBrand` 在 ready 前保留历史运行时名供 Electron 初始化 Linux/macOS 密钥环，ready 时恢复品牌；不能提前改加密身份，否则既有 safeStorage 密文/Cookie 无法使用原密钥。Windows AUMID、macOS bundle ID 和旧 localStorage key 保持兼容身份；旧名只用于兼容，不作为新的安装包或数据目录名。
 - 更新缓存新写入使用 `pideck-updater`，旧缓存可重建，保留不删除。验证入口：`tests/appBrand*.test.mjs`、`tests/*UserData*.test.mjs`、`tests/userData*.test.mjs`、`tests/feishuConfigDirectory.test.mjs`、`tests/feishuSecretStorage.test.mjs`、`tests/channelDataImport.test.mjs`；真实安装与系统密钥环仍需按平台 smoke。

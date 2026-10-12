@@ -3729,7 +3729,7 @@ app
 			if (result?.kind === "migrated") {
 				void appLogger.info("migration", "userData directory renamed to PiDeck", { from: result.oldPath, to: result.userDataPath, sessionDirs: result.migratedSessionDirs.length });
 			} else if (result?.kind === "failed") {
-				void appLogger.warn("migration", "userData rename failed; continuing on legacy dir, retry next launch", { reason: result.reason });
+				void appLogger.warn("migration", "userData migration incomplete; retry next launch", { userDataPath: result.userDataPath, reason: result.reason });
 			} else if (result?.kind === "skipped" && result.reason === "collision") {
 				void appLogger.warn("migration", "Legacy and PiDeck directories coexist; preserving both without merging", { userDataPath: result.userDataPath });
 			}
