@@ -167,7 +167,7 @@ export const PetTab = memo(function PetTab(props: PetTabProps) {
 					);
 				})()}
 			</SettingBox>
-			<SettingsSection title={t("settings.pet.preview")} description={t("settings.pet.previewDesc")}>
+			<SettingsSection id="settings-section-pet-preview" title={t("settings.pet.preview")} description={t("settings.pet.previewDesc")}>
 				<SettingRow title={<span>{t("settings.pet.previewMode")}</span>} alignEnd={false}>
 					<Select
 						value={petPreviewMode}

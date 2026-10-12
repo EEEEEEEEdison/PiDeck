@@ -214,7 +214,7 @@ export const WebTab = memo(function WebTab(props: WebTabProps) {
 	}, [qrUrl]);
 
 	return (
-		<SettingsSection title={t("settings.webLocalService")} description={t("settings.webLocalServiceDesc")}>
+		<SettingsSection id="settings-section-web-local-service" title={t("settings.webLocalService")} description={t("settings.webLocalServiceDesc")}>
 			{/* 服务总开关 + 重启按钮 */}
 			<SettingRow anchor="web-enable-service" title={t("settings.enableWebService")} description={webServiceChanging ? t("settings.webOpening") : t("settings.webOffDesc")}>
 				<div className="flex items-center gap-2">

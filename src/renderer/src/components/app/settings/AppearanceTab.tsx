@@ -72,7 +72,7 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 	return (
 		<>
 			{/* 主题与背景 */}
-			<SettingsSection title={t("settings.sectionThemeBackground")}>
+			<SettingsSection id="settings-section-appearance-theme-background" title={t("settings.sectionThemeBackground")}>
 				<SettingRow
 					anchor="appearance-navigation-mode"
 					title={
@@ -261,7 +261,7 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 			</SettingsSection>
 
 			{/* 字体 */}
-			<SettingsSection title={t("settings.sectionFonts")}>
+			<SettingsSection id="settings-section-appearance-fonts" title={t("settings.sectionFonts")}>
 				{/* 窗口缩放：与字号设置同分组，避免「字变大」两个入口分散在不同分组；
            提示文案说明其与字号档位的区别（缩放=整体，字号=仅文字）。 */}
 				<SettingRow
@@ -485,7 +485,7 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 			</SettingsSection>
 
 			{/* 聊天排版 */}
-			<SettingsSection title={t("settings.sectionChatLayout")}>
+			<SettingsSection id="settings-section-appearance-chat-layout" title={t("settings.sectionChatLayout")}>
 				<SettingRow anchor="appearance-content-width" title={<span>{t("settings.contentWidthPct")}</span>} description={t("settings.contentWidthPctDesc")}>
 					<div className="flex w-full items-center gap-2">
 						<input type="range" min="60" max="100" step="1" value={draft.chatContentWidthPct} onChange={(event) => updateDraft({ chatContentWidthPct: parseInt(event.target.value) })} className="min-w-0 flex-1 accent-[var(--color-accent)]" aria-label={t("settings.contentWidthPct")} />
@@ -516,7 +516,7 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 			</SettingsSection>
 
 			{/* 窗口样式 */}
-			<SettingsSection title={t("settings.sectionWindowStyle")}>
+			<SettingsSection id="settings-section-appearance-window-style" title={t("settings.sectionWindowStyle")}>
 				{/* 会话 Tab 宽度上限：仅封顶不设最小宽，Tab 仍按内容收缩；拖动时先本地夹取预览，保存时主进程再归一化。 */}
 				<SettingRow anchor="appearance-session-tab-width" title={<span>{t("settings.sessionTabMaxWidth")}</span>} description={t("settings.sessionTabMaxWidthDesc")}>
 					<div className="flex w-full items-center gap-2">
