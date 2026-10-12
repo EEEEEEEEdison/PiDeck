@@ -102,7 +102,7 @@
     "docs:dev": "vitepress dev docs-site",
     "docs:build": "vitepress build docs-site",
     "docs:preview": "vitepress preview docs-site",
-    "postinstall": "node scripts/fix-pty-permissions.js",
+    "postinstall": "node scripts/fix-pty-permissions.js && node scripts/patch-electron-builder-rename-retry.js",
     "prepare": "node scripts/install-git-hooks.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "sync:main": "node scripts/sync-main.mjs",
