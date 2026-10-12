@@ -176,6 +176,38 @@ test("新旧会话目录冲突时不合并或覆盖，不记完成，重复启�
 	}
 });
 
+test("两代目录并存但只需补修时（beta 已改目录名、header 仍指向旧路径）仍修好会话且不记完成", (t) => {
+	// 真实机器上的形态：旧根只剩 Chromium 壳，新根数据完整，但会话目录由 beta 改名后 header.cwd 未补。
+	const fx = fixture(t, { alreadyMigrated: true });
+	fs.mkdirSync(fx.oldRoot);
+	fs.writeFileSync(join(fx.oldRoot, "Local State"), "{}");
+	assert.equal(JSON.parse(fs.readFileSync(fx.file, "utf8").split("\n")[0]).cwd, fx.oldCwd, "前置：header 仍指向旧路径");
+	const result = runUserDataNameMigration(fx.input);
+	assert.equal(result.kind, "skipped");
+	assert.equal(result.reason, "collision");
+	assert.equal(fs.existsSync(fx.state), false, "并存时不写完成记录");
+	assert.equal(JSON.parse(fs.readFileSync(fx.file, "utf8").split("\n")[0]).cwd, fx.newCwd, "header 应被修复到新根");
+	assert.equal(fs.readFileSync(join(fx.oldRoot, "Local State"), "utf8"), "{}", "旧根内容不动");
+	assert.equal(fs.readFileSync(fx.file, "utf8"), `${JSON.stringify({ type: "session", cwd: fx.newCwd })}\n{"text":"历史正文"}\n`, "正文逐字节保留");
+	const again = runUserDataNameMigration(fx.input);
+	assert.equal(again.reason, "collision");
+	assert.equal(JSON.parse(fs.readFileSync(fx.file, "utf8").split("\n")[0]).cwd, fx.newCwd);
+	assert.equal(fs.existsSync(fx.state), false);
+});
+
+test("并存且旧根仍在使用（旧路径仍存在）时不改名、不改 header、不记完成", (t) => {
+	const fx = fixture(t);
+	fs.mkdirSync(fx.newRoot, { recursive: true });
+	const oldFile = join(fx.oldSessionDir, "chat.jsonl");
+	const original = fs.readFileSync(oldFile, "utf8");
+	const result = runUserDataNameMigration(fx.input);
+	assert.equal(result.reason, "collision");
+	assert.equal(fs.existsSync(fx.oldSessionDir), true, "旧根名下的会话目录保留原样");
+	assert.equal(fs.existsSync(fx.newSessionDir), false, "并存时不把旧根目录改名到新名");
+	assert.equal(fs.readFileSync(oldFile, "utf8"), original, "旧路径仍存在时保守保留 header");
+	assert.equal(fs.existsSync(fx.state), false);
+});
+
 test("新旧数据根冲突或显式目录不写完成记录", (t) => {
 	for (const explicit of [false, true]) {
 		const fx = fixture(t);

@@ -45,13 +45,14 @@
 - 正式安装根 `pi-desktop → PiDeck`；源码开发根 `pi-desktop-dev[-分支] → PiDeck-dev[-分支]`；Dev 安装独立根 `pi-desktop-channel-dev → PiDeck-channel-dev`。每个新根分别记录，不共享总标记。
 - 完成文件：`<新userData>/user-data-name-migration.json`，实现为 [userDataMigrationState.ts](../src/main/projects/userDataMigrationState.ts)。当前 `schemaVersion:1`、`migrationVersion:1`、`status:"completed"`，绑定 `oldRoot/newRoot/sessionsRoot/platform`，含 `completedAt`。迁移版本与应用版本独立。
 - 完成判据覆盖本迁移列出的设置/自动化/项目/目录记录/catalog 及备份/缓存、适用的草稿和飞书 JSON 路径，以及候选 encoded 会话目录与适用的 `header.cwd`。配置改写使用同目录临时文件 + flush + rename，写入/发布失败保留完整原文件；需要改写的配置若是符号链接则保留链接并报告未完成。会话正文按字节保留。
+- 两代目录并存时不得改名/合并旧根数据（那份数据可能仍被旧版本使用），但仍要比对新根自己的目录与 header：只修「旧路径已消失、新路径存在」的会话，旧路径仍存在时保留原样。
 - 会话候选来自根本身、一层实际子目录和 `chat-path.json` 登记路径，**不是所有磁盘数据的完整审计**。未涉及本根的自定义项目路径不处理。
 - FE-001 子目录更名、Bot 格式、凭据解密和其它表项各自有独立边界；UD-001 的完成文件不证明它们已验收。
 
 ### 成功、失败与快速跳过
 
 1. 显式数据目录/便携版跳过；新旧根都不存在视为新安装，迁移器不为此创建根或完成记录。
-2. 新旧根同时存在时先走冲突保护，即使新根已有完成记录也不绕过；使用新根、保留旧根，不自动合并。
+2. 新旧根同时存在时视为「降级后并存」：不改名、不合并、不删旧根，也不写完成记录；但仍跑幂等补修（仅针对新根自己的配置与已改到新名下的会话目录，旧路径仍存在时不改写 header）。这覆盖 beta 只改了目录名、header 仍指向已消失旧路径的存量用户。
 3. 记录与本次上下文及迁移版本匹配时，只读小状态文件，跳过配置/JSONL 扫描和写盘。记录读取硬上界 16 KiB（另读 1 字节判定溢出）；损坏、超限、版本/路径/平台不符回到幂等核验。
 4. 根 rename 失败返回旧根；根已改名但后续读写、扫描、会话冲突、header 损坏/目标缺失或并行追加导致发布放弃时，返回 `failed` 并继续使用新根。下次启动补修，不重新创建已消失的旧根。
 5. 所有适用步骤成功后，独占创建同目录临时文件、flush，再 rename 发布完成记录；写入失败清理临时文件，不发布新完成记录。原有无效记录不作为成功依据。
@@ -102,6 +103,7 @@
 | --- | --- | --- |
 | 高 | UD-001 / FE-001 | 补 Linux 真实升级，再补 Windows/macOS；验收正常升级、两根冲突、重试及密钥环可用性。完成文件不能代替安装包验收 |
 | 高 | RS-001 | 复现并测试“原生写成功、清理旧记录失败”与 unresolved 后资源再次可解析：当前记录先于 cleanup，后续因已记完成而跳过。明确“写入完成/清理待重试/未解析待处理”的区别，再决定实现 |
+| 高 | UD-001 | 并行/降级场景的真实验收：本机已见「旧根只剩 Chromium 壳、新根完整、beta 已改目录名但 header 未补」的形态；并存分支现在仍补修 header，需在真实安装上复验 |
 | 高 | DR-001 / EX-001 | 验收旧便签同名目标的保护、复制后删除的失败窗口，以及扩展文件由用户编辑后的备份/内容识别。当前按文件名删除/覆盖的事实应留在记录中，不能表述为普遍保守迁移 |
 | 中 | FE-002 | 为 v1 缺 Bot ID 的配置补跨次读取/重启验收，确认生成 ID 与绑定文件不会漂移；读到 v2 之前不宣称磁盘迁移完成 |
 | 中 | DS-001 | 核实“只存在开发/试用旧布局”的实际版本范围，并验收 rename 失败后读取旧配置/归档的可用性；路径函数返回新布局，不能只凭注释认定有完整旧位置兜底 |
@@ -115,6 +117,8 @@ UD-001 完成状态改动已验证：
 node --test tests/userDataMigrationState.test.mjs tests/userDataNameMigration.test.mjs tests/userDataSessionHeaderMigration.test.mjs tests/devUserDataMigration.test.mjs tests/portableUserData.test.mjs
 ```
 
-84 项通过。覆盖首次迁移、已改根补修、快速跳过、完成记录损坏/版本/路径/平台不符/超限与读取竞态、读写/扫描/发布失败后重试、配置中断写入保留完整原文件、符号链接保护、根/会话目录冲突、header 损坏/目标缺失和并行追加保留。
+86 项通过。覆盖首次迁移、已改根补修、快速跳过、完成记录损坏/版本/路径/平台不符/超限与读取竞态、读写/扫描/发布失败后重试、配置中断写入保留完整原文件、符号链接保护、根/会话目录冲突、并存时的保守补修（旧路径已消失才改 header）、header 损坏/目标缺失和并行追加保留。
+
+真实机器验收（2026-10-12，Linux 安装版）：`pideck 0.9.0` 安装包内已含本迁移代码；`~/.config/PiDeck-dev` 完成记录已生成（`pi-desktop-dev` 已改名），dev 会话 header 全部指向新路径；`~/.config/PiDeck` 与仅剩 Chromium 壳的 `~/.config/pi-desktop` 并存，启动日志出现 collision 告警，当时未补修 9 个仍指向 `/home/zhadainian/.config/pi-desktop/chat-workspace` 的 header（旧路径已不存在），因此更正为并存也跑补修；会话文件与环境配置未被改动。
 
 TypeScript 使用 `tsconfig.main.json` 选项，仅以四个迁移模块为根进行 noEmit 定向检查，通过；启动装配文件语法检查通过。触达源码/测试的 Biome 格式检查及自身改动的差异空白检查通过。未执行全仓构建、完整应用类型检查、打包、真实用户数据迁移或系统密钥环 smoke。其它条目的测试本次未重新运行。

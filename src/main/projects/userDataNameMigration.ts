@@ -20,6 +20,8 @@ import { isMissingMigrationPath, isUserDataMigrationComplete, recordUserDataMigr
  *   子步骤均幂等；旧根已消失时仍补完剩余步骤，覆盖中途失败以及 #298 的 beta 存量用户。
  *   header 只换 cwd，历史消息逐字节保留，避免把迁移变成历史内容编辑。
  * - 只碰落在旧根内的路径：用户自定义到别处的聊天目录、同前缀的 pi-desktop-dev 均不受影响。
+ * - 旧根仍存在（降级后两代并存）= 另一份数据仍在被使用：只补修新根自己的内容（如 beta 已改目录名
+ *   但 header 仍指向已消失旧路径的会话），不改名、不合并、不删旧根，也不写完成记录。
  */
 
 /** 历史正式包 userData 目录名（值收口在 portableUserData，改名只改那一处）。 */
@@ -28,7 +30,7 @@ export const LEGACY_PACKAGED_USER_DATA_NAME = PACKAGED_USER_DATA_NAME;
 export const NEW_PACKAGED_USER_DATA_NAME = PACKAGED_USER_DATA_NAME_NEW;
 
 export type UserDataNameMigration =
-	/** 未执行改名（新数据 / 已迁移过 / 便携版 / 显式目录 / 两代目录冲突后保守用新目录） */
+	/** 未执行改名（新数据 / 旧根仍在而降级并存 / 已迁移过 / 便携版 / 显式目录） */
 	| { kind: "skipped"; reason: "new-install" | "already-migrated" | "explicit-user-data-dir" | "collision"; userDataPath: string }
 	/** 改名成功：目录已迁到 PiDeck，路径记账与会话目录已同步改写 */
 	| { kind: "migrated"; oldPath: string; userDataPath: string; migratedSessionDirs: string[] }
@@ -165,8 +167,11 @@ function rewriteFileInPlace(filePath: string, oldRoot: string, newRoot: string, 
  * 返回 oldName→newName 映射：既用于目录改名，也用于把 catalog 里的 encoded token
  * （filePath 保留磁盘大小写、originKey 全小写正斜杠）同步换掉——会话 JSONL 的绝对路径
  * 是跨重启的会话身份，目录改名后不改写引用就会全部失联。
+ *
+ * allowRename=false（旧根仍在）时只补修「已改到新名下」的目录：旧根名下的目录属于并存的
+ * 另一份数据，不属于本次修复范围，既不改名也不报错误。
  */
-function migratePiSessionDirs(piSessionsRoot: string, legacyChildren: string[], oldRoot: string, newRoot: string, platform: NodeJS.Platform, failures: string[]): Map<string, string> {
+function migratePiSessionDirs(piSessionsRoot: string, legacyChildren: string[], oldRoot: string, newRoot: string, platform: NodeJS.Platform, failures: string[], allowRename: boolean): Map<string, string> {
 	const renamed = new Map<string, string>();
 	let entries: string[];
 	try {
@@ -201,6 +206,14 @@ function migratePiSessionDirs(piSessionsRoot: string, legacyChildren: string[], 
 			continue;
 		}
 		if (nameKey(newName) !== nameKey(matched)) {
+			if (!allowRename) {
+				// 并存的旧根目录保留原样；已存在于新名下的目录仍要补修 header（只改了目录名的情况）。
+				if (existingNew && nameKey(existingNew) !== nameKey(matched)) {
+					repair(existingNew);
+					renamed.set(matched, existingNew);
+				}
+				continue;
+			}
 			try {
 				const target = join(piSessionsRoot, newName);
 				// 两份历史不可按文件名猜测合并；保留两边与旧引用，且绝不能记完成。
@@ -270,17 +283,17 @@ export function runUserDataNameMigration(input: UserDataNameMigrationInput): Use
 	let userDataPath = oldRoot;
 	try {
 		const oldExists = safeIsDirectory(oldRoot);
-		if (!oldExists) userDataPath = newRoot;
 		const newExists = safeIsDirectory(newRoot);
 		if (!oldExists && !newExists) return { kind: "skipped", reason: "new-install", userDataPath: newRoot };
-		// 必须先做冲突检查：降级后的旧根再次出现，不能被历史完成记录掩盖。
-		if (oldExists && newExists) return { kind: "skipped", reason: "collision", userDataPath: newRoot };
+		// 两代目录并存：旧根那份数据可能仍被旧版本使用，本次只补修新根自己，绝不合并或删除。
+		const legacyPresent = oldExists && newExists;
+		const renamedThisRun = oldExists && !newExists;
 		if (!oldExists && isUserDataMigrationComplete(context)) return { kind: "skipped", reason: "already-migrated", userDataPath: newRoot };
-		if (oldExists) {
+		if (renamedThisRun) {
 			mkdirSync(dirname(newRoot), { recursive: true });
 			renameSync(oldRoot, newRoot);
-			userDataPath = newRoot;
 		}
+		userDataPath = newRoot;
 
 		const failures: string[] = [];
 		const caseInsensitive = isCaseInsensitive(platform);
@@ -290,7 +303,7 @@ export function runUserDataNameMigration(input: UserDataNameMigrationInput): Use
 		const recordedNew = readRecordedChatDir(chatPathFile, newRoot);
 		const recordedChatDir = recordedOld ?? (recordedNew ? `${oldRoot}${recordedNew.slice(newRoot.length)}` : null);
 		if (recordedChatDir && !legacyChildren.includes(recordedChatDir)) legacyChildren.push(recordedChatDir);
-		const migratedSessionDirs = migratePiSessionDirs(context.sessionsRoot, legacyChildren, oldRoot, newRoot, platform, failures);
+		const migratedSessionDirs = migratePiSessionDirs(context.sessionsRoot, legacyChildren, oldRoot, newRoot, platform, failures, !legacyPresent);
 		const encodedPairs = [...migratedSessionDirs.entries()];
 		const rewrite = (path: string) => {
 			try {
@@ -322,9 +335,11 @@ export function runUserDataNameMigration(input: UserDataNameMigrationInput): Use
 			if (!isMissingMigrationPath(error)) failures.push("Cannot inspect drafts");
 		}
 		if (failures.length) return { kind: "failed", reason: failures.join("; "), userDataPath: newRoot };
+		// 旧根仍在时不能记完成：那份数据还没处理，下次启动必须继续核验。
+		if (legacyPresent) return { kind: "skipped", reason: "collision", userDataPath: newRoot };
 		recordUserDataMigrationComplete(context);
 		// 已改根的存量补修不再重复展示整目录迁移提示。
-		return oldExists ? { kind: "migrated", oldPath: oldRoot, userDataPath: newRoot, migratedSessionDirs: [...migratedSessionDirs.keys()] } : { kind: "skipped", reason: "already-migrated", userDataPath: newRoot };
+		return renamedThisRun ? { kind: "migrated", oldPath: oldRoot, userDataPath: newRoot, migratedSessionDirs: [...migratedSessionDirs.keys()] } : { kind: "skipped", reason: "already-migrated", userDataPath: newRoot };
 	} catch (error) {
 		return { kind: "failed", reason: error instanceof Error ? error.message : String(error), userDataPath };
 	}
