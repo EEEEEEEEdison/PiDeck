@@ -3,10 +3,11 @@
  *
  * 两条纪律（与 `docs/pideck-mcp.md` 的「数据与权限边界」一致）：
  * 1. 只做显式允许清单——不做「先整份导出再删敏感字段」，新增设置项默认不可见；
- * 2. 不产生副作用——不跑 `pi list`、不扫扩展目录、不碰网络，只读设置快照与内置清单常量。
+ * 2. 不产生副作用——不跑 `pi list`、不扫扩展目录、不碰网络，只读设置快照、内置清单常量
+ *    与调用方已经算好的运行时列表。
  */
 import { basename } from "node:path";
-import type { PiDeckMcpBuiltInExtension, PiDeckMcpExtensionsView, PiDeckMcpSettingsView } from "../../shared/types/piDeckMcp";
+import type { PiDeckMcpBuiltInExtension, PiDeckMcpExtensionsView, PiDeckMcpRuntimeView, PiDeckMcpSettingsView } from "../../shared/types/piDeckMcp";
 import type { AppSettings } from "../../shared/types/settings";
 import { BUILT_IN_EXTENSIONS, INTERNAL_BUILT_IN_EXTENSIONS, isDefaultDisabledBuiltInExtension, isHiddenBuiltInExtension } from "../extensions/builtInExtensions";
 
@@ -61,5 +62,27 @@ export function buildPiDeckMcpExtensionsView(input: { settings: AppSettings; bui
 		removedBuiltInExtensions: [...input.settings.removedBuiltInExtensions],
 		enabledBuiltInExtensions: [...input.settings.enabledBuiltInExtensions],
 		disabledExtensions: input.settings.disabledExtensions.map((entry) => ({ scope: entry.scope, source: entry.source })),
+	};
+}
+
+/** 调用方（服务层）已完成授权过滤；本函数只做形状投影与计数。 */
+export function buildPiDeckMcpRuntimeView(input: { runtimes: ReadonlyArray<{ sessionId: string; projectId: string; runtimeGeneration: number; status: string; createdAt: number }>; authorizedProjectCount: number }): PiDeckMcpRuntimeView {
+	const runtimes = input.runtimes.map((runtime) => ({
+		sessionId: runtime.sessionId,
+		projectId: runtime.projectId,
+		// 必须给出代次：`sessions_abort` 的 expectedRuntimeGeneration 正是从这里取的，
+		// 否则客户端的乐观并发只能靠猜。
+		runtimeGeneration: runtime.runtimeGeneration,
+		status: runtime.status,
+		// 不从 runtime state 推 busy：那是每 agent 一轮 RPC，放在每次只读请求里代价过高。
+		// 代价是回答收尾的瞬间可能短暂报 idle，所以它是「值不值得等」的提示而非精确信号。
+		busy: runtime.status === "starting" || runtime.status === "running",
+		createdAt: runtime.createdAt,
+	}));
+	return {
+		runtimes,
+		runningCount: runtimes.length,
+		activeProjectCount: new Set(runtimes.map((runtime) => runtime.projectId)).size,
+		authorizedProjectCount: input.authorizedProjectCount,
 	};
 }

@@ -2680,6 +2680,10 @@ function registerIpc() {
 		// 闭包在请求时才求值，未就绪返回 null 而不是抛错。
 		settings: () => settingsStore?.get() ?? null,
 		builtInExtensionsVersion: () => readEffectiveBuiltInExtensionsVersion(resolveBuiltInExtensionRoots()),
+		// 运行时面：coordinator 在 whenReady 里早于 registerIpc 赋值，但闭包仍在请求时才求值，
+		// 与 settings 同样不假设装配顺序。
+		runtimes: () => sessionRuntimeCoordinator.listRuntimes(),
+		abortRuntime: (target) => sessionRuntimeCoordinator.abortRuntime(target),
 		warn: mcpWarning,
 	});
 	const unregisterPiDeckMcp = registerPiDeckMcpIpc(piDeckMcp, () => mainWindow, mcpWarning);

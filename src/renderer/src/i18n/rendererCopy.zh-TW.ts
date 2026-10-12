@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 26041797815d04d400629e58aac592c626b5ad16fb8b9cf10d964c67fe7d7c8a（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 00a1f7ccd7d567b25debf66aec2d4a1f96f3a4d7c7188fbfb61f6970090a3c00（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -2149,6 +2149,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.mcp.pideck.selected": "已選 {selected} / 共 {total} 個專案",
 	"config.mcp.pideck.selectAll": "全選",
 	"config.mcp.pideck.selectNone": "全不選",
+	"config.mcp.pideck.allProjects": "所有專案（含今後新建）",
+	"config.mcp.pideck.allProjectsHint": "跟隨模式：新增專案自動可讀，改專案列表無需重新應用，令牌也不再因新增專案而輪換；已刪除的專案自動失效。勾選後下面的逐項選擇不生效。",
+	"config.mcp.pideck.control": "寫操作",
+	"config.mcp.pideck.allowControl": "允許中斷正在產生的回答（等同停止按鈕）",
+	"config.mcp.pideck.allowControlHint": "僅此一項寫能力：可停止正在進行的回答，不會刪除會話或檔案，也不能啟動、重啟或改配置；已在輸入框排隊等待發送的訊息不受影響。",
 	"config.mcp.pideck.apply": "應用授權並更新令牌",
 	"config.mcp.pideck.enable": "授權並啟用本地服務",
 	"config.mcp.pideck.disable": "關閉服務並撤銷令牌",

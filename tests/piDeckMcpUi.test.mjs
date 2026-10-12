@@ -6,7 +6,8 @@ import { quickMessageHookHost } from "./helpers/quickMessageHookHost.mjs";
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 const plain = (v) => JSON.parse(JSON.stringify(v));
-const state = { enabled: false, running: false, projectIds: [], projects: [{ id: "p1", name: "Project" }] };
+// 宿主返回的状态必须带回全部字段：refresh/apply 会把它们写回草稿，缺字段会把草稿清成 undefined。
+const state = { enabled: false, running: false, projectIds: [], allProjects: false, allowControl: false, projects: [{ id: "p1", name: "Project" }] };
 function harness(api) {
 	const host = quickMessageHookHost();
 	const { usePiDeckMcp } = loadTsCommonJs("src/renderer/src/hooks/usePiDeckMcp.ts", { stubs: { react: host.react, "../desktopApi": { desktopApi: { piDeckMcp: api } } } });
@@ -31,7 +32,7 @@ test("MCP consent hook keeps scope drafts explicit and prevents duplicate same-f
 	const view = h.render();
 	const first = view.apply(true);
 	await view.apply(true);
-	assert.deepEqual(calls, [{ enabled: true, projectIds: ["p1"] }]);
+	assert.deepEqual(calls, [{ enabled: true, projectIds: ["p1"], allProjects: false, allowControl: false }]);
 	assert.equal(h.render().busy, true);
 	finish({ ok: true, value: { ...state, enabled: true, running: true, projectIds: ["p1"] } });
 	await first;
@@ -43,6 +44,8 @@ test("select-all / clear-selection data path: a draft holding every project id i
 		enabled: true,
 		running: true,
 		projectIds: ["p1"],
+		allProjects: false,
+		allowControl: false,
 		projects: [
 			{ id: "p1", name: "A" },
 			{ id: "p2", name: "B" },
@@ -65,9 +68,33 @@ test("select-all / clear-selection data path: a draft holding every project id i
 	h.render().setProjectIds([]);
 	await h.render().apply(true);
 	assert.deepEqual(calls, [
-		{ enabled: true, projectIds: ["p1", "p2", "p3"] },
-		{ enabled: true, projectIds: [] },
+		{ enabled: true, projectIds: ["p1", "p2", "p3"], allProjects: false, allowControl: false },
+		{ enabled: true, projectIds: [], allProjects: false, allowControl: false },
 	]);
+});
+
+test("通配授权与写开关随 apply 一起提交，关闭时一并撤回", async () => {
+	const wildcard = { enabled: true, running: true, projectIds: [], allProjects: true, allowControl: true, projects: [{ id: "p1", name: "A" }] };
+	const calls = [];
+	const h = harness({
+		getState: async () => ({ ok: true, value: wildcard }),
+		setAccess: async (input) => {
+			calls.push(plain(input));
+			return { ok: true, value: { ...wildcard, ...input } };
+		},
+	});
+	h.render();
+	await flush();
+	// 通配模式下白名单可以为空：否则「所有项目」会被 project-required 卡在草稿里保存不了。
+	await h.render().apply(true);
+	assert.deepEqual(calls, [{ enabled: true, projectIds: [], allProjects: true, allowControl: true }]);
+	h.render().setAllProjects(false);
+	h.render().setAllowControl(false);
+	await h.render().apply(false);
+	// 关闭 = 撤回全部授权：两个开关必须落回安全默认，而不是留在磁盘上等下次启用。
+	assert.deepEqual(calls[1], { enabled: false, projectIds: [], allProjects: false, allowControl: false });
+	assert.equal(h.render().allProjects, false);
+	assert.equal(h.render().allowControl, false);
 });
 
 test("MCP export fetched after unmount cannot run a config write or clipboard action", async () => {
@@ -146,7 +173,7 @@ test("saved consent remains revocable when its listener could not start", async 
 	assert.equal(disable.disabled, false);
 	disable.onClick();
 	await flush();
-	assert.deepEqual(updates, [{ enabled: false, projectIds: [] }]);
+	assert.deepEqual(updates, [{ enabled: false, projectIds: [], allProjects: false, allowControl: false }]);
 	host.unmount();
 });
 
@@ -162,5 +189,5 @@ test("PiDeck catalog uses dedicated consent panel, native logo and localized con
 	for (const locale of ["zh-CN", "en-US", "zh-TW"]) assert.match(read(`src/renderer/src/i18n/rendererCopy.${locale}.ts`), /"config\.mcp\.pideck\.warning"\s*:/);
 	// 一键授权入口：按钮文案必须来自 i18n 词典，删掉按钮或硬编码文案都会红。
 	const panel = read("src/renderer/src/config/PiDeckMcpPanel.tsx");
-	for (const key of ["config.mcp.pideck.selectAll", "config.mcp.pideck.selectNone"]) assert.match(panel, new RegExp(`t\\(\\s*"${key.replace(/\./g, "\\.")}"`), `面板缺少 ${key}`);
+	for (const key of ["config.mcp.pideck.selectAll", "config.mcp.pideck.selectNone", "config.mcp.pideck.allProjects", "config.mcp.pideck.allowControl"]) assert.match(panel, new RegExp(`t\\(\\s*"${key.replace(/\./g, "\\.")}"`), `面板缺少 ${key}`);
 });

@@ -16,6 +16,11 @@ export const piDeckMcpAccessSchema = z
 					.regex(/^[^\u0000-\u001f]+$/),
 			)
 			.max(1000),
+		// 旧文件没有这两个字段。默认值让升级后行为原样延续：“显式白名单 + 无写能力”。
+		// 不 bump version：旧构建读到多出来的 key 本来就会被 .strict() 拒（fail closed），
+		// 而新构建必须能直接读旧文件——加字段+默认值就能同时做到。
+		allProjects: z.boolean().default(false),
+		allowControl: z.boolean().default(false),
 	})
 	.strict();
 const storedSchema = piDeckMcpAccessSchema
@@ -26,7 +31,7 @@ const storedSchema = piDeckMcpAccessSchema
 	})
 	.strict();
 export type PiDeckMcpConfig = z.infer<typeof storedSchema>;
-export const emptyPiDeckMcpConfig = (): PiDeckMcpConfig => ({ version: 1, enabled: false, projectIds: [], port: 0, token: "" });
+export const emptyPiDeckMcpConfig = (): PiDeckMcpConfig => ({ version: 1, enabled: false, projectIds: [], allProjects: false, allowControl: false, port: 0, token: "" });
 
 /** Corrupt/oversized files fail closed; absence alone means first-run defaults. */
 export async function readPiDeckMcpConfig(path: string): Promise<PiDeckMcpConfig> {
@@ -42,7 +47,8 @@ export async function readPiDeckMcpConfig(path: string): Promise<PiDeckMcpConfig
 		const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
 		if (bytesRead > 256 * 1024) throw new Error("config-read-failed");
 		const value = storedSchema.parse(JSON.parse(buffer.subarray(0, bytesRead).toString("utf8")));
-		if (value.enabled && (!value.token || !value.port || !value.projectIds.length)) throw new Error("config-read-failed");
+		// enabled 必须至少有一块可读区域：要么通配，要么非空白名单——否则监听起来也只能拒绝一切。
+		if (value.enabled && (!value.token || !value.port || (!value.projectIds.length && !value.allProjects))) throw new Error("config-read-failed");
 		return value;
 	} catch {
 		throw new Error("config-read-failed");

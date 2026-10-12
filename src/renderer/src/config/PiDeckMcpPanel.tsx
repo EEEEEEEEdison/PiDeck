@@ -14,8 +14,8 @@ export function PiDeckMcpPanel({ existingNames, disabled, onAdd }: { existingNam
 	const prefix = useId();
 	const [copied, setCopied] = useState(false);
 	const busy = disabled || host.busy;
-	const changed = host.state && (host.projectIds.length !== host.state.projectIds.length || host.projectIds.some((id) => !host.state?.projectIds.includes(id)));
-	// 「全选」只覆盖当前项目列表；今后新建的项目仍需再次授权（授权快照是显式白名单，不是跟随模式）。
+	const changed = host.state && (host.projectIds.length !== host.state.projectIds.length || host.projectIds.some((id) => !host.state?.projectIds.includes(id)) || host.allProjects !== host.state.allProjects || host.allowControl !== host.state.allowControl);
+	// 「全选」只覆盖当前项目列表；要跟随今后新建的项目得用通配授权，而不是逐个勾。
 	const projectCount = host.state?.projects.length ?? 0;
 	const allSelected = projectCount > 0 && host.projectIds.length === projectCount;
 	return (
@@ -37,29 +37,42 @@ export function PiDeckMcpPanel({ existingNames, disabled, onAdd }: { existingNam
 			</p>
 			<fieldset disabled={busy || !host.state} className="flex flex-col gap-2">
 				<legend className="mb-2 text-control font-medium">{t("config.mcp.pideck.projects")}</legend>
+				<div className="flex shrink-0 items-center gap-2">
+					<Checkbox id={`${prefix}-all`} checked={host.allProjects} onCheckedChange={(checked) => host.setAllProjects(checked === true)} />
+					<Label htmlFor={`${prefix}-all`}>{t("config.mcp.pideck.allProjects")}</Label>
+				</div>
+				<p className="text-micro text-muted-foreground">{t("config.mcp.pideck.allProjectsHint")}</p>
 				<div className="flex shrink-0 items-center gap-1">
 					<p role="status" className="flex-1 text-micro text-muted-foreground">
 						{t("config.mcp.pideck.selected", { selected: host.projectIds.length, total: projectCount })}
 					</p>
-					<Button variant="ghost" size="xs" disabled={allSelected} onClick={() => host.setProjectIds(host.state?.projects.map((project) => project.id) ?? [])}>
+					<Button variant="ghost" size="xs" disabled={allSelected || host.allProjects} onClick={() => host.setProjectIds(host.state?.projects.map((project) => project.id) ?? [])}>
 						{t("config.mcp.pideck.selectAll")}
 					</Button>
-					<Button variant="ghost" size="xs" disabled={!host.projectIds.length} onClick={() => host.setProjectIds([])}>
+					<Button variant="ghost" size="xs" disabled={!host.projectIds.length || host.allProjects} onClick={() => host.setProjectIds([])}>
 						{t("config.mcp.pideck.selectNone")}
 					</Button>
 				</div>
 				<div className="flex max-h-60 flex-col gap-2 overflow-y-auto">
 					{host.state?.projects.map((project, index) => (
 						<div key={project.id} className="flex shrink-0 items-center gap-2">
-							<Checkbox id={`${prefix}-${index}`} checked={host.projectIds.includes(project.id)} onCheckedChange={(checked) => host.setProjectIds((ids) => (checked === true ? [...ids, project.id] : ids.filter((id) => id !== project.id)))} />
+							<Checkbox id={`${prefix}-${index}`} disabled={host.allProjects} checked={host.projectIds.includes(project.id)} onCheckedChange={(checked) => host.setProjectIds((ids) => (checked === true ? [...ids, project.id] : ids.filter((id) => id !== project.id)))} />
 							<Label htmlFor={`${prefix}-${index}`}>{project.name}</Label>
 						</div>
 					))}
 				</div>
 			</fieldset>
+			<fieldset disabled={busy || !host.state} className="flex flex-col gap-2">
+				<legend className="mb-2 text-control font-medium">{t("config.mcp.pideck.control")}</legend>
+				<div className="flex shrink-0 items-center gap-2">
+					<Checkbox id={`${prefix}-control`} checked={host.allowControl} onCheckedChange={(checked) => host.setAllowControl(checked === true)} />
+					<Label htmlFor={`${prefix}-control`}>{t("config.mcp.pideck.allowControl")}</Label>
+				</div>
+				<p className="text-micro text-muted-foreground">{t("config.mcp.pideck.allowControlHint")}</p>
+			</fieldset>
 			<div className="flex flex-wrap gap-2">
 				<Button
-					disabled={busy || !host.state || !host.projectIds.length || Boolean(host.state.running && !changed)}
+					disabled={busy || !host.state || (!host.projectIds.length && !host.allProjects) || Boolean(host.state.running && !changed)}
 					onClick={() => {
 						setCopied(false);
 						void host.apply(true);

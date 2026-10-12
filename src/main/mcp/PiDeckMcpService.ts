@@ -2,10 +2,11 @@
 import { randomBytes } from "node:crypto";
 import type { PiDeckMcpAccess, PiDeckMcpProject, PiDeckMcpState } from "../../shared/types/piDeckMcp";
 import type { McpConfigFile } from "../../shared/types/mcp";
+import type { SessionCommandResult, SessionRuntimeInfo, SessionRuntimeTarget } from "../../shared/types/session";
 import type { AppSettings } from "../../shared/types/settings";
 import { emptyPiDeckMcpConfig, piDeckMcpAccessSchema, readPiDeckMcpConfig, writePiDeckMcpConfig, type PiDeckMcpConfig } from "../config/piDeckMcpConfig";
 import type { HostPluginSessions } from "../plugins/HostPluginSessions";
-import { buildPiDeckMcpExtensionsView, buildPiDeckMcpSettingsView } from "./piDeckMcpViews";
+import { buildPiDeckMcpExtensionsView, buildPiDeckMcpRuntimeView, buildPiDeckMcpSettingsView } from "./piDeckMcpViews";
 import { createPiDeckMcpServer } from "./piDeckMcpTools";
 import { PiDeckMcpHttpServer } from "./PiDeckMcpHttpServer";
 
@@ -25,6 +26,10 @@ export class PiDeckMcpService {
 			/** 宿主级端口：设置存储晚于本服务构造，闭包只在请求时求值；未就绪返回 null。 */
 			settings: () => AppSettings | null;
 			builtInExtensionsVersion: () => string | null;
+			/** 在跑的会话运行时（coordinator 侧）；宿主未就绪时返回空数组。 */
+			runtimes: () => SessionRuntimeInfo[];
+			/** 中断一个 agent 正在产生的回答；只由 sessions_abort 调用。target 的 runtimeGeneration 由 coordinator 校验。 */
+			abortRuntime: (target: SessionRuntimeTarget) => Promise<SessionCommandResult<unknown>>;
 			warn: (code: string) => void;
 		},
 	) {
@@ -49,14 +54,35 @@ export class PiDeckMcpService {
 		return this.snapshot();
 	}
 	private snapshot(): PiDeckMcpState {
-		return { enabled: this.config.enabled, projectIds: [...this.config.projectIds], running: Boolean(this.endpoint), endpoint: this.endpoint, projects: this.deps.projects(), error: this.error };
+		return {
+			enabled: this.config.enabled,
+			projectIds: [...this.config.projectIds],
+			allProjects: this.config.allProjects,
+			allowControl: this.config.allowControl,
+			running: Boolean(this.endpoint),
+			endpoint: this.endpoint,
+			projects: this.deps.projects(),
+			error: this.error,
+		};
+	}
+
+	/**
+	 * 项目授权的唯一判定点：setAccess 校验、请求期 authorize 与工具列表过滤必须同口径，
+	 * 否则会出现「列表里看得到但读不了」或反过来的越权。
+	 * 通配模式仍要求项目当前存在——已删除项目的 id 不再放行。
+	 */
+	private isProjectAuthorized(projectId: string): boolean {
+		if (!this.deps.projects().some((project) => project.id === projectId)) return false;
+		return this.config.allProjects || this.config.projectIds.includes(projectId);
 	}
 
 	/** Serialize writes; invalidate prior requests immediately, not after disk IO completes. */
 	setAccess(input: PiDeckMcpAccess): Promise<PiDeckMcpState> {
 		const access = piDeckMcpAccessSchema.parse(input);
-		if (access.enabled && !access.projectIds.length) return Promise.reject(new Error("project-required"));
-		if (access.projectIds.some((id) => !this.deps.projects().some((p) => p.id === id))) return Promise.reject(new Error("project-not-authorized"));
+		// enabled 必须至少有一块可读区域。通配模式下 projectIds 只是「切回显式授权」时用的草稿，
+		// 既不参与判定，也不应该因为里面留着已删除的项目而让整次保存失败。
+		if (access.enabled && !access.projectIds.length && !access.allProjects) return Promise.reject(new Error("project-required"));
+		if (!access.allProjects && access.projectIds.some((id) => !this.deps.projects().some((p) => p.id === id))) return Promise.reject(new Error("project-not-authorized"));
 		const epoch = ++this.epoch;
 		const operation = this.pending.then(async () => {
 			if (this.disposed || epoch !== this.epoch) throw new Error("access-revoked");
@@ -95,14 +121,14 @@ export class PiDeckMcpService {
 	private async start(config: PiDeckMcpConfig, epoch: number): Promise<void> {
 		const authorize = (projectId?: string) => {
 			if (this.disposed || epoch !== this.epoch || !this.config.enabled || !this.endpoint) throw new Error("access-revoked");
-			if (projectId && (!this.config.projectIds.includes(projectId) || !this.deps.projects().some((p) => p.id === projectId))) throw new Error("project-not-authorized");
+			if (projectId && !this.isProjectAuthorized(projectId)) throw new Error("project-not-authorized");
 		};
 		const listener = new PiDeckMcpHttpServer(
 			config.token,
 			() =>
 				createPiDeckMcpServer({
 					sessions: this.deps.sessions,
-					projects: () => this.deps.projects().filter((p) => this.config.projectIds.includes(p.id)),
+					projects: () => this.deps.projects().filter((p) => this.isProjectAuthorized(p.id)),
 					// 宿主级视图每次请求现算：设置改完无需重启服务即生效，也不会缓存敏感快照。
 					settings: () => {
 						const current = this.deps.settings();
@@ -111,6 +137,30 @@ export class PiDeckMcpService {
 					extensions: () => {
 						const current = this.deps.settings();
 						return current ? buildPiDeckMcpExtensionsView({ settings: current, builtInVersion: this.deps.builtInExtensionsVersion() }) : null;
+					},
+					// 运行时先按授权过滤再投影：未授权项目里在跑的会话不能借计数或列表漏出去。
+					runtimes: () =>
+						buildPiDeckMcpRuntimeView({
+							runtimes: this.deps.runtimes().filter((runtime) => this.isProjectAuthorized(runtime.projectId)),
+							authorizedProjectCount: this.deps.projects().filter((project) => this.isProjectAuthorized(project.id)).length,
+						}),
+					// 会话 → 运行中 agent。授权在解析之后做，所以「未授权项目里的会话」与「不存在/没在跑」
+					// 在会话 id 上是可区分的：id 本身不可猜（随机），换来的是客户端能拿到可行动的报错
+					// （project-not-authorized）而不是误导性的 session-not-running。
+					resolveRuntime: (sessionId) => {
+						const runtime = this.deps.runtimes().find((candidate) => candidate.sessionId === sessionId);
+						if (!runtime) return null;
+						authorize(runtime.projectId);
+						return { sessionId: runtime.sessionId, agentId: runtime.agentId, projectId: runtime.projectId, runtimeGeneration: runtime.runtimeGeneration };
+					},
+					controlEnabled: () => this.config.allowControl,
+					abort: async (target) => {
+						// 开关在请求开始后才被关掉时（工具已注册）也必须拒绝，所以每次调用都复查。
+						if (!this.config.allowControl) throw new Error("control-disabled");
+						const result = await this.deps.abortRuntime(target);
+						// resolve 与 abort 之间 runtime 换了人（重启/换绑）时 coordinator 会拒；其余失败都
+						// 等价于「这个会话现在没有可中断的运行」。
+						if (!result.ok) throw new Error(result.error.code === "SESSION_RUNTIME_CHANGED" ? "runtime-changed" : "session-not-running");
 					},
 					authorize,
 				}),
