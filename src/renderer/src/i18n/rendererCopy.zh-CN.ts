@@ -51,6 +51,8 @@ export const zhCN = {
 	"hostPlugins.plugin": "插件",
 	"hostPlugins.permission": "权限与状态",
 	"hostPlugins.actions": "操作",
+	"hostPlugins.moreActions": "更多操作",
+	"hostPlugins.panels": "面板",
 	"hostPlugins.sessionsRead": "读取当前项目的会话（可能包含敏感内容）",
 	"hostPlugins.noSessionsRead": "无会话读取权限",
 	"hostPlugins.enabled": "已启用",

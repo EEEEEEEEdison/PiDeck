@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { FolderOpen, FolderPlus, PackagePlus, RefreshCw, Puzzle, BookOpen, FilePlus2, Trash2 } from "lucide-react";
+import { FolderOpen, FolderPlus, PackagePlus, RefreshCw, Puzzle, BookOpen, FilePlus2, Trash2, Ellipsis, Power, PowerOff, PanelTop } from "lucide-react";
 import type { HostPluginInfo, HostPluginPermission } from "../../../shared/types/hostPlugin";
 import { LOCAL_SERVICE_IDS } from "../../../shared/localServices";
 import { hostPluginCatalogAtom, hostPluginPanelAtom } from "../atoms/host-plugin-atoms";
@@ -12,8 +12,8 @@ import { Alert, AlertDescription } from "../components/ui-shadcn/alert";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../components/ui-shadcn/alert-dialog";
 import { Badge } from "../components/ui-shadcn/badge";
 import { Button } from "../components/ui-shadcn/button";
-import { ButtonGroup } from "../components/ui-shadcn/button-group";
 import { Checkbox } from "../components/ui-shadcn/checkbox";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "../components/ui-shadcn/dropdown-menu";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui-shadcn/dialog";
 import { Input } from "../components/ui-shadcn/input";
 import { Label } from "../components/ui-shadcn/label";
@@ -210,38 +210,48 @@ export function HostPluginsTab() {
 								</div>
 							</TableCell>
 							<TableCell>
-								{/* 操作合并成一个按钮组：启停、面板入口、卸载在同一条分段控件里，不再是一堆散落的按钮。 */}
-								<ButtonGroup>
-									<Button
-										size="sm"
-										variant="outline"
-										disabled={busy}
-										onClick={() => {
-											if (plugin.enabled) void toggle(plugin, false);
-											else setConsent(plugin);
-										}}
-									>
-										{t(plugin.enabled ? "hostPlugins.disable" : "hostPlugins.enable")}
-									</Button>
-									{plugin.enabled &&
-										plugin.manifest.contributes.panels.map((panel) => (
-											<Button
-												key={panel.id}
-												size="sm"
-												variant="outline"
-												onClick={() => {
-													setSettingsOpen(false);
-													openPanel({ pluginId: plugin.manifest.id, panelId: panel.id });
-												}}
-											>
-												{panel.title}
-											</Button>
-										))}
-									<Button size="sm" variant="destructive" disabled={busy} onClick={() => setRemoving(plugin)}>
-										<Trash2 data-icon="inline-start" />
-										{t("hostPlugins.remove")}
-									</Button>
-								</ButtonGroup>
+								{/* 行内只留一个「更多操作」菜单：启停、面板入口、卸载都是低频动作，平铺会把表格撑宽、也容易误点卸载。 */}
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button variant="ghost" size="icon-sm" disabled={busy} aria-label={t("hostPlugins.moreActions")} title={t("hostPlugins.moreActions")}>
+											<Ellipsis size={14} aria-hidden="true" />
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="end" className="min-w-[10rem]">
+										<DropdownMenuItem
+											onClick={() => {
+												if (plugin.enabled) void toggle(plugin, false);
+												else setConsent(plugin);
+											}}
+										>
+											{plugin.enabled ? <PowerOff size={14} aria-hidden="true" /> : <Power size={14} aria-hidden="true" />}
+											{t(plugin.enabled ? "hostPlugins.disable" : "hostPlugins.enable")}
+										</DropdownMenuItem>
+										{plugin.enabled && plugin.manifest.contributes.panels.length > 0 && (
+											<>
+												<DropdownMenuSeparator />
+												<DropdownMenuLabel>{t("hostPlugins.panels")}</DropdownMenuLabel>
+												{plugin.manifest.contributes.panels.map((panel) => (
+													<DropdownMenuItem
+														key={panel.id}
+														onClick={() => {
+															setSettingsOpen(false);
+															openPanel({ pluginId: plugin.manifest.id, panelId: panel.id });
+														}}
+													>
+														<PanelTop size={14} aria-hidden="true" />
+														{panel.title}
+													</DropdownMenuItem>
+												))}
+											</>
+										)}
+										<DropdownMenuSeparator />
+										<DropdownMenuItem variant="destructive" onClick={() => setRemoving(plugin)}>
+											<Trash2 size={14} aria-hidden="true" />
+											{t("hostPlugins.remove")}
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
 							</TableCell>
 						</TableRow>
 					))}

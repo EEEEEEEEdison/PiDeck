@@ -52,6 +52,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"hostPlugins.plugin": "Plugin",
 	"hostPlugins.permission": "Permissions and status",
 	"hostPlugins.actions": "Actions",
+	"hostPlugins.moreActions": "More actions",
+	"hostPlugins.panels": "Panels",
 	"hostPlugins.sessionsRead": "Read current project's sessions (may contain sensitive data)",
 	"hostPlugins.noSessionsRead": "No session access",
 	"hostPlugins.enabled": "Enabled",

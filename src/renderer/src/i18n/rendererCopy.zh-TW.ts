@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: d59252964385216cafd191d527699053585e38ab45ff226c2b880b7c320d43ed（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: af61a85c251d14598958d598c7af5acfcf534ba356670800de28f4dd7daa88e0（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -58,6 +58,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"hostPlugins.plugin": "外掛",
 	"hostPlugins.permission": "權限與狀態",
 	"hostPlugins.actions": "操作",
+	"hostPlugins.moreActions": "更多操作",
+	"hostPlugins.panels": "面板",
 	"hostPlugins.sessionsRead": "讀取當前專案的會話（可能包含敏感內容）",
 	"hostPlugins.noSessionsRead": "無會話讀取權限",
 	"hostPlugins.enabled": "已啟用",
