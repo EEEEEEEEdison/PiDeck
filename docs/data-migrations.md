@@ -120,5 +120,7 @@ node --test tests/userDataMigrationState.test.mjs tests/userDataNameMigration.te
 86 项通过。覆盖首次迁移、已改根补修、快速跳过、完成记录损坏/版本/路径/平台不符/超限与读取竞态、读写/扫描/发布失败后重试、配置中断写入保留完整原文件、符号链接保护、根/会话目录冲突、并存时的保守补修（旧路径已消失才改 header）、header 损坏/目标缺失和并行追加保留。
 
 真实机器验收（2026-10-12，Linux 安装版）：`pideck 0.9.0` 安装包内已含本迁移代码；`~/.config/PiDeck-dev` 完成记录已生成（`pi-desktop-dev` 已改名），dev 会话 header 全部指向新路径；`~/.config/PiDeck` 与仅剩 Chromium 壳的 `~/.config/pi-desktop` 并存，启动日志出现 collision 告警，当时未补修 9 个仍指向 `/home/zhadainian/.config/pi-desktop/chat-workspace` 的 header（旧路径已不存在），因此更正为并存也跑补修；会话文件与环境配置未被改动。
+重新打包启动后复验（同日 20:45，安装包已含修复）：15 个会话的 header 全部指向新路径（原 9 条旧路径归零），恰好只改写那 9 个文件，正文逐字节保留；项目会话（29+3）未被误改；`~/.config/pi-desktop` 未被碰；catalog 139 条 `filePath` 全部存在。
+经用户确认，仅含 `Local State`（57 B，sha256 前缀 b56ef05d）、`Crashpad/client_id`（36 B，b6b9c373）和一个空目录的空壳旧根已用 `gio trash` 移入回收站（`~/.local/share/Trash/files/pi-desktop`，可还原）；根目录内 2 个 `session-catalog.json.*.tmp`（2026-09-26 旧残留）按用户选择保留。旧根已不存在，下次启动会重跑一次全链路并写入完成记录，之后走快速跳过。
 
 TypeScript 使用 `tsconfig.main.json` 选项，仅以四个迁移模块为根进行 noEmit 定向检查，通过；启动装配文件语法检查通过。触达源码/测试的 Biome 格式检查及自身改动的差异空白检查通过。未执行全仓构建、完整应用类型检查、打包、真实用户数据迁移或系统密钥环 smoke。其它条目的测试本次未重新运行。
