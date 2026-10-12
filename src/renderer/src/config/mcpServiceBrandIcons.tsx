@@ -1,9 +1,10 @@
 /**
  * MCP 目录服务的品牌图标（单色/多色 path + 官方品牌色，或官方位图）。
  * 来源优先级：官方站点/CDN 导出的 SVG（Tavily mark、飞书四色 logo）> simple-icons（CC0，经 iconify API 获取）
- * > 官方品牌图集 logos（Exa）> 官方只发位图时的内联 PNG（腾讯文档/企查查/百度网盘的官方 app 图标裁切后压缩）。
+ * > 官方品牌图集 logos（Exa）> 官方只发位图时的内联 PNG（腾讯文档/企查查/百度网盘/百智云的官方图标裁切后压缩）。
  * 拿不到任何官方图形的服务（context7/firecrawl）回退到 lucide 通用图标（见 McpResourceViews 的 catalogEntryIcon）。
- * adaptive 品牌（github/notion/sentry/tavily/piDeck）原始色过暗，暗色主题下会消失：改用主题文字色自动适配。
+ * adaptive 品牌（github/notion/sentry/tavily/piDeck）原始色过暗，暗色主题下会消失：改用主题文字色自动适配；
+ * 位图里的深色描边品牌（百智云）无法改色，改用 plate 底片补回暗色主题下的对比度。
  */
 export type McpBrandIcon = {
 	hex: string;
@@ -19,14 +20,22 @@ export type McpBrandIcon = {
 	 * 按 viewBox 满格 meet 缩放；hex 仅为满足统一契约（不参与渲染）。
 	 */
 	png?: string;
+	/**
+	 * 位图自带深色描边（百智云的黑色圆环）时，暗色主题下描边会与面板背景融合、只剩中间的白芯：
+	 * 声明品牌自身的浅色底片色，渲染时先铺一层圆角底片再叠位图（亮色主题下该底片与面板同色、不可见）。
+	 * 仅 png 分支使用。
+	 */
+	plate?: string;
 	/** 官方彩色多 path 图形（如飞书四色 logo）：优先于单色 path 渲染，每段自带官方 fill。 */
 	multiPaths?: Array<{ d: string; fill: string }>;
 };
 
 export const MCP_BRAND_ICONS: Record<string, McpBrandIcon> = {
 	// Official platform mark: https://baizhi.cloud/images/platform-logo.png (48px inline PNG).
+	// 标志是黑色圆环 + 白色内芯，底片取标志自身的白色：暗色主题下补回圆环，亮色主题下与面板同色不显形。
 	baizhi: {
 		hex: "#101317",
+		plate: "#FDFDFD",
 		png: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwBAMAAAClLOS0AAAAMFBMVEUQExdMaXENEBMLDhEOERQNDxL9/f0EBgrs7OwrLTDa2tvBwcKhoqNISk1jZGeCg4U6Hk/tAAAABnRSTlP+AJYy0m7n/hu8AAAACXBIWXMAAAsTAAALEwEAmpwYAAACCUlEQVR42nWUSy8EQRDHK+vRHieWOXNxthLOXnH2SHyEztj16Ftn4nGc7LpwwjrInlw4OCGCI+uAG4kITh6JM8KBqprp2elBJfuY/k1V/6u6qqEptPToIFT3j5lHB8I/3b3A1p+xQRcYS2XioBUqloqBdBBHK/4ZqIDhYLlYFIxGDOBA6nY/n99+UGEwBuTgfUqy7DW91B4AchDPMrACudQEoBPXG8N1Oc27ZBigJG/TgBIL6yOAkcS6WZdPYS4IMBLsmvUsytYUC0EbwFzkkBXq6wi3aXcgjZEeIyCPUTZKrnKAxG5Ky1BAjQMtAAv2upxRUO0A7t2YAKgAemAYxFUC0Cbj0AbiLQlOATqgN5aFsR2AIQJ+EhQIYKFiwOXvKQW1COaTDjbIcZZbceDxw3sDUXESA/W0hyso/yldFx4jq6IgOU0aCno2LNYQJUjuk1ohKGk+gT1KEEvyhhtPskeJPLbkO5WkE8RKYaOc1SRuQje4F0W5SkXEss/KxX35NMcBH90DP8dlb8ZEZu7KcomFXvruxT2qTQVHe/kRS9v93uOjxWYQa1ZB3FVuBmofu1rUjNQ+zXabSBKbMi26IH3LoS9q6huz7LvXUVNTZ3knfEb4OVPRGFCTwnw5UHSuKoND24PwXg/yi4cvOj5q0XAua3s4o3GG5DhzsL8ugP+vDCT/XDK/r6UfCM8ji4HxSDsAAAAASUVORK5CYII=",
 	},
 	github: {
@@ -134,13 +143,16 @@ export const MCP_BRAND_ICONS: Record<string, McpBrandIcon> = {
 	},
 };
 
-/** 目录行内品牌图标：大小跟随目录图标（14px），彩色品牌用原色，adaptive 品牌用主题文字色；官方位图（png）按 viewBox 满格 meet 缩放。 */
+/** 目录行内品牌图标：大小跟随目录图标（14px），彩色品牌用原色，adaptive 品牌用主题文字色；官方位图（png）按 viewBox 满格 meet 缩放，深色描边位图先铺 plate 底片。 */
 export function McpBrandIconSvg(props: { icon: McpBrandIcon; size?: number }) {
 	const [minX, minY, boxW, boxH] = (props.icon.viewBox ?? `0 0 ${props.icon.viewSize ?? 24} ${props.icon.viewSize ?? 24}`).split(/\s+/).map(Number);
 	return (
 		<svg viewBox={`${minX} ${minY} ${boxW} ${boxH}`} width={props.size ?? 14} height={props.size ?? 14} aria-hidden="true" className={props.icon.adaptive ? "shrink-0 text-text-primary" : "shrink-0"}>
 			{props.icon.png ? (
-				<image href={props.icon.png} x={minX} y={minY} width={boxW} height={boxH} preserveAspectRatio="xMidYMid meet" />
+				<>
+					{props.icon.plate ? <rect x={minX} y={minY} width={boxW} height={boxH} rx={Math.min(boxW, boxH) * 0.22} fill={props.icon.plate} /> : null}
+					<image href={props.icon.png} x={minX} y={minY} width={boxW} height={boxH} preserveAspectRatio="xMidYMid meet" />
+				</>
 			) : props.icon.multiPaths ? (
 				props.icon.multiPaths.map((segment, index) => <path key={index} d={segment.d} fill={segment.fill} />)
 			) : (

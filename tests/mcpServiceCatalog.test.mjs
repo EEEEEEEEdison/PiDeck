@@ -137,8 +137,13 @@ test("brand icons cover every catalog entry except the documented fallbacks", ()
 		assert.equal(MCP_BRAND_ICONS[id].path, undefined, `${id} keeps no vector path`);
 		assert.equal(MCP_BRAND_ICONS[id].multiPaths, undefined, `${id} keeps no multiPaths`);
 	}
+	// 百智云的黑色圆环位图必须带浅色底片，否则暗色主题下描边被背景吞掉、只剩一个白圆盘（见 plate 契约）。
+	assert.equal(MCP_BRAND_ICONS.baizhi.plate, "#FDFDFD");
 	for (const [id, icon] of Object.entries(MCP_BRAND_ICONS)) {
 		assert.match(icon.hex, /^#[0-9A-Fa-f]{6}$/, `${id} hex`);
+		if (icon.plate) {
+			assert.match(icon.plate, /^#[0-9A-Fa-f]{6}$/, `${id} plate`);
+		}
 		if (icon.png) {
 			// 官方位图：data URI 内联（离线可用，不新增远程依赖）
 			assert.match(icon.png, /^data:image\/png;base64,/, `${id} png`);
