@@ -134,3 +134,18 @@ test("tray icon follows logoStyle at creation and on settings change (source sca
 	assert.match(logoBranch.slice(0, 400), /applyTrayLogoStyle\(settings\.logoStyle, getTray, settings\.logoCustomImage\)/, "tray icon refresh");
 	assert.match(logoBranch.slice(0, 400), /"logoCustomImage" in patch && prevSettings\.logoCustomImage !== settings\.logoCustomImage/, "custom image change must refresh icons too");
 });
+
+test("window icon is resolved at window creation (startup applyWindowLogoStyle runs before the window exists)", () => {
+	// 回归：启动阶段的 applyWindowLogoStyle（settingsStore.load() 之后）早于 createWindow 执行，
+	// 那时 mainWindow 还是 null → 调用是空操作；建窗参数若写死 iconPath，
+	// 冷启动的任务栏/Alt-Tab 图标就永远不跟 logoStyle（要等用户改一次设置才纠正）。
+	const index = fs.readFileSync(path.join(root, "src", "main", "index.ts"), "utf8");
+	const createWindowStart = index.indexOf("async function createWindow()");
+	assert.notEqual(createWindowStart, -1, "index.ts must define createWindow");
+	const createWindow = index.slice(createWindowStart);
+	const optionsIndex = createWindow.indexOf("settingsStore.createWindowOptions()");
+	assert.notEqual(optionsIndex, -1, "createWindow must read window options");
+	const iconOption = createWindow.slice(optionsIndex).match(/\bicon:\s*([^,\n]+)/);
+	assert.ok(iconOption, "createWindow must set a window icon");
+	assert.match(iconOption[1], /resolveLogoImage|initialWindowLogo/, "窗口 icon 必须来自 resolveLogoImage（写死 iconPath 会让冷启动图标不跟随）");
+});

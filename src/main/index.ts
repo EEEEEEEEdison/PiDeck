@@ -27,6 +27,7 @@ import { isDevToolsShortcut, toggleMainWindowDevTools } from "./devTools";
 import { isShortcutInput, refreshShortcutBindings } from "./appShortcuts";
 // 主进程复用共享的接管型扩展识别规则（与渲染层横幅单一来源；纯函数无依赖）。
 import { detectThirdPartyMcpExtensions } from "../shared/mcpThirdParty";
+import { composeAppTitle } from "../shared/appTitle";
 import { PiResourceConfigService } from "./config/PiResourceConfigService";
 import { isPackageSource, projectExtensionEnabled, projectExtensionFiltered } from "./config/PiResourceConfigService";
 import { runPackageRootRuleRepair, type PackageRootRuleRepairDeps } from "./config/piPackageRootRuleRepair";
@@ -1926,6 +1927,9 @@ function configureBrowserPanelWebviewHost(window: BrowserWindow): void {
 async function createWindow() {
 	applyNativeThemeSource(settingsStore.get());
 	const windowOptions = settingsStore.createWindowOptions();
+	// 窗口首帧图标必须在这里定：启动阶段的 applyWindowLogoStyle 早于建窗执行（那时 mainWindow 还是 null），
+	// 只靠那一处会永远落回 build/icon.png —— 冷启动时任务栏/Alt-Tab 图标跟不住 logoStyle。
+	const initialWindowLogo = resolveLogoImage(settingsStore.get().logoStyle, settingsStore.get().logoCustomImage);
 	const showMainWindowImmediately = shouldShowMainWindowImmediately();
 	const sourcePreloadPath = join(__dirname, "../preload/index.js");
 	const mainPreloadPath = await prepareMainPreloadPath();
@@ -1987,9 +1991,10 @@ async function createWindow() {
 		height: startupWindowBounds.height,
 		minWidth: MIN_WINDOW_WIDTH,
 		minHeight: MIN_WINDOW_HEIGHT,
-		// 多 worktree 并行 dev：标题带分支名，任务栏/Alt-Tab 一眼区分窗口
-		title: isolateDevByGitBranch && !isSharedDevBranch(devGitBranch) ? `PiDeck · ${devGitBranch}` : "PiDeck",
-		icon: iconPath,
+		// 多 worktree 并行 dev：标题带分支名，任务栏/Alt-Tab 一眼区分窗口；
+		// 显示名称走 composeAppTitle 与渲染层 document.title 同源（后者会覆盖此处的初值）
+		title: composeAppTitle(settingsStore.get().appDisplayName, isolateDevByGitBranch && !isSharedDevBranch(devGitBranch) ? devGitBranch : undefined),
+		icon: initialWindowLogo?.image ?? iconPath,
 		frame: windowOptions.frame,
 		titleBarStyle: windowOptions.titleBarStyle,
 		...(windowOptions.trafficLightPosition ? { trafficLightPosition: windowOptions.trafficLightPosition } : {}),
