@@ -2,6 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
+ * source-sha256: cd0668fcb47b3e73a672e37d9e9fd3c0a520e11ec9a0faad2104760355885dab（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5446,7 +5447,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"health.check.wsl.config": "WSL 兜底配置",
 	"health.check.wsl.config.hint": "Windows 上開啟 WSL 兜底卻未填發行版，兜底永遠不會生效。",
 	"health.check.instance.locks": "單例項鎖狀態",
-	"health.check.instance.locks.hint": "檢查例項鎖檔案是否殘留。舊版本升級被中斷會留下鎖檔案，導致再次啟動「雙擊圖示沒反應」。鎖檔案位於目前應用程式資料目錄下的 instance-locks 中，可從設定中開啟資料目錄查看。",
+	"health.check.instance.locks.hint": "檢查例項鎖檔案是否殘留。舊版本升級被中斷會留下鎖檔案，導致再次啟動「雙擊圖示沒反應」。鎖檔案位於當前應用資料目錄下的 instance-locks 中，可從設定中開啟資料目錄檢視。",
 	...mainProcessZhTW,
 	"update.openRelease": "開啟 Release",
 	"update.viewInSettings": "檢視設定",
