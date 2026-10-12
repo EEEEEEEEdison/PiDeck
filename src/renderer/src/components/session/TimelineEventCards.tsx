@@ -1,4 +1,7 @@
-import { memo, useState } from "react";
+import { memo, useCallback, useState } from "react";
+import { cn } from "../../lib/utils";
+import { ProcessEntryReturnToStart } from "./turn/ProcessEntryReturnToStart";
+import { useProcessEntryStickyHeader } from "./turn/useProcessEntryStickyHeader";
 import { AlertTriangle, Brain, ChevronDown, ChevronRight, ChevronUp, RefreshCw } from "lucide-react";
 import type { ChatMessage } from "../../../../shared/types";
 import { t, translateI18nDescriptor } from "../../i18n";
@@ -91,6 +94,15 @@ export const ThinkingBlock = memo(
 		hiddenLabel?: string;
 	}) {
 		const [expanded, setExpanded] = useState(props.defaultExpanded ?? false);
+		const sticky = useProcessEntryStickyHeader(expanded);
+		const toggleExpanded = useCallback(() => {
+			sticky.prepareCollapse();
+			setExpanded((value) => !value);
+		}, [sticky.prepareCollapse]);
+		const collapse = useCallback(() => {
+			sticky.prepareCollapse();
+			setExpanded(false);
+		}, [sticky.prepareCollapse]);
 		// 折叠行的打字机：流式中始终推进（预览吃 displayedContent + 尾部跟随 = 跑马灯）。
 		// 展开正文由 MarkdownStream 自己打字，这里不能 disabled 跟 expanded 绑——
 		// 用户中途收起时还要接得上单行预览。非流式关掉 rAF，避免历史卡片空转。
@@ -111,47 +123,50 @@ export const ThinkingBlock = memo(
 				// 与工具行一样压扁底距：思考不再是「标题行 + 虚线框」双行块
 				contentClassName="pb-1"
 			>
-				<section data-thinking-step="true" className="w-full min-w-0 overflow-hidden rounded-md border-0">
-					{/* 整行可点，结构对齐 ToolCard trigger：图标 + 耗时 + chevron + 折叠预览。 */}
-					<button
-						type="button"
-						className="group relative flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-left text-chat-row transition-[background-color,transform] duration-fast motion-reduce:transition-none hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] active:scale-[0.99] focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
-						onClick={() => setExpanded((v) => !v)}
-						aria-expanded={expanded}
-						title={expanded ? t("thinking.collapse") : t("thinking.expand")}
-					>
-						{/* 流式思考中整行扫光（dsh-web reasoning-row-sweep 同款）。
+				<section ref={sticky.entryRef} data-thinking-step="true" className={cn("w-full min-w-0 rounded-md border-0", sticky.insideProcessGroup ? "overflow-visible" : "overflow-hidden")}>
+					{/* 原始标题在本项内吸顶，不复制标题或把正文另套一条滚轮。 */}
+					<div ref={sticky.headerRef} data-process-entry-header="" data-process-entry-pinned={sticky.pinned} className={cn("relative flex min-h-7 items-center", sticky.sticky && "sticky top-0 z-10", sticky.pinned && "rounded-none bg-bg-app shadow-[0_1px_0_var(--color-border-subtle)]")}>
+						<button
+							type="button"
+							className="group relative flex min-h-7 w-full min-w-0 cursor-pointer overflow-hidden items-center gap-2 rounded-md px-1 py-1 text-left text-chat-row transition-[background-color,transform] duration-fast motion-reduce:transition-none hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)] active:scale-[0.99] focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
+							onClick={toggleExpanded}
+							aria-expanded={expanded}
+							title={expanded ? t("thinking.collapse") : t("thinking.expand")}
+						>
+							{/* 流式思考中整行扫光（dsh-web reasoning-row-sweep 同款）。
 				    预览嵌在同一行里，不再给 SingleLinePreview 第二道光带，避免叠扫。 */}
-						{props.isStreaming && <span aria-hidden className="pointer-events-none absolute inset-y-0 left-[-300px] w-[300px] animate-thinking-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]" />}
-						<Brain size={16} className="thinking-row-icon shrink-0" aria-hidden="true" />
-						{/* 文本段：「思考了 Xs」（14px）与折叠预览（12px 等宽）必须共基线，否则预览
+							{props.isStreaming && <span aria-hidden className="pointer-events-none absolute inset-y-0 left-[-300px] w-[300px] animate-thinking-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]" />}
+							<Brain size={16} className="thinking-row-icon shrink-0" aria-hidden="true" />
+							{/* 文本段：「思考了 Xs」（14px）与折叠预览（12px 等宽）必须共基线，否则预览
 						    比左侧文本高约 3px（原理解释见 RowText）。chevron 是盒子，self-center。 */}
-						<RowText className="flex-[1_1_auto]">
-							{/* GUI 扩展桥：ctx.ui.setHiddenThinkingLabel —— 有值时**替换**折叠行的耗时小字（§8.2 A 组）。
+							<RowText className="flex-[1_1_auto]">
+								{/* GUI 扩展桥：ctx.ui.setHiddenThinkingLabel —— 有值时**替换**折叠行的耗时小字（§8.2 A 组）。
 							    这是 pi 的「折叠思考块标签」语义：扩展想换掉这行提示文案。 */}
-							{props.hiddenLabel ? (
-								<small className="shrink-0 text-chat-row text-text-faint">{props.hiddenLabel}</small>
-							) : (hasEnded || props.isStreaming) && props.startedAt ? (
-								<small className="shrink-0 text-chat-row tabular-nums text-text-faint">
-									{hasEnded ? (
-										t("thinking.duration", { duration: durationText })
-									) : (
-										// 流式中：思考未结束，用同一「思考了 Xs」文案 + LiveDuration 实时跳动，
-										// 思考结束只是数字冻结，不会出现前缀/文案整体蹦出。
-										<>
-											{t("thinking.durationPrefix")}
-											<LiveDuration startedAt={props.startedAt} isStreaming />
-										</>
-									)}
-								</small>
-							) : null}
-							{/* chevron 语言对齐工具行：折叠 ChevronRight，展开 ChevronDown */}
-							{expanded ? <ChevronDown size={14} className="shrink-0 self-center text-text-faint" aria-hidden="true" /> : <ChevronRight size={14} className="shrink-0 self-center text-text-faint" aria-hidden="true" />}
-							{/* 折叠才挂预览：与工具 displayLabel 一样 truncate 在同一行；
+								{props.hiddenLabel ? (
+									<small className="shrink-0 text-chat-row text-text-faint">{props.hiddenLabel}</small>
+								) : (hasEnded || props.isStreaming) && props.startedAt ? (
+									<small className="shrink-0 text-chat-row tabular-nums text-text-faint">
+										{hasEnded ? (
+											t("thinking.duration", { duration: durationText })
+										) : (
+											// 流式中：思考未结束，用同一「思考了 Xs」文案 + LiveDuration 实时跳动，
+											// 思考结束只是数字冻结，不会出现前缀/文案整体蹦出。
+											<>
+												{t("thinking.durationPrefix")}
+												<LiveDuration startedAt={props.startedAt} isStreaming />
+											</>
+										)}
+									</small>
+								) : null}
+								{/* chevron 语言对齐工具行：折叠 ChevronRight，展开 ChevronDown */}
+								{expanded ? <ChevronDown size={14} className="shrink-0 self-center text-text-faint" aria-hidden="true" /> : <ChevronRight size={14} className="shrink-0 self-center text-text-faint" aria-hidden="true" />}
+								{/* 折叠才挂预览：与工具 displayLabel 一样 truncate 在同一行；
 							    展开后正文在下方，行内预览会抢宽度、和打字机重复。 */}
-							{!expanded && <SingleLinePreview text={displayedContent} running={props.isStreaming} showSweep={false} className="min-w-0 flex-[1_1_auto] font-mono text-chat-detail text-text-faint" />}
-						</RowText>
-					</button>
+								{!expanded && <SingleLinePreview text={displayedContent} running={props.isStreaming} showSweep={false} className="min-w-0 flex-[1_1_auto] font-mono text-chat-detail text-text-faint" />}
+							</RowText>
+						</button>
+						{sticky.pinned && <ProcessEntryReturnToStart onClick={sticky.returnToStart} />}
+					</div>
 					{expanded && (
 						<div className="relative ml-5 mt-1 mb-2 rounded-b-sm border-l-2 border-border-subtle bg-transparent pl-3 animate-in fade-in duration-100 motion-reduce:animate-none">
 							<div className="markdown-body px-0 pt-1 pb-1 text-text-tertiary">
@@ -162,7 +177,7 @@ export const ThinkingBlock = memo(
 								<button
 									type="button"
 									className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-chat-detail text-text-tertiary transition-colors duration-fast hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_45%,transparent)] hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-[var(--focus-ring)]"
-									onClick={() => setExpanded(false)}
+									onClick={collapse}
 								>
 									<ChevronUp size={12} aria-hidden="true" />
 									{t("thinking.collapse")}
