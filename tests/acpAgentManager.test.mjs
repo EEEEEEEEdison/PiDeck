@@ -614,3 +614,54 @@ test("configOptions:config_option_update 通知整表替换并回调 onConfigOpt
 	assert.deepEqual(seen, [{ agentId: tab.id, first: "model" }]);
 	assert.equal(manager.getSessionConfigOptions(tab.id)?.[0]?.currentValue, "o3");
 });
+
+test("session/prompt 超时后补发 session/cancel：agent 侧旧回合必须收口，否则后续 prompt 永久排队", async (t) => {
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+				if (frame.method === "session/new") return { sessionId: "sess-timeout" };
+				// session/prompt 永不应答：模拟 opencode 回合卡死（客户端超时 ≠ agent 侧回合结束）
+				return undefined;
+			},
+		},
+		{ promptTurnTimeoutMs: 40 },
+	);
+	const tab = await createAgent();
+	const first = await manager.sendPrompt({ agentId: tab.id, message: "hello" });
+	assert.equal(first.accepted, false);
+	assert.match(first.error, /ACP request timed out after 40ms: session\/prompt/);
+	// 超时后必须补发 cancel，让 agent 收口旧回合（reason 固定 turn_timeout）
+	await waitFor(() => lastProc().methodFrames("session/cancel").length === 1);
+	const cancel = lastProc().methodFrames("session/cancel")[0];
+	assert.equal(cancel.params.sessionId, "sess-timeout");
+	assert.equal(cancel.params.reason, "turn_timeout");
+	// 取消补发后 turnActive 已清：新 prompt 不再被「still responding」拒绝，能重新进入发送路径
+	const second = await manager.sendPrompt({ agentId: tab.id, message: "again" });
+	assert.equal(second.accepted, false);
+	assert.match(second.error, /ACP request timed out after 40ms: session\/prompt/);
+	assert.equal(lastProc().methodFrames("session/cancel").length, 2);
+});
+
+test("session/prompt 非超时拒绝（JSON-RPC 错误）不补发 session/cancel", async (t) => {
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+				if (frame.method === "session/new") return { sessionId: "sess-rpc" };
+				if (frame.method === "session/prompt") return { __error: true, code: -32002, message: "turn in progress" };
+				return {};
+			},
+		},
+		{ promptTurnTimeoutMs: 5000 },
+	);
+	const tab = await createAgent();
+	const result = await manager.sendPrompt({ agentId: tab.id, message: "hi" });
+	assert.equal(result.accepted, false);
+	assert.match(result.error, /turn in progress/);
+	// 拒绝是 agent 即时应答：回合已在 agent 侧结束，再发 cancel 反而可能打断下一回合
+	await sleep(120);
+	assert.equal(lastProc().methodFrames("session/cancel").length, 0);
+});

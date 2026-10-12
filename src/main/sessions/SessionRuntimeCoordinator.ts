@@ -870,10 +870,12 @@ export class SessionRuntimeCoordinator {
 			// 仍持有旧 sessionId/generation。只要 agentId 仍有 live 绑定，就用 live 绑定
 			// 规范化目标，别让陈旧身份挡住停止（此前用户只能靠重启停掉后台 Agent）。
 			const stopTarget = this.resolveStopTarget(target);
-			// 与在途 prompt dispatch 并发时先等 lease 释放（毫秒级窗口），不直接报
-			// 「dispatch is in progress」；超时后 reserveBoundRuntime 照旧硬失败。
-			await this.waitForNoDispatchLease(stopTarget.sessionId, stopTarget.agentId);
-			reservation = this.reserveBoundRuntime(stopTarget.sessionId, stopTarget.agentId);
+			// 停止必须永远可行：在途 prompt 回合的 dispatch lease 覆盖整个回合（ACP 长任务或
+			// 卡死的 agent 会让 lease 挂到超时甚至永不释放），不该挡住杀进程——那正是用户唯一
+			// 的恢复出口。跳过 lease 等待与断言，直接占 replacement 槽（新 dispatch 会被
+			// acquireDispatchLease 的 replacement 检查拒绝），dispatch 侧对「stop 期间回合死亡」
+			// 已有 unknownDelivery 收尾路径。
+			reservation = this.reserveBoundRuntime(stopTarget.sessionId, stopTarget.agentId, { ignoreDispatchLease: true });
 			await this.agents.stop(stopTarget.agentId);
 			this.requireCurrentReservation(reservation);
 			this.releaseRuntimeReplacement(reservation);
@@ -1818,12 +1820,14 @@ export class SessionRuntimeCoordinator {
 		}
 	}
 
-	private reserveBoundRuntime(sessionId: string, agentId: string): RuntimeReplacement {
+	private reserveBoundRuntime(sessionId: string, agentId: string, opts: { ignoreDispatchLease?: boolean } = {}): RuntimeReplacement {
 		const binding = this.getRuntimeBinding(agentId);
 		if (!binding || binding.sessionId !== sessionId || this.agentIdBySession.get(sessionId) !== agentId) {
 			throw new Error("Session runtime changed before reservation");
 		}
-		this.assertNoDispatchLease(sessionId, agentId);
+		// stop 路径传 ignoreDispatchLease：停止杀进程是卡死回合的唯一恢复出口，必须越过
+		// 在途 dispatch lease（其余 replacement 路径保持原断言，避免重配与 dispatch 竞态）。
+		if (!opts.ignoreDispatchLease) this.assertNoDispatchLease(sessionId, agentId);
 		if (this.replacementByAgent.has(agentId)) {
 			throw new Error(`Session runtime replacement already in progress: ${agentId}`);
 		}

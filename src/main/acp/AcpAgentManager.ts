@@ -19,7 +19,7 @@ import type { PiCommand } from "../../shared/types/app";
 import type { SessionAgentGateway } from "../sessions/SessionRuntimeCoordinator";
 import type { PiLocator } from "../pi/PiLocator";
 import { ACP_ERROR_CODE, type AcpAgentCapabilities, type AcpConfigOption, type AcpContentBlock, type AcpIncomingRequest, type AcpPermissionRequestParams, type AcpSessionPromptResult, type AcpSessionSetupResult, type AcpSessionUpdateNotification } from "./acpProtocol";
-import { AcpConnection, AcpRpcError, ACP_DEFER_RESPONSE } from "./AcpConnection";
+import { AcpConnection, AcpRpcError, AcpTimeoutError, ACP_DEFER_RESPONSE } from "./AcpConnection";
 import { acpPromptBlocks, initialAcpProjection, projectAcpSessionUpdate, settleAcpTurn, type AcpProjectionState } from "./AcpEventProjector";
 
 /** ACP 协议握手版本(v1)。 */
@@ -27,6 +27,8 @@ const ACP_PROTOCOL_VERSION = 1;
 
 /** initialize/session 握手超时:CLI 冷启动(npm 包)可能要十几秒。 */
 const HANDSHAKE_TIMEOUT_MS = 60_000;
+/** session/prompt 回合兑底超时。测试用 deps.promptTurnTimeoutMs 注入缩短。 */
+const PROMPT_TURN_TIMEOUT_MS = 10 * 60_000;
 
 /** permission/request 未应答超时:超时按 cancelled 回,避免 agent 侧永久挂起。 */
 const PERMISSION_TIMEOUT_MS = 10 * 60_000;
@@ -79,6 +81,8 @@ type AcpManagerDeps = {
 	logger?: { info(channel: string, message: string, meta?: Record<string, unknown>): void; warn(channel: string, message: string, meta?: Record<string, unknown>): void };
 	/** 图片落盘(base64→内容寻址 ref):生图 ImageBlobStore 的最小结构化依赖,便于单测注入假实现。 */
 	imageStore?: { put(data: string, mimeType: string): Promise<string | null> };
+	/** session/prompt 回合超时(默认 10 分钟)。测试注入短值验证超时补发 session/cancel。 */
+	promptTurnTimeoutMs?: number;
 };
 
 export class AcpAgentManager implements SessionAgentGateway {
@@ -451,8 +455,9 @@ export class AcpAgentManager implements SessionAgentGateway {
 		this.emitRuntimeState(input.agentId);
 		try {
 			// 长回合请求不套默认 60s 短超时:深思模型单回合可超分钟级,超时应由 abort/stop/连接死亡驱动;
-			// 10 分钟兑底防真悬死(实测 codex-acp 思考型回合 >60s,见 scripts/acpLiveSmoke.mjs)
-			const result = (await runtime.conn.request("session/prompt", { sessionId: runtime.acpSessionId, prompt }, 10 * 60_000)) as AcpSessionPromptResult;
+			// 10 分钟兑底防真悬死(实测 codex-acp 思考型回合 >60s,见 scripts/acpLiveSmoke.mjs)。
+			// 可注入 deps.promptTurnTimeoutMs 供测试缩短。
+			const result = (await runtime.conn.request("session/prompt", { sessionId: runtime.acpSessionId, prompt }, this.deps.promptTurnTimeoutMs ?? PROMPT_TURN_TIMEOUT_MS)) as AcpSessionPromptResult;
 			// 结算前先排空 update 链:result 帧与末批 update 同为 stdout 行序分发,
 			// 但链上每步含异步物化,settle 提前会把在途流式块拆成新回合。
 			await runtime.updateChain;
@@ -461,6 +466,16 @@ export class AcpAgentManager implements SessionAgentGateway {
 			await runtime.updateChain;
 			runtime.projection = settleAcpTurn(runtime.projection, "error");
 			runtime.turnActive = false;
+			// 请求超时 ≠ agent 侧回合结束:agent 仍在跑旧回合,后续 session/prompt 会一直
+			// 排在它后面反复超时(opencode 卡死实测);abort() 也因 turnActive 已清而 no-op。
+			// 超时必须补发 session/cancel 让 agent 收口旧回合,否则会话永久卡死。
+			if (error instanceof AcpTimeoutError && runtime.conn && !runtime.conn.isClosed()) {
+				try {
+					runtime.conn.notify("session/cancel", { sessionId: runtime.acpSessionId, reason: "turn_timeout" });
+				} catch {
+				// 通知失败只能放弃:连接层随后会自行死亡/关闭并结算。
+				}
+			}
 			// 连接死亡等外部终态(error/closed)由 closed handler 结算,不回 idle;
 			// 仅本回合请求失败(如 JSON-RPC 拒绝)从 running 回 idle。
 			if (runtime.status === "running") {
