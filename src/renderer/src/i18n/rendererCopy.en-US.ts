@@ -4705,6 +4705,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.enableNotifications": "Send system notifications when agents finish responding",
 	"settings.askNotification": "Ask question notifications",
 	"settings.askNotificationDesc": "When an agent asks you a question, also send a system notification (default off; the in-app toast always shows)",
+	"settings.alertOnlyWhenUnfocused": "Notify only when unfocused",
+	"settings.alertOnlyWhenUnfocusedDesc": "Send system notifications and play the alert sound only while the PiDeck window is unfocused (covered by another window, hidden in the tray, or you switched to another app); stay quiet while it is in the foreground (in-app toasts and the timeline still update; default off)",
 	"settings.agentCountReminder": "Active agent count reminder",
 	"settings.agentCountReminderDesc": "When 15+ agents are active, remind at launch to close idle sessions and free memory",
 	"settings.announcementNotification": "Announcement notifications",

@@ -69,6 +69,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "idleAgentTimeoutMin", tab: "common", itemKey: "settings.idleAgentTimeoutMin" },
 	{ field: "enableNotifications", tab: "notification", itemKey: "settings.enableNotifications" },
 	{ field: "askNotificationEnabled", tab: "notification", itemKey: "settings.askNotification" },
+	{ field: "alertOnlyWhenUnfocused", tab: "notification", itemKey: "settings.alertOnlyWhenUnfocused" },
 	{ field: "agentCountReminderEnabled", tab: "notification", itemKey: "settings.agentCountReminder" },
 	{ field: "announcementNotificationEnabled", tab: "notification", itemKey: "settings.announcementNotification" },
 	{ field: "toastDurationMs", tab: "notification", itemKey: "settings.toastDuration" },

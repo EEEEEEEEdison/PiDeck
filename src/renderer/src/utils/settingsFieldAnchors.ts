@@ -405,6 +405,12 @@ const SETTINGS_ROW_ANCHORS = [
 	},
 	{
 		tab: "notification",
+		slug: "notification-unfocused-only",
+		labelKey: "settings.alertOnlyWhenUnfocused",
+		keywords: ["仅失焦提醒", "前台不提醒", "前台不响铃", "窗口焦点", "响铃打扰", "静音前台", "unfocused", "window focus", "quiet when focused"],
+	},
+	{
+		tab: "notification",
 		slug: "notification-ask",
 		labelKey: "settings.askNotification",
 		keywords: ["提问通知", "需要回答", "ask notification", "等待输入"],

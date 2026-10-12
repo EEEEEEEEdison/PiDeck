@@ -4691,6 +4691,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.enableNotifications": "Agent 完成響應時傳送系統通知",
 	"settings.askNotification": "Ask 提問系統通知",
 	"settings.askNotificationDesc": "Agent 向你提問（select/confirm/input/editor）時，同時傳送系統通知（預設關閉，應用內 toast 始終顯示）",
+	"settings.alertOnlyWhenUnfocused": "僅失焦時提醒",
+	"settings.alertOnlyWhenUnfocusedDesc": "只在 PiDeck 視窗沒有焦點（被其他視窗遮擋、最小化到系統匣、切到別的應用）時傳送系統通知並播放提示音；視窗在前台時保持安靜（應用內 toast 與時間軸照常顯示，預設關閉）",
 	"settings.agentCountReminder": "啟用 Agent 數量提醒",
 	"settings.agentCountReminderDesc": "啟用 Agent 達到 15 個時，啟動時提醒關閉空閒會話釋放記憶體",
 	"settings.announcementNotification": "公告通知",

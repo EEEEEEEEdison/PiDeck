@@ -193,6 +193,8 @@ Gitmoji 对应关系：
 	soundAlert: createDefaultSoundAlertSettings(),
 	// Ask 提问系统通知默认关闭：与通用通知解耦，避免非聚焦会话每次提问都打扰
 	askNotificationEnabled: false,
+	// 仅失焦提醒默认关闭：窗口在前台时照常提醒（用户抱怨「明明一直在看还一直响铃」时可自行打开）
+	alertOnlyWhenUnfocused: false,
 	// 人文关怀提醒默认开启：用户可在设置中随时关闭
 	agentCountReminderEnabled: true,
 	// 公告通知默认开启：新公告弹 toast 提醒（弹出时机另有忙碌延迟控制）
@@ -464,6 +466,10 @@ export class SettingsStore {
 			// 公告通知开关同理：旧配置缺字段回落 true（默认开启），脏数据（字符串等）也回落。
 			if (typeof this.settings.announcementNotificationEnabled !== "boolean") {
 				this.settings.announcementNotificationEnabled = defaultSettings.announcementNotificationEnabled;
+			}
+			// 仅失焦提醒开关同理：旧配置缺字段回落 false（默认照常提醒），脏数据也回落，避免真值误静音全程。
+			if (typeof this.settings.alertOnlyWhenUnfocused !== "boolean") {
+				this.settings.alertOnlyWhenUnfocused = defaultSettings.alertOnlyWhenUnfocused;
 			}
 			// toast 展示时长：旧 settings.json 缺字段或脏值（0/负数/超大/字符串）钳回默认，
 			// 避免升级后 toast 永不再消失或瞬间消失。

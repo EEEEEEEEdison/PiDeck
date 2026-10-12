@@ -4686,6 +4686,8 @@ export const zhCN = {
 	"settings.enableNotifications": "Agent 完成响应时发送系统通知",
 	"settings.askNotification": "Ask 提问系统通知",
 	"settings.askNotificationDesc": "Agent 向你提问（select/confirm/input/editor）时，同时发送系统通知（默认关闭，应用内 toast 始终显示）",
+	"settings.alertOnlyWhenUnfocused": "仅失焦时提醒",
+	"settings.alertOnlyWhenUnfocusedDesc": "只在 PiDeck 窗口没有焦点（被其他窗口遮挡、最小化到托盘、切到别的应用）时发送系统通知并播放提示音；窗口在前台时保持安静（应用内 toast 与时间线照常显示，默认关闭）",
 	"settings.agentCountReminder": "激活 Agent 数量提醒",
 	"settings.agentCountReminderDesc": "激活 Agent 达到 15 个时，启动时提醒关闭空闲会话释放内存",
 	"settings.announcementNotification": "公告通知",

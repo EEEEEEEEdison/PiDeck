@@ -221,6 +221,10 @@
         "to": "reply-actions.default.json"
       },
       {
+        "from": "resources/notification-logo.png",
+        "to": "notification-logo.png"
+      },
+      {
         "from": "resources/pi-auth-host.mjs",
         "to": "pi-auth-host.mjs"
       },
