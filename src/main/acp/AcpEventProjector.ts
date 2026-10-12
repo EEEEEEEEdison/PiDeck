@@ -6,19 +6,21 @@
  * stdio 管道天然保序,投影按到达顺序追加。
  *
  * 投影规则(与渲染层既有卡片契约对齐,见 dshEventProjector 的 meta 约定):
- * - user_message_chunk:user 消息回显(渲染层对 acp 后端不本地 append,靠投影回显,
- *   与 DSH 同策略——避免发送方与 agent 回显双条)。agent 不回显时由 appendAcpUserPrompt
- *   在 prompt 派发处本地落条目(见该函数:ACP 规范里回显是 agent 的可选行为)。
+ * - user_message_chunk:实时发送由 appendAcpUserPrompt 在 prompt 派发处先落投影(ACP 规范
+ *   不保证 agent 回显,OpenCode 等根本不发),回放的 chunk 再按 localUserEchoes 前缀去重,
+ *   未命中则视为历史/注入消息并回——规范一次只携带一个 content block,同一 prompt 的
+ *   文本+图片分多条 update,必须并回最后一条 user 消息;收口上一轮 assistant 回放。
  * - agent_message_chunk / agent_thought_chunk:聚合进「当前回合」的一条 assistant
  *   流式消息;thoughtChunk 写 thinking 字段(渲染层思考折叠块)。
- * - tool_call:role="tool" 卡片消息,meta.status 驱动旋转动画;同一 toolCallId 的
- *   in_progress/completed/failed 更新原卡片(按 callId 精确匹配,非最后一条)。
+ * - tool_call/tool_call_update:role="tool" 卡片按 toolCallId 原位应用字段补丁，
+ *   省略字段不覆盖，content/locations 出现则整表替换。
  * - plan:整表 last-wins 归一化为 TodoItem[](AgentRuntimeState.todos 同源)。
  * - available_commands_update:listCommands 数据源(PiCommand[])。
  * - unknown update:忽略(前向兼容,规范允许新增 update 类型)。
  */
-import type { AcpSessionUpdate, AcpToolCallUpdate } from "./acpProtocol";
+import type { AcpContentBlock, AcpSessionUpdate, AcpStopReason, AcpToolCallUpdate } from "./acpProtocol";
 import { fallbackSessionTitle } from "../dsh/dshSessionTitleFold";
+import { defaultToolDetailTranslate, formatToolDetail } from "../../shared/formatToolDetail";
 import type { TodoItem } from "../../shared/types/todo";
 import type { ChatMessage } from "../../shared/types/session";
 import type { PiCommand } from "../../shared/types/app";
@@ -42,6 +44,8 @@ export type AcpProjectionState = {
 	 * 避免同一条用户消息在时间线上出现两次。
 	 */
 	localUserEchoes?: Array<{ text: string; echoed: number }>;
+	/** 末条由 user_message_chunk 落下的消息下标:多块并回只针对 chunk 连续块,不针对本地 seed/注入消息。 */
+	lastUserChunkIndex?: number;
 	/**
 	 * 投影侧信道：本次 update 触及的 messages 下标（无消息变更时为 undefined）。
 	 *
@@ -69,48 +73,86 @@ function nextMessageId(): string {
 	return `acp-${Date.now().toString(36)}-${messageCounter.toString(36)}`;
 }
 
-/** 工具卡内容块 → 展示文本:文本直拼;diff/terminal/图片等特殊块给占位描述。 */
-function toolContentText(update: AcpToolCallUpdate): { text: string; fullText?: string } {
-	let text = "";
-	let special = "";
-	for (const block of update.content ?? []) {
+/** 工具正文解包标准 content；旧 CLI 的直接文本块也可读，不改变出站协议。 */
+function toolContentText(blocks: readonly unknown[]): string {
+	const parts: string[] = [];
+	for (const candidate of blocks) {
+		if (!candidate || typeof candidate !== "object") continue;
+		const wrapper = candidate as Record<string, unknown>;
+		const block = wrapper.type === "content" ? wrapper.content : wrapper;
 		if (!block || typeof block !== "object") continue;
-		if (block.type === "text" && typeof block.text === "string") {
-			text += block.text;
-		} else if (block.type === "resource_link") {
-			special += `${(block as { name?: string }).name ?? (block as { uri?: string }).uri ?? "resource"}\n`;
-		} else if (block.type === "image") {
-			special += "[image]\n";
-		} else if (block.type === "diff") {
-			const diff = block as { path?: string };
-			special += `[diff ${diff.path ?? ""}]\n`;
-		} else if (block.type === "terminal") {
-			special += "[terminal]\n";
-		}
+		const value = block as Record<string, unknown>;
+		if (value.type === "text" && typeof value.text === "string") parts.push(value.text);
+		else if (value.type === "resource_link") parts.push(typeof value.name === "string" ? value.name : typeof value.uri === "string" ? value.uri : "");
+		else if (value.type === "diff") parts.push(`[diff ${typeof value.path === "string" ? value.path : ""}]`);
+		else if (value.type === "terminal") parts.push("[terminal]");
+		else if (value.type === "image") parts.push("[image]");
 	}
-	const combined = (text + (special ? `\n${special.trim()}` : "")).trim();
-	if (combined.length <= ACP_TOOL_RESULT_MAX_CHARS) return { text: combined };
-	return { text: combined.slice(0, ACP_TOOL_RESULT_MAX_CHARS), fullText: combined };
+	return parts.join("\n").trim();
 }
 
-/** tool_call kind → 工具卡渲染形态:read 类对齐只读工具样式。 */
-function toolDisplayKind(update: AcpToolCallUpdate): string {
-	return update.kind === "read" ? "read" : "execute";
-}
-
-function toolStatus(status: AcpToolCallUpdate["status"]): "running" | "completed" | "failed" {
+/** 使用既有卡片的 error/running/completed 状态，避免 failed 被 UI 当作成功。 */
+function toolStatus(status: AcpToolCallUpdate["status"]): "running" | "completed" | "error" {
 	if (status === "completed") return "completed";
-	if (status === "failed") return "failed";
+	if (status === "failed") return "error";
 	return "running";
+}
+
+/** 工具正文里的图片结果(截图/生图工具):保进消息 images 走物化链落 ref,不随占位文本丢弃。 */
+function toolContentImages(blocks: readonly unknown[]): NonNullable<ChatMessage["images"]> {
+	const images: NonNullable<ChatMessage["images"]> = [];
+	for (const candidate of blocks) {
+		if (!candidate || typeof candidate !== "object") continue;
+		const wrapper = candidate as Record<string, unknown>;
+		const block = (wrapper.type === "content" ? wrapper.content : wrapper) as Record<string, unknown> | undefined;
+		if (!block || typeof block !== "object") continue;
+		const value = block as Record<string, unknown>;
+		if (value.type === "image" && typeof value.data === "string" && typeof value.mimeType === "string") images.push({ type: "image", data: value.data, mimeType: value.mimeType });
+	}
+	return images;
+}
+
+/** 仅应用出现的字段；正文空数组是清空，不能用 truthy 判断丢掉。 */
+function patchToolCard(existing: ChatMessage | undefined, update: AcpToolCallUpdate, agentId: string): ChatMessage {
+	const meta: NonNullable<ChatMessage["meta"]> = { ...(existing?.meta ?? {}), toolCallId: update.toolCallId };
+	const title = typeof update.title === "string" ? update.title : typeof meta.toolName === "string" ? meta.toolName : update.toolCallId;
+	meta.toolName = title;
+	if (update.status != null || !existing) meta.status = toolStatus(update.status);
+	if (typeof update.kind === "string") meta.kind = update.kind;
+	if (update.rawInput !== undefined) meta.args = update.rawInput;
+	if (update.rawOutput !== undefined) meta.result = update.rawOutput;
+	if (Array.isArray(update.locations)) meta.locations = update.locations;
+	if (Array.isArray(update.content)) {
+		const text = toolContentText(update.content);
+		meta.fullText = text;
+		meta.truncated = text.length > ACP_TOOL_RESULT_MAX_CHARS;
+	}
+	// content 是整表替换语义:图片随表替换(0 图即清空);省略 content 的补丁保留旧图。
+	const contentImages = Array.isArray(update.content) ? toolContentImages(update.content) : undefined;
+	const isError = meta.status === "error";
+	meta.isError = isError;
+	const result = typeof meta.fullText === "string" && meta.fullText ? meta.fullText : meta.result;
+	meta.detailText = formatToolDetail(title, meta.args, result, isError, defaultToolDetailTranslate);
+	const base = existing ?? { id: nextMessageId(), agentId, role: "tool" as const, timestamp: Date.now() };
+	return { ...base, ...(contentImages !== undefined ? { images: contentImages.length > 0 ? contentImages : undefined } : {}), text: title, meta };
 }
 
 export function projectAcpSessionUpdate(state: AcpProjectionState, update: AcpSessionUpdate, agentId: string): AcpProjectionState {
 	const next: AcpProjectionState = { ...state, messages: state.messages, toolCardIndex: state.toolCardIndex, commands: state.commands, replayed: true, activeAssistantIndex: state.activeAssistantIndex, lastTouched: undefined };
 	switch (update.sessionUpdate) {
 		case "user_message_chunk": {
-			// 一次一个 content block:文本块拼 text;图片块进 images(回显路径)。
+			// 回放没有 prompt 响应作为轮次边界；下一条 user 消息收口上一轮 assistant。
+			const settled = settleAcpTurn(state, "end_turn");
+			next.activeAssistantIndex = undefined;
+			// 规范一次只携带一个 content block:同一 prompt 的文本+图片分多条 update 回放,
+			// 必须并回最后一条 user 消息,否则图文 prompt 恢复后被拆成多个气泡。
 			const content = update.content as { type?: string; text?: string; data?: string; mimeType?: string } | undefined;
 			if (!content || typeof content !== "object") return state;
+			const previous = settled.messages.length > 0 ? settled.messages[settled.messages.length - 1] : undefined;
+			// 多块并回仅限「上一条也是 user_message_chunk 落下的消息」:规范一条 update 只带一个 content block,
+			// 同一消息的多块连续到达;本地 seed(appendAcpUserPrompt)与 agent 注入的独立消息不是续块,
+			// 并回会误吞上下文消息(保持独立气泡)。
+			const mergeInto = previous?.role === "user" && state.lastUserChunkIndex === settled.messages.length - 1 ? previous : undefined;
 			if (content.type === "text" && typeof content.text === "string" && content.text) {
 				const chunkText = content.text;
 				// 本地回显去重：prompt 派发时 appendAcpUserPrompt 已把用户消息写进投影，
@@ -125,26 +167,20 @@ export function projectAcpSessionUpdate(state: AcpProjectionState, update: AcpSe
 					next.localUserEchoes = echoed >= entry.text.length ? [...pending.slice(0, echoIndex), ...pending.slice(echoIndex + 1)] : [...pending.slice(0, echoIndex), { text: entry.text, echoed }, ...pending.slice(echoIndex + 1)];
 					return next;
 				}
-				// 与本地条目都不同文：是 agent 自己的用户侧消息(如注入的上下文)，照常追加；
+				// 与本地条目都不同文：是历史回放或 agent 自己的用户侧消息(如注入的上下文)，照常落条目；
 				// 本地未回显条目不再期待回显（否则后续同文回显会被误吞），只留下回显到一半的。
 				next.localUserEchoes = pending.filter((entry) => entry.echoed > 0);
-				next.messages = [...state.messages, { id: nextMessageId(), agentId, role: "user", text: chunkText, timestamp: Date.now() }];
-				next.lastTouched = [state.messages.length];
+				// 多块并回：同一 prompt 的文本块分多条 update 到达时并回最后一条 user 消息。
+				next.messages = mergeInto ? [...settled.messages.slice(0, -1), { ...mergeInto, text: mergeInto.text + chunkText }] : [...settled.messages, { id: nextMessageId(), agentId, role: "user", text: chunkText, timestamp: Date.now() }];
+				next.lastTouched = [next.messages.length - 1];
+				next.lastUserChunkIndex = next.messages.length - 1;
 				return next;
 			}
 			if (content.type === "image" && typeof content.data === "string" && typeof content.mimeType === "string") {
-				next.messages = [
-					...state.messages,
-					{
-						id: nextMessageId(),
-						agentId,
-						role: "user",
-						text: "",
-						images: [{ type: "image", mimeType: content.mimeType, data: content.data }],
-						timestamp: Date.now(),
-					},
-				];
-				next.lastTouched = [state.messages.length];
+				const image = { type: "image" as const, mimeType: content.mimeType, data: content.data };
+				next.messages = mergeInto ? [...settled.messages.slice(0, -1), { ...mergeInto, images: [...(mergeInto.images ?? []), image] }] : [...settled.messages, { id: nextMessageId(), agentId, role: "user", text: "", images: [image], timestamp: Date.now() }];
+				next.lastTouched = [next.messages.length - 1];
+				next.lastUserChunkIndex = next.messages.length - 1;
 				return next;
 			}
 			return state;
@@ -183,54 +219,26 @@ export function projectAcpSessionUpdate(state: AcpProjectionState, update: AcpSe
 			}
 			return next;
 		}
-		case "tool_call": {
-			// switch 判别被 fallback 宽类型(sessionUpdate: string)击穿，显式收窄。
+		case "tool_call":
+		case "tool_call_update": {
+			// fallback 宽类型容纳未知 update，已知帧仍要校验工具身份。
 			const toolUpdate = update as AcpToolCallUpdate;
+			if (typeof toolUpdate.toolCallId !== "string" || !toolUpdate.toolCallId) return state;
 			const cardIndex = state.toolCardIndex.get(toolUpdate.toolCallId);
-			if (cardIndex !== undefined && state.messages[cardIndex]?.role === "tool") {
-				const existing = state.messages[cardIndex];
-				const contentText = toolContentText(toolUpdate);
-				next.messages = [...state.messages];
-				next.messages[cardIndex] = {
-					...existing,
-					meta: {
-						...(existing.meta ?? {}),
-						toolName: toolUpdate.title,
-						status: toolStatus(toolUpdate.status),
-						...(toolUpdate.kind ? { kind: toolDisplayKind(toolUpdate) } : {}),
-						...(contentText.text ? { fullText: contentText.fullText ?? contentText.text, truncated: contentText.fullText !== undefined } : {}),
-						...(toolUpdate.locations?.length ? { locations: toolUpdate.locations } : {}),
-					},
-				};
-				next.lastTouched = [cardIndex];
-			} else {
-				const contentText = toolContentText(toolUpdate);
-				const card: ChatMessage = {
-					id: nextMessageId(),
-					agentId,
-					role: "tool",
-					text: toolUpdate.title,
-					timestamp: Date.now(),
-					meta: {
-						toolCallId: toolUpdate.toolCallId,
-						toolName: toolUpdate.title,
-						status: toolStatus(toolUpdate.status),
-						...(toolUpdate.kind ? { kind: toolDisplayKind(toolUpdate) } : {}),
-						...(contentText.text ? { fullText: contentText.fullText ?? contentText.text, truncated: contentText.fullText !== undefined } : {}),
-						...(toolUpdate.locations?.length ? { locations: toolUpdate.locations } : {}),
-					},
-				};
-				next.messages = [...state.messages, card];
-				next.toolCardIndex = new Map(state.toolCardIndex);
-				const toolCardIndex = next.messages.length - 1;
-				next.toolCardIndex.set(toolUpdate.toolCallId, toolCardIndex);
-				next.lastTouched = [toolCardIndex];
-			}
+			const existing = cardIndex !== undefined ? state.messages[cardIndex] : undefined;
+			const card = patchToolCard(existing?.role === "tool" ? existing : undefined, toolUpdate, agentId);
+			next.messages = [...state.messages];
+			const index = existing?.role === "tool" && cardIndex !== undefined ? cardIndex : next.messages.length;
+			next.messages[index] = card;
+			next.toolCardIndex = new Map(state.toolCardIndex);
+			next.toolCardIndex.set(toolUpdate.toolCallId, index);
+			next.lastTouched = [index];
 			return next;
 		}
 		case "plan": {
-			const planUpdate = update as { plan?: Array<{ content?: unknown; status?: unknown }> };
-			next.todos = (Array.isArray(planUpdate.plan) ? planUpdate.plan : []).map((entry) => ({
+			const planUpdate = update as { entries?: Array<{ content?: unknown; status?: unknown }>; plan?: Array<{ content?: unknown; status?: unknown }> };
+			const entries = Array.isArray(planUpdate.entries) ? planUpdate.entries : Array.isArray(planUpdate.plan) ? planUpdate.plan : [];
+			next.todos = entries.map((entry) => ({
 				content: typeof entry?.content === "string" ? entry.content : "",
 				status: entry?.status === "in_progress" ? "in_progress" : entry?.status === "completed" ? "completed" : "pending",
 			}));
@@ -246,8 +254,9 @@ export function projectAcpSessionUpdate(state: AcpProjectionState, update: AcpSe
 			return next;
 		}
 		case "session_info_update": {
-			const infoUpdate = update as { sessionTitle?: unknown };
-			if (typeof infoUpdate.sessionTitle === "string" && infoUpdate.sessionTitle.trim()) next.title = infoUpdate.sessionTitle.trim();
+			const infoUpdate = update as { title?: unknown; sessionTitle?: unknown };
+			const title = infoUpdate.title ?? infoUpdate.sessionTitle;
+			if (typeof title === "string" && title.trim()) next.title = title.trim();
 			return next;
 		}
 		case "current_mode_update":
@@ -261,10 +270,10 @@ export function projectAcpSessionUpdate(state: AcpProjectionState, update: AcpSe
 }
 
 /** session/prompt 结算(stopReason 回填 + 活动流式消息收口)。 */
-export function settleAcpTurn(state: AcpProjectionState, stopReason: "end_turn" | "cancelled" | "aborted" | "error"): AcpProjectionState {
+export function settleAcpTurn(state: AcpProjectionState, stopReason: AcpStopReason | "aborted" | "error"): AcpProjectionState {
 	const active = state.activeAssistantIndex !== undefined ? state.messages[state.activeAssistantIndex] : undefined;
 	if (!active || state.activeAssistantIndex === undefined) return { ...state, activeAssistantIndex: undefined };
-	const reason = stopReason === "end_turn" ? "stop" : stopReason === "cancelled" || stopReason === "aborted" ? "aborted" : "error";
+	const reason = stopReason === "end_turn" || stopReason === "refusal" ? "stop" : stopReason === "max_tokens" || stopReason === "max_turn_requests" ? "length" : stopReason === "cancelled" || stopReason === "aborted" ? "aborted" : "error";
 	const messages = [...state.messages];
 	messages[state.activeAssistantIndex] = { ...active, stopReason: reason };
 	return { ...state, messages, activeAssistantIndex: undefined };
@@ -328,6 +337,8 @@ export function appendAcpUserPrompt(state: AcpProjectionState, text: string, ima
 		// 队列只保留「回显到一半」的条目 + 本条：agent 全程不回显时（OpenCode 等）
 		// 不会每条 prompt 都留一个永不消费的条目。
 		localUserEchoes: [...(state.localUserEchoes ?? []).filter((entry) => entry.echoed > 0), { text, echoed: 0 }],
+		// seed 不是 user_message_chunk 落下的消息,后续 chunk 不得并回进它。
+		lastUserChunkIndex: undefined,
 		...(title ? { title } : {}),
 		lastTouched: [state.messages.length],
 		replayed: true,

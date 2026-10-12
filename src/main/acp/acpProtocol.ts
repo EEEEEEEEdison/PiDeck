@@ -10,6 +10,8 @@
  * 不得抛错——规范要求 client 对未识别内容优雅降级。
  */
 
+export type AcpRpcId = number | string;
+
 /** JSON-RPC 2.0 client → agent 请求（带 id，等待响应）。 */
 export type AcpRpcRequest = {
 	jsonrpc: "2.0";
@@ -21,7 +23,7 @@ export type AcpRpcRequest = {
 /** JSON-RPC 2.0 agent → client 请求（双向协议：agent 也会调我们）。 */
 export type AcpIncomingRequest = {
 	jsonrpc: "2.0";
-	id: number;
+	id: AcpRpcId;
 	method: string;
 	params?: Record<string, unknown>;
 };
@@ -29,7 +31,7 @@ export type AcpIncomingRequest = {
 /** JSON-RPC 2.0 响应（result 与 error 互斥）。 */
 export type AcpRpcResponse = {
 	jsonrpc: "2.0";
-	id: number;
+	id: AcpRpcId;
 	result?: unknown;
 	error?: { code: number; message: string; data?: unknown };
 };
@@ -50,18 +52,17 @@ export type AcpJsonRpcMessage = AcpIncomingRequest | AcpRpcResponse | AcpRpcNoti
  * - 不声明 fs（readTextFile/writeTextFile）：agent 用自己的文件工具直接读写磁盘，
  *   与 pi 后端同构；PiDeck 不做 agent 的文件代理。
  * - 不声明 terminal：agent 自带 bash/exec 工具。
- * - loadAgent：支持 session/list + session/load 恢复（agent 声明能力时才调用）。
+ * 会话恢复由 agentCapabilities.loadSession 门控，不虚构 client 的 loadAgent 能力。
  */
 export type AcpClientCapabilities = {
-	loadAgent: boolean;
 	fs?: { readTextFile?: boolean; writeTextFile?: boolean };
 	terminal?: boolean;
 };
 
 /** agent 在 initialize 响应里声明的能力；缺失字段 = 不支持，不得调用对应方法。 */
 export type AcpAgentCapabilities = {
-	loadSession?: {};
-	promptCapabilities?: { agentThought?: boolean; agentThoughtSeries?: boolean };
+	loadSession?: boolean;
+	promptCapabilities?: { image?: boolean; audio?: boolean; embeddedContext?: boolean; agentThought?: boolean; agentThoughtSeries?: boolean };
 	sessionCapabilities?: {
 		list?: {};
 		delete?: {};
@@ -75,8 +76,8 @@ export type AcpAgentCapabilities = {
 export type AcpInitializeResult = {
 	protocolVersion: number;
 	agentCapabilities: AcpAgentCapabilities;
-	/** agent 对 human-readable 名（显示用）。 */
-	name?: string;
+	/** 标准 agent 身份；缺省时回退工具配置名。 */
+	agentInfo?: { name: string; version: string; title?: string } | null;
 	_meta?: Record<string, unknown>;
 };
 
@@ -91,13 +92,14 @@ export type AcpContentBlock = AcpTextBlock | AcpImageBlock | AcpResourceLinkBloc
 export type AcpDiffContent = {
 	type: "diff";
 	path: string;
-	oldValue: string;
+	/** null 表示新建文件。 */
+	oldValue?: string | null;
 	newValue: string;
 	/** v1 draft 扩展：diff 类型（missing/add/remove/change）；缺失按 unified diff 文本渲染。 */
 	kind?: "missing" | "add" | "remove" | "change";
 };
 export type AcpTerminalContent = { type: "terminal"; terminalId: string };
-export type AcpToolCallContent = AcpContentBlock | AcpDiffContent | AcpTerminalContent;
+export type AcpToolCallContent = { type: "content"; content: AcpContentBlock } | AcpDiffContent | AcpTerminalContent;
 
 // ── session setup ──────────────────────────────────────────────────────────
 
@@ -158,8 +160,10 @@ export type AcpSessionPromptParams = {
 	prompt: AcpContentBlock[];
 };
 
+export type AcpStopReason = "end_turn" | "max_tokens" | "max_turn_requests" | "refusal" | "cancelled";
+
 export type AcpSessionPromptResult = {
-	stopReason: "end_turn" | "cancelled" | "aborted" | "error";
+	stopReason: AcpStopReason;
 	_meta?: Record<string, unknown>;
 };
 
@@ -171,29 +175,30 @@ export type AcpPlanEntry = {
 	status: "pending" | "in_progress" | "completed";
 };
 
+/** 工具更新是字段补丁：省略字段保持原值，content/locations 出现则整表替换。 */
 export type AcpToolCallUpdate = {
-	sessionUpdate: "tool_call";
+	sessionUpdate: "tool_call" | "tool_call_update";
 	toolCallId: string;
-	title: string;
-	/** execute（shell/文件编辑等）| read（读文件/搜索等只读）。 */
-	kind: "execute" | "read";
-	/** pending → in_progress → completed | failed；in_progress 内容可多次追加。 */
-	status: "pending" | "in_progress" | "completed" | "failed";
-	content: AcpToolCallContent[];
+	title?: string | null;
+	kind?: "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "other" | null;
+	status?: "pending" | "in_progress" | "completed" | "failed" | null;
+	content?: AcpToolCallContent[] | null;
+	rawInput?: unknown;
+	rawOutput?: unknown;
 	/** 涉及的代码位置（file:line 锚点）。 */
-	locations?: Array<{ path: string; line?: number }>;
+	locations?: Array<{ path: string; line?: number }> | null;
 	_meta?: Record<string, unknown>;
 };
 
 export type AcpSessionUpdate =
 	| { sessionUpdate: "user_message_chunk"; content: AcpContentBlock }
-	| { sessionUpdate: "agent_message_chunk"; content: AcpTextBlock }
+	| { sessionUpdate: "agent_message_chunk"; content: AcpContentBlock }
 	| { sessionUpdate: "agent_thought_chunk"; content: AcpTextBlock | { type: "reasoning"; text: string } }
 	| AcpToolCallUpdate
-	| { sessionUpdate: "plan"; plan: AcpPlanEntry[] }
+	| { sessionUpdate: "plan"; entries: AcpPlanEntry[] }
 	| { sessionUpdate: "current_mode_update"; currentModeId: string }
 	| { sessionUpdate: "available_commands_update"; commands: Array<{ name: string; description?: string; _meta?: Record<string, unknown> }> }
-	| { sessionUpdate: "session_info_update"; sessionTitle?: string | null; updatedAt?: string | null; _meta?: Record<string, unknown> }
+	| { sessionUpdate: "session_info_update"; title?: string | null; updatedAt?: string | null; _meta?: Record<string, unknown> }
 	| { sessionUpdate: "config_option_update"; configOptions: AcpConfigOption[] }
 	/** 未知/后续版本新增的 update：保留原值，由投影层决定忽略。 */
 	| ({ sessionUpdate: string } & Record<string, unknown>);
@@ -214,22 +219,24 @@ export type AcpSessionUpdateNotification = {
 export type AcpPermissionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always";
 
 export type AcpPermissionOption = {
+	optionId: string;
 	kind: AcpPermissionKind;
-	name?: string;
+	name: string;
 	_meta?: Record<string, unknown>;
 };
-
-/** 请求中的被许可对象；v1 定义 command / read_path / write_path / web_search 等变体。 */
-export type AcpPermissionRequestItem = { type: "command"; command: string; cwd?: string } | { type: "read_path"; path: string } | { type: "write_path"; path: string } | { type: "web_search" } | ({ type: string } & Record<string, unknown>);
 
 export type AcpPermissionRequestParams = {
 	sessionId: string;
 	options: AcpPermissionOption[];
-	permissions: AcpPermissionRequestItem[];
+	toolCall: Omit<AcpToolCallUpdate, "sessionUpdate">;
 	_meta?: Record<string, unknown>;
 };
 
 export type AcpPermissionOutcome = { outcome: "selected"; optionId: string } | { outcome: "cancelled" };
+export type AcpPermissionResult = { outcome: AcpPermissionOutcome };
+
+/** load 保留请求中的身份，标准响应不要求 sessionId。 */
+export type AcpSessionLoadResult = Omit<AcpSessionSetupResult, "sessionId"> & { sessionId?: string };
 
 // ── session/list 与 session/load（loadAgent 能力，agent 声明时才用）────────
 

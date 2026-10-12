@@ -9,7 +9,7 @@ import { PassThrough } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { AcpConnection, ACP_DEFER_RESPONSE } = loadTsCommonJs("src/main/acp/AcpConnection.ts");
+const { AcpConnection, ACP_DEFER_RESPONSE, LARGE_ACP_LINE_PARSE_CHARS, MAX_ACP_LINE_BYTES } = loadTsCommonJs("src/main/acp/AcpConnection.ts");
 
 /** 回环:stdout 是伪造的 agent 输出流;writeLine 模拟 agent 发帧。afterEach 销毁流,
  * 否则 PassThrough 的 data 监听会挂住 node --test 进程不退出。 */
@@ -29,7 +29,7 @@ function harness(t) {
 		stdout.destroy();
 	});
 	const sendFromAgent = (obj) => stdout.write(`${JSON.stringify(obj)}\n`);
-	return { conn, written, sendFromAgent, stdout };
+	return { conn, written, sendFromAgent, stdout, stdin };
 }
 
 test("request/response pairs by id and rejects with AcpRpcError on error response", async (t) => {
@@ -122,4 +122,67 @@ test("agent→client requests dispatch to handlers; defer answers later via resp
 test("request timeout rejects after timeoutMs", async (t) => {
 	const { conn } = harness(t);
 	await assert.rejects(conn.request("session/prompt", undefined, 30), /timed out after 30ms/);
+});
+
+test("large updates remain ordered before small updates and the prompt response", async (t) => {
+	const { conn, sendFromAgent } = harness(t);
+	const seen = [];
+	conn.on("notification", (frame) => seen.push(frame.params.index));
+	const prompt = conn.request("session/prompt", { sessionId: "s" });
+	sendFromAgent({ jsonrpc: "2.0", method: "session/update", params: { index: 1, text: "x".repeat(LARGE_ACP_LINE_PARSE_CHARS + 1) } });
+	sendFromAgent({ jsonrpc: "2.0", method: "session/update", params: { index: 2 } });
+	sendFromAgent({ jsonrpc: "2.0", id: 1, result: { stopReason: "end_turn" } });
+	await prompt;
+	assert.deepEqual(seen, [1, 2], "the prompt must not settle before preceding large content has been dispatched");
+});
+
+test("stdout ending after a large final response drains frames before closing", async (t) => {
+	const { conn, stdout } = harness(t);
+	const response = conn.request("session/prompt", { sessionId: "s" });
+	stdout.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { stopReason: "end_turn", text: "x".repeat(LARGE_ACP_LINE_PARSE_CHARS + 1) } }));
+	assert.equal((await response).stopReason, "end_turn");
+});
+
+test("stdin errors promptly close the connection and reject its pending requests", async (t) => {
+	const { conn, stdin } = harness(t);
+	const rejected = assert.rejects(conn.request("session/prompt", undefined, 30), /broken stdin/);
+	stdin.emit("error", new Error("broken stdin"));
+	await rejected;
+	assert.equal(conn.isClosed(), true);
+});
+
+test("a synchronous write failure settles the request and leaves no live connection", async (t) => {
+	const { conn, stdin, sendFromAgent } = harness(t);
+	stdin.write = () => {
+		throw new Error("synchronous pipe failure");
+	};
+	await assert.rejects(
+		Promise.resolve().then(() => conn.request("session/prompt", undefined, 30)),
+		/synchronous pipe failure/,
+	);
+	// Resolve any baseline's orphaned internal promise, so this regression has no unhandled rejection.
+	sendFromAgent({ jsonrpc: "2.0", id: 1, result: {} });
+	assert.equal(conn.isClosed(), true);
+});
+
+test("the byte limit applies to each line, not to a chunk containing many valid lines", async (t) => {
+	const { conn, stdout } = harness(t);
+	const seen = [];
+	conn.on("notification", (frame) => seen.push(frame.params.index));
+	const batch = Array.from({ length: 9 }, (_, index) => JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: { index, text: "x".repeat(1024 * 1024) } })).join("\n");
+	const pending = conn.request("session/prompt", undefined, 100);
+	stdout.write(`${batch}\n${JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} })}\n`);
+	await pending;
+	assert.deepEqual(seen, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+});
+
+test("a multibyte line above the byte limit closes without dispatching it or retaining a hanging request", async (t) => {
+	const { conn, stdout } = harness(t);
+	const seen = [];
+	conn.on("notification", (frame) => seen.push(frame));
+	const pending = assert.rejects(conn.request("session/prompt", undefined, 100), /overflow/);
+	stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: { text: "你".repeat(Math.floor(MAX_ACP_LINE_BYTES / 3) + 1) } })}\n`);
+	await pending;
+	assert.equal(conn.isClosed(), true);
+	assert.equal(seen.length, 0);
 });
