@@ -1,7 +1,7 @@
 import { t } from "../i18n";
 import { AppWindow, BookOpen, CircleDot, CreditCard, Database, Flame, GitBranch, Globe, LogIn, LogOut, Map, MapPin, MessageSquare, Notebook, Bell, PenTool, RefreshCw, Search, ShieldAlert, TrainFront, Boxes } from "lucide-react";
 import { Button } from "../components/ui-shadcn/button";
-import { PiTuiLogoMark, useLogoStyle } from "../components/app/PiTuiLogo";
+import { PiTuiLogoMark, useBrandGlyph } from "../components/app/PiTuiLogo";
 import { McpCatalogConfiguredMark, McpCatalogGroupTitle } from "./McpServiceTemplateForm";
 import { MCP_SERVICE_CATALOG, type McpServiceCatalogEntry } from "./mcpServiceCatalog";
 import { MCP_BRAND_ICONS, McpBrandIconSvg } from "./mcpServiceBrandIcons";
@@ -62,7 +62,7 @@ export function McpServerListPane(props: {
 	onSelectTemplate: (template: string) => void;
 }) {
 	const stateOf = (name: string): { state: string; tools: string[]; error?: string } | undefined => props.statusByName[name];
-	const logoStyle = useLogoStyle();
+	const { style: logoStyle, customLogo } = useBrandGlyph();
 	return (
 		<div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto rounded-md border border-border-subtle bg-bg-panel p-1.5">
 			<div className="flex items-center justify-between gap-2 px-1 pb-0.5">
@@ -140,7 +140,16 @@ export function McpServerListPane(props: {
 						const configured = props.servers.some((item) => item.name === entry.defaultName);
 						return (
 							<Button key={entry.id} variant="ghost" size="sm" className={`w-full justify-start gap-2 px-2 ${props.selectedTemplate === entry.id ? "bg-accent/40" : ""}`} aria-pressed={props.selectedTemplate === entry.id} disabled={props.creating} onClick={() => props.onSelectTemplate(entry.id)}>
-								{entry.id === "pideck" && logoStyle === "pi-tui" ? <PiTuiLogoMark size={14} className="shrink-0" /> : brand ? <McpBrandIconSvg icon={brand} size={14} /> : <Icon size={14} className="shrink-0" aria-hidden="true" />}
+								{/* pideck 条目跟随品牌设置：自定义图优先，其次 pi-tui 三色标，否则回落目录里的通用图标 */}
+								{entry.id === "pideck" && customLogo ? (
+									<img src={customLogo} alt="" className="size-3.5 shrink-0 object-contain" />
+								) : entry.id === "pideck" && logoStyle === "pi-tui" ? (
+									<PiTuiLogoMark size={14} className="shrink-0" />
+								) : brand ? (
+									<McpBrandIconSvg icon={brand} size={14} />
+								) : (
+									<Icon size={14} className="shrink-0" aria-hidden="true" />
+								)}
 								<span className="min-w-0 flex-1 truncate text-left">{t(entry.titleKey)}</span>
 								{configured ? <McpCatalogConfiguredMark /> : null}
 							</Button>

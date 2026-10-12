@@ -12,12 +12,11 @@ import { Input } from "../../ui-shadcn/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui-shadcn/select";
 import { SettingsSection } from "./SettingsStorageTab";
 import { DirtyMarker, SettingRow, SettingSwitchRow } from "./SettingRows";
+import { BrandingSection } from "./BrandingSection";
 import { ModuleVisibilitySection } from "./ModuleVisibilitySection";
 import { ComposerFeaturesSection } from "./ComposerFeaturesSection";
 import { CustomThemeSection } from "./CustomThemeSection";
 import { Check, Minus, Plus } from "lucide-react";
-import { PiTuiLogoMark } from "../PiTuiLogo";
-import { resolveLogoStyle } from "../piTuiLogoData";
 import { cn } from "@/lib/utils";
 
 type AppearanceTabProps = {
@@ -115,40 +114,8 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 						</SelectContent>
 					</Select>
 				</SettingRow>
-				{/* Logo 风格：classic = PiDeck 现状四块拼图；pi-tui = pi 官方 TUI 三色像素标。保存后所有 logo 落点即时切换（含下次启动的开屏画面）。 */}
-				<SettingRow
-					title={
-						<>
-							<span>{t("settings.logoStyle")}</span>
-							<DirtyMarker dirty={isDirty("logoStyle")} label={t("settings.logoStyle")} />
-						</>
-					}
-					description={t("settings.logoStyleDesc")}
-				>
-					<Select value={resolveLogoStyle(draft.logoStyle)} onValueChange={(value) => updateDraft({ logoStyle: value as AppSettings["logoStyle"] })}>
-						<SelectTrigger className="w-44">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="classic">
-								<span className="flex items-center gap-2">
-									{/* 经典银灰标需要黑底承托，不能直接放在浅色菜单上；保留完整 π 轮廓与镂空。 */}
-									<svg viewBox="140 140 520 520" width="16" height="16" className="size-4 shrink-0 rounded-xs bg-black p-px" aria-hidden="true" shapeRendering="crispEdges">
-										<path fill="#f4f4f5" fillRule="evenodd" d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z" />
-										<path fill="#a7a8ab" d="M517.36 400H634.72V634.72H517.36Z" />
-									</svg>
-									<span>{t("settings.logoStyleClassic")}</span>
-								</span>
-							</SelectItem>
-							<SelectItem value="pi-tui">
-								<span className="flex items-center gap-2">
-									<PiTuiLogoMark size={16} />
-									<span>{t("settings.logoStylePiTui")}</span>
-								</span>
-							</SelectItem>
-						</SelectContent>
-					</Select>
-				</SettingRow>
+				{/* Logo 风格 / 自定义 logo 图 / 应用显示名称：品牌区专属几行（含选图异步态），拆到 BrandingSection 控制本文件体量 */}
+				<BrandingSection draft={draft} updateDraft={updateDraft} isDirty={isDirty} />
 				{draft.theme === "schedule" && (
 					<SettingRow
 						title={

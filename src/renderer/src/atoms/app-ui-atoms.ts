@@ -2,6 +2,7 @@ import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import type { BusySendDelivery } from "../../../shared/busySendDelivery";
 import type { AgentBackend } from "../../../shared/types";
+import { APP_DISPLAY_NAME_DEFAULT, type LogoStyle } from "../../../shared/types/settings";
 import type { QuickMessagesSnapshot } from "../../../shared/types/quickMessages";
 import type { ReplyActionsSnapshot } from "../../../shared/types/replyActions";
 import { resolveEffectiveAgentBackend } from "../../../shared/types/dshRuntime";
@@ -17,7 +18,15 @@ export const settingsOpenAtom = atom(false);
 /** Logo 风格的渲染层镜像（App.tsx 在 settings 变化时同步写入，照 announcement-atoms 模式）。
  *  LogoMark / PiTuiLogo / AppParts 侧栏 / AboutPopover 订阅，避免 settings props 透传链；
  *  Web 独立环境无人写入，保持默认 pi-tui（与 settings 默认同源），不引入额外通道。 */
-export const logoStyleAtom = atom<"classic" | "pi-tui">("pi-tui");
+export const logoStyleAtom = atom<LogoStyle>("pi-tui");
+
+/** 自定义 logo 图片（data URL）的渲染层镜像；空串 = 未设置。
+ *  只服务 logoStyle="custom" 的落点（LogoMark / 品牌区 / 关于弹层 / 来源标），
+ *  未设置时各落点自行回落默认标——atom 里不放回落逻辑，免得多处订阅拿到不同结果。 */
+export const customLogoAtom = atom<string>("");
+
+/** 应用显示名称的渲染层镜像（已解析，空值已是 PiDeck）；品牌区与「关于」弹层订阅。 */
+export const appDisplayNameAtom = atom<string>(APP_DISPLAY_NAME_DEFAULT);
 
 /** 当前活跃编辑器 tab 的文件路径（无 tab 时为 null）：文件抽屉树行高亮用。
  *  由 useFileEditor 在 activeTab 变化时写入；抽屉树跨六个组件层级订阅，

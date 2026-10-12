@@ -227,8 +227,10 @@ const hostPlugins: HostPluginDesktopApi = {
 	mount: (input) => ipcRenderer.invoke(ipcChannels.hostPluginsMount, input),
 	update: (instanceId: string, context: HostPluginContext) => ipcRenderer.invoke(ipcChannels.hostPluginsUpdate, instanceId, context),
 	unmount: (id) => ipcRenderer.invoke(ipcChannels.hostPluginsUnmount, id),
+	remove: (id) => ipcRenderer.invoke(ipcChannels.hostPluginsRemove, id),
 	onChanged: (callback) => subscribe(ipcChannels.hostPluginsChanged, callback),
 	onNavigate: (callback) => subscribe(ipcChannels.hostPluginNavigate, callback),
+	onOpenBrowser: (callback) => subscribe(ipcChannels.hostPluginOpenBrowser, callback),
 };
 
 const piDeckMcp: PiDeckMcpDesktopApi = {

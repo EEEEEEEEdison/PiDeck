@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { FolderOpen, FolderPlus, PackagePlus, RefreshCw, Puzzle, BookOpen, FilePlus2 } from "lucide-react";
+import { FolderOpen, FolderPlus, PackagePlus, RefreshCw, Puzzle, BookOpen, FilePlus2, Trash2 } from "lucide-react";
 import type { HostPluginInfo, HostPluginPermission } from "../../../shared/types/hostPlugin";
+import { LOCAL_SERVICE_IDS } from "../../../shared/localServices";
 import { hostPluginCatalogAtom, hostPluginPanelAtom } from "../atoms/host-plugin-atoms";
 import { settingsOpenAtom } from "../atoms/app-ui-atoms";
 import { desktopApi } from "../desktopApi";
@@ -11,6 +12,7 @@ import { Alert, AlertDescription } from "../components/ui-shadcn/alert";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../components/ui-shadcn/alert-dialog";
 import { Badge } from "../components/ui-shadcn/badge";
 import { Button } from "../components/ui-shadcn/button";
+import { ButtonGroup } from "../components/ui-shadcn/button-group";
 import { Checkbox } from "../components/ui-shadcn/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui-shadcn/dialog";
 import { Input } from "../components/ui-shadcn/input";
@@ -27,6 +29,8 @@ export function HostPluginsTab() {
 	const openPanel = useSetAtom(hostPluginPanelAtom);
 	const setSettingsOpen = useSetAtom(settingsOpenAtom);
 	const [consent, setConsent] = useState<HostPluginInfo | null>(null);
+	// 卸载确认：删目录不可逆，与启用授权一样走一次显式确认。
+	const [removing, setRemoving] = useState<HostPluginInfo | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [createOpen, setCreateOpen] = useState(false);
 	// 默认勾上一个最常见的权限：新手生成的示例直接能看到内容，而不是一打开就报权限错误。
@@ -71,6 +75,22 @@ export function HostPluginsTab() {
 			setBusy(false);
 		}
 	};
+	/** 卸载：删掉插件目录并清掉授权；内置示例会被主进程拒（plugin-builtin），提示用户改用禁用。 */
+	const remove = async (plugin: HostPluginInfo) => {
+		setBusy(true);
+		try {
+			const result = await desktopApi.hostPlugins.remove(plugin.manifest.id);
+			if (result.ok) {
+				setCatalog({ catalog: result.value });
+				showNotice(t("hostPlugins.removed", { name: plugin.manifest.name }), 4500, "info");
+			} else fail(result.code);
+		} catch {
+			fail("plugin-host-unavailable");
+		} finally {
+			setBusy(false);
+			setRemoving(null);
+		}
+	};
 	/** 脚手架：先落盘再重扫描，生成的插件直接出现在下表里（默认禁用，仍需授权启用）。 */
 	const scaffold = async () => {
 		const input = hostPluginScaffoldInput(draft);
@@ -89,7 +109,13 @@ export function HostPluginsTab() {
 			setBusy(false);
 		}
 	};
-	const togglePermission = (permission: HostPluginPermission, checked: boolean) => setDraft((current) => ({ ...current, permissions: checked ? [...current.permissions, permission] : current.permissions.filter((item) => item !== permission) }));
+	const togglePermission = (permission: HostPluginPermission, checked: boolean) =>
+		setDraft((current) => ({
+			...current,
+			permissions: checked ? [...current.permissions, permission] : current.permissions.filter((item) => item !== permission),
+			// 勾上服务控制时预置 PiDeck 已实现的服务（作者仍可逐个取消）；不预置会因缺 services 被 manifest 校验拒。
+			...(permission === "service.local" && checked && current.services.length === 0 ? { services: [...LOCAL_SERVICE_IDS] } : {}),
+		}));
 	const draftReady = hostPluginScaffoldInput(draft) !== null;
 	return (
 		<section className="flex flex-col gap-4">
@@ -184,7 +210,8 @@ export function HostPluginsTab() {
 								</div>
 							</TableCell>
 							<TableCell>
-								<div className="flex flex-wrap gap-2">
+								{/* 操作合并成一个按钮组：启停、面板入口、卸载在同一条分段控件里，不再是一堆散落的按钮。 */}
+								<ButtonGroup>
 									<Button
 										size="sm"
 										variant="outline"
@@ -201,7 +228,7 @@ export function HostPluginsTab() {
 											<Button
 												key={panel.id}
 												size="sm"
-												variant="secondary"
+												variant="outline"
 												onClick={() => {
 													setSettingsOpen(false);
 													openPanel({ pluginId: plugin.manifest.id, panelId: panel.id });
@@ -210,7 +237,11 @@ export function HostPluginsTab() {
 												{panel.title}
 											</Button>
 										))}
-								</div>
+									<Button size="sm" variant="destructive" disabled={busy} onClick={() => setRemoving(plugin)}>
+										<Trash2 data-icon="inline-start" />
+										{t("hostPlugins.remove")}
+									</Button>
+								</ButtonGroup>
 							</TableCell>
 						</TableRow>
 					))}
@@ -248,6 +279,30 @@ export function HostPluginsTab() {
 							}}
 						>
 							{t("hostPlugins.enable")}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+			<AlertDialog
+				open={Boolean(removing)}
+				onOpenChange={(open) => {
+					if (!open) setRemoving(null);
+				}}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>{t("hostPlugins.removeConfirmTitle", { name: removing?.manifest.name ?? "" })}</AlertDialogTitle>
+						<AlertDialogDescription>{t("hostPlugins.removeConfirmDescription")}</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+						<AlertDialogAction
+							disabled={busy}
+							onClick={() => {
+								if (removing) void remove(removing);
+							}}
+						>
+							{t("hostPlugins.remove")}
 						</AlertDialogAction>
 					</AlertDialogFooter>
 				</AlertDialogContent>
@@ -302,14 +357,29 @@ export function HostPluginsTab() {
 								</span>
 							</div>
 						)}
+						{draft.permissions.includes("service.local") && (
+							<div className="flex flex-col gap-2">
+								<Label>{t("hostPlugins.scaffoldServices")}</Label>
+								{LOCAL_SERVICE_IDS.map((id) => (
+									<div key={id} className="flex items-start gap-2">
+										<Checkbox id={`host-plugin-service-${id}`} checked={draft.services.includes(id)} onCheckedChange={(value) => setDraft((current) => ({ ...current, services: value === true ? [...current.services, id] : current.services.filter((item) => item !== id) }))} />
+										<Label htmlFor={`host-plugin-service-${id}`} className="cursor-pointer font-mono text-sm">
+											{id}
+										</Label>
+									</div>
+								))}
+								<span className="text-xs text-muted-foreground">{t("hostPlugins.scaffoldServicesHint")}</span>
+							</div>
+						)}
 						<div className="flex flex-col gap-1.5">
 							<Label>{t("hostPlugins.scaffoldPresentation")}</Label>
-							<Select value={draft.presentation} onValueChange={(value) => setDraft((current) => ({ ...current, presentation: value === "page" ? "page" : "modal" }))}>
+							<Select value={draft.presentation} onValueChange={(value) => setDraft((current) => ({ ...current, presentation: value === "page" || value === "popover" ? value : "modal" }))}>
 								<SelectTrigger className="w-full">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
 									<SelectItem value="modal">{t("hostPlugins.scaffoldModal")}</SelectItem>
+									<SelectItem value="popover">{t("hostPlugins.scaffoldPopover")}</SelectItem>
 									<SelectItem value="page">{t("hostPlugins.scaffoldPage")}</SelectItem>
 								</SelectContent>
 							</Select>

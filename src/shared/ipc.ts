@@ -927,11 +927,15 @@ export const ipcChannels = {
 	hostPluginsMount: "host-plugins:mount",
 	hostPluginsUpdate: "host-plugins:update",
 	hostPluginsUnmount: "host-plugins:unmount",
+	/** 卸载：删掉 userData 里的插件目录并清掉授权（内置示例不可卸载，见 HostPluginManager.remove）。 */
+	hostPluginsRemove: "host-plugins:remove",
 	hostPluginsChanged: "host-plugins:changed",
 	hostPluginRequest: "host-plugin:request",
 	hostPluginEvent: "host-plugin:event",
 	/** 插件发起的会话导航：broker 校验后推给桌面渲染层执行，插件页自身无权打开会话 */
 	hostPluginNavigate: "host-plugin:navigate",
+	/** 插件要求打开本地服务的 Web UI：地址由主进程适配器给，渲染层只负责开内置浏览器 */
+	hostPluginOpenBrowser: "host-plugin:open-browser",
 	pluginDevStatus: "plugin-dev:status",
 	/** 把 AI 插件开发指南写入用户扩展目录并在资源管理器定位 */
 	pluginDevWriteGuide: "plugin-dev:write-guide",
