@@ -37,7 +37,8 @@ function fakeAgentProcess(t, { handler = () => undefined } = {}) {
 			const frame = JSON.parse(line);
 			frames.push(frame);
 			if (frame.method && frame.id !== undefined) {
-				const outcome = handler(frame);
+				// 第二参数 { writeFromCli }:用例可在应答前先推通知(模拟 ACP 规范的 load 重放时序)
+				const outcome = handler(frame, { writeFromCli: (obj) => stdout.write(`${JSON.stringify(obj)}\n`) });
 				if (outcome?.__error) {
 					stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: frame.id, error: { code: outcome.code ?? -32000, message: outcome.message ?? "fail" } })}\n`);
 				} else if (outcome !== undefined) {
@@ -216,6 +217,55 @@ test("未声明 loadSession 时直接 session/new(不带旧 sessionId)", async (
 	const news = lastProc().methodFrames("session/new");
 	assert.equal(news.length, 1);
 	assert.equal(news[0].params.sessionId, undefined);
+});
+
+test("新建:tab.sessionId 必须回填 agent 侧会话 id(coordinator buildAttachPatch 据此把 acpSessionId 落 catalog;缺失则重开历史会话永远 session/new 新建、历史丢失)", async (t) => {
+	const { createAgent, manager } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-fresh" };
+			return {};
+		},
+	});
+	const fresh = await createAgent();
+	assert.equal(manager.list().find((tab) => tab.id === fresh.id)?.sessionId, "sess-fresh", "session/new 后 tab.sessionId = agent 侧会话 id");
+});
+
+test("恢复:load 成功后 tab.sessionId 同样回填(load 回来的会话 id 才是 catalog 要持久化的身份)", async (t) => {
+	const { manager } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+			if (frame.method === "session/load") return { sessionId: "sess-restored" };
+			if (frame.method === "session/new") return { sessionId: "should-not-happen" };
+			return {};
+		},
+	});
+	const tab = await manager.create({ projectId: "p1", deckSessionId: "deck-1", backend: "acp", agentPreset: "gemini", acpSessionId: "sess-old" });
+	assert.equal(manager.list().find((item) => item.id === tab.id)?.sessionId, "sess-restored");
+});
+
+test("恢复:load 重放的 session/update(ACP 规范:agent 先重放历史再回 load 响应)不得被 sessionId 过滤丢弃", async (t) => {
+	const { manager, events } = harness(t, {
+		handler: (frame, { writeFromCli }) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+			if (frame.method === "session/load") {
+				// 模拟规范行为:先推全部历史重放,再应答 session/load
+				writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-old", update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: "earlier question" } } } });
+				writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-old", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "earlier answer" } } } });
+				return { sessionId: "sess-old" };
+			}
+			if (frame.method === "session/new") return { sessionId: "should-not-happen" };
+			return {};
+		},
+	});
+	const tab = await manager.create({ projectId: "p1", deckSessionId: "deck-1", backend: "acp", agentPreset: "gemini", acpSessionId: "sess-old" });
+	await waitFor(() => {
+		const flushed = events.messages.filter((payload) => payload.agentId === tab.id);
+		return flushed.length > 0 && flushed.at(-1).messages.length >= 2;
+	}, "load 重放历史投影为消息");
+	const messages = manager.getMessages(tab.id);
+	assert.equal(messages.filter((message) => message.role === "user").at(-1)?.text, "earlier question", "重放的用户消息保留");
+	assert.equal(messages.filter((message) => message.role === "assistant").at(-1)?.text, "earlier answer", "重放的助手消息保留");
 });
 
 test("sendPrompt:流式 update 投影为消息,stopReason 结算后回 idle", async (t) => {
@@ -563,4 +613,55 @@ test("configOptions:config_option_update 通知整表替换并回调 onConfigOpt
 	await sleep(60);
 	assert.deepEqual(seen, [{ agentId: tab.id, first: "model" }]);
 	assert.equal(manager.getSessionConfigOptions(tab.id)?.[0]?.currentValue, "o3");
+});
+
+test("session/prompt 超时后补发 session/cancel：agent 侧旧回合必须收口，否则后续 prompt 永久排队", async (t) => {
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+				if (frame.method === "session/new") return { sessionId: "sess-timeout" };
+				// session/prompt 永不应答：模拟 opencode 回合卡死（客户端超时 ≠ agent 侧回合结束）
+				return undefined;
+			},
+		},
+		{ promptTurnTimeoutMs: 40 },
+	);
+	const tab = await createAgent();
+	const first = await manager.sendPrompt({ agentId: tab.id, message: "hello" });
+	assert.equal(first.accepted, false);
+	assert.match(first.error, /ACP request timed out after 40ms: session\/prompt/);
+	// 超时后必须补发 cancel，让 agent 收口旧回合（reason 固定 turn_timeout）
+	await waitFor(() => lastProc().methodFrames("session/cancel").length === 1);
+	const cancel = lastProc().methodFrames("session/cancel")[0];
+	assert.equal(cancel.params.sessionId, "sess-timeout");
+	assert.equal(cancel.params.reason, "turn_timeout");
+	// 取消补发后 turnActive 已清：新 prompt 不再被「still responding」拒绝，能重新进入发送路径
+	const second = await manager.sendPrompt({ agentId: tab.id, message: "again" });
+	assert.equal(second.accepted, false);
+	assert.match(second.error, /ACP request timed out after 40ms: session\/prompt/);
+	assert.equal(lastProc().methodFrames("session/cancel").length, 2);
+});
+
+test("session/prompt 非超时拒绝（JSON-RPC 错误）不补发 session/cancel", async (t) => {
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+				if (frame.method === "session/new") return { sessionId: "sess-rpc" };
+				if (frame.method === "session/prompt") return { __error: true, code: -32002, message: "turn in progress" };
+				return {};
+			},
+		},
+		{ promptTurnTimeoutMs: 5000 },
+	);
+	const tab = await createAgent();
+	const result = await manager.sendPrompt({ agentId: tab.id, message: "hi" });
+	assert.equal(result.accepted, false);
+	assert.match(result.error, /turn in progress/);
+	// 拒绝是 agent 即时应答：回合已在 agent 侧结束，再发 cancel 反而可能打断下一回合
+	await sleep(120);
+	assert.equal(lastProc().methodFrames("session/cancel").length, 0);
 });

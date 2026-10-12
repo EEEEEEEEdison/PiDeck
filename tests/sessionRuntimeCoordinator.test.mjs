@@ -425,6 +425,28 @@ test("restart still fails when dispatch lease is held beyond grace window", asyn
 	await assert.rejects(coordinator.restartSession("session-1", "agent-1"), /prompt dispatch is in progress/);
 });
 
+test("stopRuntime 不被在途 prompt 回合的 dispatch lease 挡住：关闭是卡死回合的唯一恢复出口", async () => {
+	const { SessionRuntimeCoordinator } = loadCoordinator();
+	const started = deferred();
+	const harness = createHarness({
+		sender: async () => {
+			started.resolve();
+			// 回合永不返回：模拟 opencode/ACP 卡死（session/prompt 悬挂到 10 分钟超时），
+			// 过去 stopRuntime 会在此期间报 SESSION_RUNTIME_BUSY（「会话正在处理其他操作」），用户无法关闭
+			await new Promise(() => {});
+		},
+	});
+	const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+	const generation = coordinator.bindExistingAgent("session-1", "agent-1");
+	const sending = coordinator.send(prompt());
+	await started.promise;
+	const stopped = await coordinator.stopRuntime({ sessionId: "session-1", agentId: "agent-1", runtimeGeneration: generation });
+	assert.equal(stopped.ok, true);
+	assert.equal(harness.calls.stop, 1);
+	// lease 本身未被放宽：非 stop 路径（如重新绑定）仍被在途 dispatch 挡住，语义不变
+	assert.throws(() => coordinator.bindExistingAgent("session-1", "agent-1"), /prompt dispatch is in progress/);
+});
+
 test("dispatch lease is released when sender throws", async () => {
 	const { SessionRuntimeCoordinator } = loadCoordinator();
 	const started = deferred();

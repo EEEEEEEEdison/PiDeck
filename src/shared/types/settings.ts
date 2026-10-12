@@ -220,6 +220,13 @@ export type AppSettings = {
 	 * 默认关闭：与通用 enableNotifications 解耦，用户可单独控制提问提醒，避免打扰。
 	 */
 	askNotificationEnabled: boolean;
+	/**
+	 * 仅失焦提醒：PiDeck 窗口有焦点（用户正在看）时不弹系统通知、不播提示音，只有窗口失焦时才提醒。
+	 * 默认关闭 = 只要会话有结果就提醒，与窗口是否在前台无关。
+	 * 门控范围：主进程系统通知（会话完成/Ask 提问，见 AgentManager 与 index.ts 定时任务通知）
+	 * + 提示音（主进程 SoundAlertService 判定后推 `sounds:play`）；应用内 toast 不受影响，它本来就只在窗口里可见。
+	 */
+	alertOnlyWhenUnfocused: boolean;
 	/** 激活 Agent 数量提醒（人文关怀）：激活数达到阈值时，启动时提示关闭空闲会话释放内存。默认开启。 */
 	agentCountReminderEnabled: boolean;
 	/**
@@ -957,6 +964,8 @@ export function createDefaultAppSettings(): AppSettings {
 		enableNotifications: true,
 		// Ask 提问系统通知默认关闭：与主进程 SettingsStore 默认一致（默认不打扰）
 		askNotificationEnabled: false,
+		// 仅失焦提醒默认关闭：与主进程 SettingsStore 默认一致（默认照常提醒，不看窗口焦点）
+		alertOnlyWhenUnfocused: false,
 		// 人文关怀提醒默认开启：与主进程 SettingsStore 默认一致，首屏未拉到真实设置前不关闭提醒
 		agentCountReminderEnabled: true,
 		// 公告通知默认开启：与主进程 SettingsStore 默认一致，首屏未拉到真实设置前不误关提醒

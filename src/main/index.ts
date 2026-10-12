@@ -46,6 +46,9 @@ import { ChannelSwitchService } from "./update/ChannelSwitchService";
 import { registerChannelSwitchIpc } from "./ipc/channelSwitchIpc";
 import { resolveUpdateChannel } from "./update/channelIdentity";
 import { APP_DEEP_LINK_SCHEME } from "./utils/deepLinkScheme";
+import { APP_DISPLAY_NAME } from "./utils/appBrand";
+import { isMainWindowFocused, shouldAlertNow } from "./notifications/alertFocusGate";
+import { buildToastXml, notificationLaunchUrl, resolveNotificationLogoUri } from "./notifications/notificationToast";
 import { extractFocusTargetFromArgv } from "./utils/focusTarget";
 import type { Project, StartupWindowMode } from "../shared/types";
 import type { DataEnvMode } from "../shared/types/dataEnv";
@@ -5003,8 +5006,11 @@ app
 			notifyRunFinished: (run, task) => {
 				const settings = settingsStore.get();
 				if (!settings.enableNotifications || !Notification.isSupported()) return;
+				// 仅失焦提醒：窗口在前台时不弹系统通知（设置默认关闭时不生效）
+				if (!shouldAlertNow(settings.alertOnlyWhenUnfocused, isMainWindowFocused(mainWindow))) return;
 				const isSuccess = run.status === "succeeded";
-				const appName = app.getName();
+				// 品牌常量而非 app.getName()：安装版 asar 内 package.json 只有 name=pi-desktop，标题会露馅
+				const appName = APP_DISPLAY_NAME;
 				const body = isSuccess
 					? mainCopy("mainNotification.automationDone", { name: task.name })
 					: mainCopy("mainNotification.automationFailed", {
@@ -5015,6 +5021,13 @@ app
 					title: appName,
 					body,
 					silent: false,
+					// 与 AgentManager 同一套 toast XML：品牌字标 + 点击经深链跳回会话（下面 click 处理保留作兜底）
+					toastXml: buildToastXml({
+						title: appName,
+						body,
+						launch: notificationLaunchUrl(run.sessionId),
+						logoUri: resolveNotificationLogoUri({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() }),
+					}),
 				});
 				notification.on("click", () => {
 					focusMainWindow();
@@ -5399,6 +5412,7 @@ app
 			agentManager,
 			settingsStore,
 			getMainWindow: () => mainWindow,
+			isWindowFocused: () => isMainWindowFocused(mainWindow),
 			log: (domain, message, details) => void appLogger.info(domain, message, details),
 		});
 		soundAlertService.attach();

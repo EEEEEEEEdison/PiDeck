@@ -164,6 +164,8 @@ export const NotificationTab = memo(function NotificationTab(props: Notification
 			{/* 系统通知（原常用设置「通知」区）：会话完成/Ask 提问/Agent 数量提醒三个独立开关 */}
 			<SettingsSection id="settings-section-notification-channels" title={t("settings.notificationSection")}>
 				<SettingSwitchRow anchor="notification-enable" title={t("settings.enableNotifications")} checked={draft.enableNotifications} onChange={(checked) => updateDraft({ enableNotifications: checked })} />
+				{/* 仅失焦提醒：按窗口焦点门控系统通知 + 提示音（应用内 toast 不受影响） */}
+				<SettingSwitchRow anchor="notification-unfocused-only" title={t("settings.alertOnlyWhenUnfocused")} description={t("settings.alertOnlyWhenUnfocusedDesc")} checked={draft.alertOnlyWhenUnfocused} onChange={(checked) => updateDraft({ alertOnlyWhenUnfocused: checked })} />
 				<SettingSwitchRow anchor="notification-ask" title={t("settings.askNotification")} description={t("settings.askNotificationDesc")} checked={draft.askNotificationEnabled} onChange={(checked) => updateDraft({ askNotificationEnabled: checked })} />
 				<SettingSwitchRow anchor="notification-agent-count" title={t("settings.agentCountReminder")} description={t("settings.agentCountReminderDesc")} checked={draft.agentCountReminderEnabled} onChange={(checked) => updateDraft({ agentCountReminderEnabled: checked })} />
 				<SettingSwitchRow anchor="notification-announcement" title={t("settings.announcementNotification")} description={t("settings.announcementNotificationDesc")} checked={draft.announcementNotificationEnabled} onChange={(checked) => updateDraft({ announcementNotificationEnabled: checked })} />
