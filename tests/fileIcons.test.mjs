@@ -97,7 +97,7 @@ describe("Seti file icon integration", () => {
 		assert.match(workspaceSurface, /depth \* 8/);
 		assert.match(workspaceSurface, /树行用原生 button/);
 		assert.doesNotMatch(workspaceSurface, /\[&_svg\]:!size-/);
-		assert.match(workspaceSurface, /FolderOpen size=\{18\}/);
+		assert.match(workspaceSurface, /FolderOpen\s+size=\{18\}/);
 		// 滚动层上移到 DrawerSurface 的 LazyWrapper（overflow-y-auto）；files-panel 自身
 		// 只保留 overflow-x-hidden，避免滚动条占位导致的宽度摆动（见 DrawerSurface 注释）
 		assert.match(workspaceSurface, /files-panel[^"]*overflow-x-hidden/);

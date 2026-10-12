@@ -1845,7 +1845,6 @@
   padding: var(--space-2);
 }
 .file-node-row {
-  --file-depth-offset: 0px;
   width: 100%;
   /* 高度/圆角由 WorkspaceSurface Button utility；水平 padding 由行上 inline style
      （含 depth 缩进）承担，避免 Button 的 px-* 与 legacy padding 双源冲突。 */
@@ -1864,7 +1863,7 @@
   line-height: var(--line-height-control);
   white-space: nowrap;
 }
-/* chevron 固定宽度不参与压缩；目录图标 24px 由 .file-node-icon 保证 */
+/* chevron 不参与压缩；文件树的图标槽宽由行内 w-4 承担。 */
 .file-node-chevron {
   flex-shrink: 0;
 }
@@ -1908,15 +1907,6 @@
 }
 .file-children {
   position: relative;
-}
-.file-children::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: calc(var(--space-1) + var(--file-depth-offset, 0px) + 10px);
-  border-left: 1px solid var(--color-border-subtle);
-  pointer-events: none;
 }
 .panel-action-row {
   display: flex;
