@@ -205,6 +205,13 @@
         ]
       },
       {
+        "from": "resources/host-plugins",
+        "to": "host-plugins",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "node_modules/undici",
         "to": "extensions/node_modules/undici"
       },
