@@ -1234,6 +1234,24 @@ test("runtime model preference is not persisted when AgentManager fails", async 
 	assert.deepEqual(harness.entry.model, previousModel);
 	assert.equal(harness.calls.update, 0);
 	assert.equal(harness.calls.setModel, 1);
+	assert.equal(harness.calls.publishRuntimeState, 0, "a rejected model selection must not publish new context usage");
+});
+
+test("a runtime-state refresh failure does not turn an applied model selection into a command failure", async () => {
+	const { SessionRuntimeCoordinator } = loadCoordinator();
+	const harness = createHarness({ tabs: [{ id: "agent-a", status: "idle", createdAt: 1 }] });
+	harness.agents.publishRuntimeState = async () => {
+		harness.calls.publishRuntimeState += 1;
+		throw new Error("Runtime refresh unavailable");
+	};
+	const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+	const runtimeGeneration = coordinator.bindExistingAgent("session-1", "agent-a");
+
+	const result = await coordinator.setRuntimeModel({ sessionId: "session-1", agentId: "agent-a", runtimeGeneration }, "openai", "gpt-test");
+
+	assert.equal(result.ok, true);
+	assert.equal(harness.entry.model?.modelId, "gpt-test");
+	assert.equal(harness.calls.publishRuntimeState, 1);
 });
 
 test("runtime thinking falls back to the requested level when no Pi snapshot is available", async () => {
@@ -1370,6 +1388,7 @@ test("reselecting an already-applied model or thinking level skips duplicate run
 	assert.equal(harness.calls.setModel, 1);
 	assert.equal(harness.calls.setThinking, 1);
 	assert.equal(harness.calls.runtimeState, 0);
+	assert.equal(harness.calls.publishRuntimeState, 1, "reselecting the applied model must not repeat the context refresh");
 });
 
 test("DSH model change preserves the recorded thinking preference", async () => {

@@ -800,6 +800,10 @@ export class SessionRuntimeCoordinator {
 					modelName: appliedModel.modelName,
 					thinkingLevel: effectiveThinkingLevel,
 				});
+				// 模型名称写回 catalog 不会更新圆环使用的 runtime 用量快照；切换确认后
+				// 立即推送新窗口与占用率。刷新失败不撤销已生效的选择，迟到快照由网关丢弃。
+				this.requireBoundTarget(target);
+				await this.agents.publishRuntimeState(agentId).catch(() => undefined);
 				return result;
 			}),
 		);
