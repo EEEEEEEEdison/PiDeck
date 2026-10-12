@@ -67,6 +67,7 @@ export const SESSION_FEATURE_TIPS: readonly SessionFeatureTip[] = [
 	{ textKey: "agent.tips.usageProbe" },
 	{ textKey: "agent.tips.settingsExtras" },
 	{ textKey: "agent.tips.sessionStatusPlacement" },
+	{ textKey: "agent.tips.moduleVisibility" },
 	{ textKey: "agent.tips.rpcLogTrace" },
 	{ textKey: "agent.tips.visionBridge" },
 	{ textKey: "agent.tips.configBackup" },

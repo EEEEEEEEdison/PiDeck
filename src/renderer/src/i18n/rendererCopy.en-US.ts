@@ -5380,6 +5380,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"agent.tips.multiSelect": "Hover one of your messages to multi-select and share text / Markdown / image",
 	"agent.tips.settingsExtras": "Settings include usage stats, desktop pet, web server and Feishu bot",
 	"agent.tips.sessionStatusPlacement": "Settings → 'Appearance' can move the todo, files and subagent strips to the right rail",
+	"agent.tips.moduleVisibility": "Settings → 'Appearance' hides unused modules and composer buttons; config and shortcuts stay",
 	"agent.tips.pasteAttach": "The composer accepts pasted images and dropped files as attachments",
 	"agent.tips.messageActions": "Hover your own message to resend it, edit it in the composer or fork a new session",
 	"agent.tips.sessionSort": "Right-click a project → 'Session sorting' to order by activity, created time or title",

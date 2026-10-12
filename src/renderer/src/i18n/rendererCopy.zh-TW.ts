@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 81a849bae80e17ab225a9a28bf9821fbd4583bced253684d1e3a8fcc9dcdbd76（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 5537e8c567a357c7db6b3b1647d7eb368f80dab9a81ba8aa4cb69a191bd4623d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -5367,6 +5367,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"agent.tips.multiSelect": "懸停自己的訊息可多選分享為文本 / Markdown / 圖片",
 	"agent.tips.settingsExtras": "設定裡有用量統計、桌面寵物、Web 服務與飛書機器人",
 	"agent.tips.sessionStatusPlacement": "設定 →「外觀設定」的會話狀態位置能把待辦、修改檔案、子代理挪到右側邊欄",
+	"agent.tips.moduleVisibility": "設定 →「外觀設定」裡能關掉不用的模組與輸入框入口，只隱藏介面、不動配置和快捷鍵",
 	"agent.tips.pasteAttach": "輸入框可以直接貼上圖片、拖入檔案當附件",
 	"agent.tips.messageActions": "懸停自己的訊息可重發、在輸入框中編輯或 fork 成新會話",
 	"agent.tips.sessionSort": "右鍵專案 →「會話排序」，可按最近活躍、建立時間或標題排列",
