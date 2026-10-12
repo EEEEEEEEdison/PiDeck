@@ -427,11 +427,16 @@ export function resolveSingleAskDirectEnter(state: {
 
 /**
  * 批量题卡直接回车策略（与「下一题」按钮同语义，但要求当前题已作答，防误触丢题）：
+ * - multi_select 一律不推进：勾一个选项就算「已作答」（isBatchAnswered 视非空数组为已作答），
+ *   回车会把它当成本题完成——末题无审阅时直接提交整卡，而本题通常还有多个待勾项。
+ *   与点击路径同口径（shouldAutoAdvanceBatchAnswer 同样排除 multi_select）：选项按钮上的
+ *   回车交原生 click 切换勾选，空白处回车不动作，完成走显式的「下一题/提交全部」按钮。
  * - 选项按钮：未作答回车 = 原生 click 选中/切换；已作答回车 = 提交当前答案并推进；
  * - 其他按钮（上一步/下一步/提交自定义/提交全部）：交原生 click，不拦截；
  * - 卡片空白处：已作答且「下一题」可用才推进；nextDisabled（末题未全部作答）时不动作。
  */
 export function resolveBatchAskDirectEnter(state: {
+	type: AgentUiBatchQuestion["type"];
 	fromField: boolean;
 	fromButton: boolean;
 	fromOptionButton: boolean;
@@ -439,6 +444,7 @@ export function resolveBatchAskDirectEnter(state: {
 	nextDisabled: boolean; // 与「下一题」按钮禁用态一致
 }): AskDirectEnterAction {
 	if (state.fromField) return { kind: "none" };
+	if (state.type === "multi_select") return { kind: "none" };
 	if (state.fromOptionButton) {
 		return state.answered && !state.nextDisabled ? { kind: "advance" } : { kind: "none" };
 	}

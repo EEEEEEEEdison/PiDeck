@@ -73,7 +73,7 @@ test("single input: Enter submits typed text away from the field, button keeps n
 
 test("batch: Enter advances only when the current question is answered", () => {
 	const mod = loadAskUi();
-	const base = { fromField: false, fromButton: false, fromOptionButton: false, answered: true, nextDisabled: false };
+	const base = { type: "select", fromField: false, fromButton: false, fromOptionButton: false, answered: true, nextDisabled: false };
 	// 卡片空白处回车：已作答 → 下一题；未作答 → 不动作（防误触丢题）
 	assert.equal(mod.resolveBatchAskDirectEnter(base).kind, "advance");
 	assert.equal(mod.resolveBatchAskDirectEnter({ ...base, answered: false }).kind, "none");
@@ -85,6 +85,23 @@ test("batch: Enter advances only when the current question is answered", () => {
 	// 其他按钮（上一步/提交自定义等）与输入框：交原生/字段自身处理器
 	assert.equal(mod.resolveBatchAskDirectEnter({ ...base, fromButton: true }).kind, "none");
 	assert.equal(mod.resolveBatchAskDirectEnter({ ...base, fromField: true }).kind, "none");
+});
+
+test("batch multi_select: Enter never advances on a single pick", () => {
+	const mod = loadAskUi();
+	// 回归：勾一个选项后 isBatchAnswered 即为 true，回车曾据此把整张卡推进/提交
+	// （末题无审阅时直接 submitAnswers），与点击路径排除 multi_select 的口径不一致。
+	const answeredMulti = { type: "multi_select", fromField: false, fromButton: false, fromOptionButton: false, answered: true, nextDisabled: false };
+	assert.equal(mod.resolveBatchAskDirectEnter(answeredMulti).kind, "none");
+	// 焦点在选项按钮上：回车交原生 click 切换勾选，不提交
+	assert.equal(mod.resolveBatchAskDirectEnter({ ...answeredMulti, fromOptionButton: true }).kind, "none");
+	// 与点击路径同口径：两条路径对 multi_select 的态度必须一致
+	assert.equal(mod.shouldAutoAdvanceBatchAnswer({ type: "multi_select", total: 2 }), false);
+	// 单值类型不受影响（仍可回车推进），且「已作答」仍是必要条件
+	for (const type of ["select", "confirm", "input"]) {
+		assert.equal(mod.resolveBatchAskDirectEnter({ ...answeredMulti, type }).kind, "advance");
+		assert.equal(mod.resolveBatchAskDirectEnter({ ...answeredMulti, type, answered: false }).kind, "none");
+	}
 });
 
 test("overlay wires the direct-enter strategy and IME guard into ask card keydown", () => {

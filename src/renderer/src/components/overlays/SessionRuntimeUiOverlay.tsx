@@ -431,9 +431,11 @@ function BatchQuestion(props: {
 			onKeyDown={(event) => {
 				// 批量卡直接回车（策略见 askUi.resolveBatchAskDirectEnter）：
 				// 选项按钮上已作答回车 = 提交并推进；卡片空白处同理；未作答回车交原生 click 完成选中。
+				// multi_select 例外：勾一个不等于答完，回车不推进，避免少选就提交整卡。
 				if (event.key !== "Enter" || isComposingKeyboardEvent(event)) return;
 				const target = event.target as HTMLElement;
 				const action = resolveBatchAskDirectEnter({
+					type: question.type,
 					fromField: target.tagName === "INPUT" || target.tagName === "TEXTAREA",
 					fromButton: target.tagName === "BUTTON",
 					fromOptionButton: target.classList.contains("ask-inline-bar-option"),
