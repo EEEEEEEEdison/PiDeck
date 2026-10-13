@@ -27,6 +27,7 @@
 - **cmyk-xing** ([@cmyk-xing](https://github.com/cmyk-xing)) — 外观设置新增「功能模块」显示开关，按需收起飞书 / 桌宠 / 视觉桥 / 生图 / Web 服务 / Git / 用量统计 / 进程监控 / DSH 的 UI 入口 (#254)、修复引导页发送创建的新会话漏出历史旧消息 (#256)、启动时恢复上次窗口位置与最大化状态，不再一律居中 (#259)
 
 - **EEEEEEEEdison** ([@EEEEEEEEdison](https://github.com/EEEEEEEEdison)) — 右侧边栏上下分区与常驻会话状态面板 (#334)、TPS 测量模式（流式 / 端到端）(#327)
+- **fengxinzi1814** ([@fengxinzi1814](https://github.com/fengxinzi1814)) — 选择题点击即提交，不再需要二次点提交 (#344)
 
 以及所有提交 Issue、反馈建议和帮助推广的用户。
 

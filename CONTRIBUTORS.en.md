@@ -27,6 +27,7 @@ Thanks to everyone who has contributed to PiDeck!
 - **cmyk-xing** ([@cmyk-xing](https://github.com/cmyk-xing)) — Feature-module visibility switches in appearance settings so unused module entries can be hidden (#254); guide-page bootstrap messages no longer leak into newly created sessions (#256); Windows reopen at their last position, size, and maximized state (#259)
 
 - **EEEEEEEEdison** ([@EEEEEEEEdison](https://github.com/EEEEEEEEdison)) — Right sidebar split into an upper drawer pane and a persistent session-status pane (#334); streaming and end-to-end TPS measurement modes (#327)
+- **fengxinzi1814** ([@fengxinzi1814](https://github.com/fengxinzi1814)) — Ask cards submit on click instead of requiring a second click (#344)
 
 And everyone who filed issues, shared feedback, and helped spread the word.
 
