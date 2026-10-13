@@ -51,7 +51,7 @@ const PORTABLE_PREFIX_PATTERN = /^(.*?[\\/]pi-runtime[\\/]pi-global)(?:[\\/].*)?
  * - UNC 互操作路径：`\\wsl$\<distro>\…` / `\\wsl.localhost\<distro>\…`（自定义路径直接粘了发行版内路径）。
  * 两者都不是本地安装：应交回发行版内的 pi 自己更新，绝不能落到宿主包管理器。
  */
-const WSL_TARGET_PATTERN = /^(?:.*[\\/])?wsl(?:\.exe)?\s+-d\s|^\\\\wsl(?:\$|\.localhost)[\\/]/i;
+const WSL_TARGET_PATTERN = /^(?:.*[\\/])?wsl(?:\.exe)?\s+(?:-d|--distribution)\s|^\\\\wsl(?:\$|\.localhost)[\\/]/i;
 
 /**
  * bun 安装根目录：`<root>/bin` 同时放 bun 本体与全局命令 shim。
@@ -133,6 +133,23 @@ export function parseBunVersion(raw: string): string | undefined {
 /** 本地绝对路径形态（POSIX `/…`、Windows `C:\…`、UNC `\\…`）；带空格的安装目录同样合法，只按前缀判定。 */
 export function isLocalAbsolutePath(value: string): boolean {
 	return /^(?:[a-zA-Z]:[\\/]|[\\/])/.test(value);
+}
+
+/**
+ * 自定义 BUN_INSTALL 的 shim 形态细化（需要磁盘判断，`exists` 由调用方注入以保持本模块零磁盘依赖）。
+ *
+ * 为什么需要：shim 形态 `<root>/bin/pi[.exe]` 与普通全局安装在路径上无法区分，但 bun 的全局包目录固定是
+ * `<root>/install/global/node_modules`——存在就说明这是 bun 安装，根即 `<root>`。不补这一步的后果：
+ * Windows 上这类安装会归 `pi-self`，而 pi 在 Windows 明确拒绝非 npm/pnpm 自更新（bun 形态直接报
+ * “Update pi manually”），PiDeck 的代跑能力形同不存在；POSIX 上至少还能拿到绝对 bun 路径与 BUN_INSTALL。
+ * 非 `pi-self` 通道、非本地绝对路径（含 WSL 召唤串）一律原样返回。
+ */
+export function refineChannelForCustomBunRoot(channel: PiSelfUpdateChannel, command: string, exists: (path: string) => boolean, platform: NodeJS.Platform = process.platform): PiSelfUpdateChannel {
+	if (channel.kind !== "pi-self" || !isLocalAbsolutePath(command)) return channel;
+	const api = command.includes("\\") ? win32 : posix;
+	const root = api.dirname(api.dirname(command));
+	if (!exists(api.join(root, "install", "global", "node_modules"))) return channel;
+	return { kind: "bun-global", bunCommand: api.join(root, "bin", platform === "win32" ? "bun.exe" : "bun"), bunInstallRoot: root };
 }
 
 export function resolvePiSelfUpdateChannel(command: string, platform: NodeJS.Platform = process.platform): PiSelfUpdateChannel {

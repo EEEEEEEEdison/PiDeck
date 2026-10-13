@@ -15,7 +15,7 @@ import { test } from "node:test";
 import { join, win32 } from "node:path";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG, bunCommandCandidates, bunGlobalInstallArgs, isLocalAbsolutePath, npmGlobalInstallArgs, parseBunVersion, PI_OFFICIAL_REGISTRY, resolvePiSelfUpdateChannel } = loadTsCommonJs("src/main/pi/piSelfUpdateChannel.ts");
+const { BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG, bunCommandCandidates, bunGlobalInstallArgs, isLocalAbsolutePath, npmGlobalInstallArgs, parseBunVersion, PI_OFFICIAL_REGISTRY, refineChannelForCustomBunRoot, resolvePiSelfUpdateChannel } = loadTsCommonJs("src/main/pi/piSelfUpdateChannel.ts");
 
 test("bun 全局 bin（POSIX 形态）→ bun-global，bunCommand 取同目录的 bun 本体", () => {
 	const channel = resolvePiSelfUpdateChannel("/home/tester/.bun/bin/pi", "linux");
@@ -85,6 +85,8 @@ test("运行时 WSL 召唤形态 → pi-self（不能把 WSL 目标的 bun 当�
 	for (const command of [
 		"wsl -d Ubuntu-24.04 -u dev /home/dev/.bun/bin/pi",
 		"wsl.exe -d Ubuntu-24.04 -u dev /home/dev/.bun/bin/pi",
+		// 长选项拼写同样要拦（PiLocator 目前只产 -d，这是第二道防线）。
+		"wsl --distribution Ubuntu-24.04 -u dev /home/dev/.bun/bin/pi",
 		String.raw`C:\Windows\System32\wsl.exe -d Ubuntu-24.04 -u dev /home/dev/.bun/bin/pi`,
 		// 自定义路径直接粘发行版内路径的 UNC 互操作形态（同样不是本地安装）。
 		String.raw`\\wsl.localhost\Ubuntu-24.04\home\dev\.bun\bin\pi`,
@@ -92,6 +94,30 @@ test("运行时 WSL 召唤形态 → pi-self（不能把 WSL 目标的 bun 当�
 	]) {
 		assert.equal(resolvePiSelfUpdateChannel(command, "win32").kind, "pi-self", command);
 	}
+});
+
+test("自定义 BUN_INSTALL 的 shim：<root>/install/global/node_modules 存在才细化成 bun-global", () => {
+	// 回归（2026-10 评审）：`<root>/bin/pi` 与普通全局安装在路径上无法区分，不细化的话 Windows 上会落到
+	// pi 自身的 gate（“Update pi manually”），PiDeck 代跑能力形同不存在。
+	const piPath = "/opt/oven/bin/pi";
+	const base = resolvePiSelfUpdateChannel(piPath, "linux");
+	assert.equal(base.kind, "pi-self");
+	assert.equal(refineChannelForCustomBunRoot(base, piPath, () => false, "linux").kind, "pi-self");
+	const refined = refineChannelForCustomBunRoot(base, piPath, (path) => path === "/opt/oven/install/global/node_modules", "linux");
+	assert.equal(refined.kind, "bun-global");
+	assert.equal(refined.bunCommand, "/opt/oven/bin/bun");
+	assert.equal(refined.bunInstallRoot, "/opt/oven");
+	// 已是 bun-global / portable-prefix 的通道不受影响；WSL 召唤串（非本地路径）不细化。
+	const alreadyBun = resolvePiSelfUpdateChannel("/home/u/.bun/bin/pi", "linux");
+	assert.equal(
+		refineChannelForCustomBunRoot(alreadyBun, "/home/u/.bun/bin/pi", () => true, "linux"),
+		alreadyBun,
+	);
+	const wsl = "wsl -d Ubuntu-24.04 -u dev /home/dev/.bun/bin/pi";
+	assert.equal(
+		refineChannelForCustomBunRoot(base, wsl, () => true, "linux"),
+		base,
+	);
 });
 
 test("安装参数构造器：代跑与「源未同步」提示同源（npm/bun 各自的 flags）", () => {

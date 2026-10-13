@@ -10,7 +10,7 @@ import { getAppLogger } from "../logging/sharedLogger";
 import { compareVersions } from "../utils/versionCompare";
 import { parsePiVersion } from "../extensions/extensionVersionGate";
 import { readConfiguredNpmCommand } from "../resourceWhitelist";
-import { BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG, bunCommandCandidates, bunGlobalInstallArgs, isLocalAbsolutePath, npmGlobalInstallArgs, parseBunVersion, PI_OFFICIAL_REGISTRY, resolvePiSelfUpdateChannel, type PiSelfUpdateChannel } from "./piSelfUpdateChannel";
+import { BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG, bunCommandCandidates, bunGlobalInstallArgs, isLocalAbsolutePath, npmGlobalInstallArgs, parseBunVersion, PI_OFFICIAL_REGISTRY, refineChannelForCustomBunRoot, resolvePiSelfUpdateChannel, type PiSelfUpdateChannel } from "./piSelfUpdateChannel";
 
 /**
  * pi 自更新的**执行**链路：检查（pi.dev 版本接口）→ 通道分派 → 包管理器代跑 → 结果核验 → 失败提示。
@@ -151,9 +151,12 @@ export class PiSelfUpdateRunner {
 			throw new Error(this.translate("mainExtension.piSelfUpdateUnsupported", { version: check.currentVersion || "?", minimum: MIN_PI_VERSION_FOR_SELF_UPDATE }));
 		}
 		// 通道分派（bun 全局 / 旧引导前缀 → PiDeck 代跑包管理器；其余 → pi 自身）。
-		// 判定依赖 check 返回的 command（选中的 pi 可执行路径形状），见 piSelfUpdateChannel。
-		const channel = resolvePiSelfUpdateChannel(check.command ?? "");
-		// 展示用摘要：与代跑共用同一 argv 构造器（真实前缀路径掩码成 <pi-runtime>），不再单独维护映射。
+		// 判定依赖 check 返回的 command（选中的 pi 可执行路径形状），见 piSelfUpdateChannel；
+		// 自定义 BUN_INSTALL 的 shim 形态（`<root>/bin/pi`）再按磁盘布局细化——不细化的话 Windows 上会落到
+		// pi 自身的 gate（“Update pi manually”），代跑能力形同不存在。
+		const channel = refineChannelForCustomBunRoot(resolvePiSelfUpdateChannel(check.command ?? ""), check.command ?? "", existsSync);
+		// 展示用摘要：与代跑共用同一 argv 构造器（真实前缀路径掩码成 <pi-runtime>）；bun 的年龄门开关取决于
+		// 版本探测结果，摘要里不体现，实际 argv 以 runBunGlobalUpdate 为准。
 		const labelSpec = `${check.packageName ?? PI_PACKAGE_NAME}@${check.latestVersion}`;
 		const channelLabel = channel.kind === "bun-global" ? `bun ${bunGlobalInstallArgs(labelSpec).join(" ")}` : channel.kind === "portable-prefix" ? `npm ${npmGlobalInstallArgs(labelSpec, { prefixDir: "<pi-runtime>" }).join(" ")}` : "pi update --self";
 		let output: string;
@@ -216,7 +219,8 @@ export class PiSelfUpdateRunner {
 
 	/**
 	 * 更新失败时补一条可执行提示（只改写三类可判定的根因，其余错误原样抛出）：
-	 * - 发布年龄门：给「放宽年龄门」的提示——PiDeck 代跑已带 0 开关，能走到这里的是手动重试/外部命令；
+	 * - 发布年龄门：给「放宽年龄门」的提示。前提是代跑会带 0 开关；探测不到 bun 版本（bun < 1.3 或包装
+	 *   命令输出不可解析）时代跑不带，而能走到这里的正是 bun 自身的年龄门报错，让用户去改配置仍然正确；
 	 * - 源里没有该版本：PiDeck 代跑的通道给与代跑同源的官方源命令，pi-self 通道只给「把 registry 指向
 	 *   官方源」的建议（npm/pnpm/yarn/brew/managed 都在这档，写死 npm 会在 pnpm/yarn 机器上又装一个 pi）；
 	 * - 其余（网络、权限、`ConnectionClosed` 等）不猜、不改写。
@@ -234,7 +238,9 @@ export class PiSelfUpdateRunner {
 		// 这里刻意不做 sanitizeCommandOutput 的 home 掩码：提示里的命令要能直接粘贴执行，掩码后的 `<user>` 在
 		// shell/CMD 里都不是路径（channelLabel 那个 `<pi-runtime>` 只是展示标签）。路径属于 PiDeck 自己的
 		// userData/pi-runtime 目录，回显给同一用户无外泄；与「失败输出脱敏」的差别记入 docs/pi-install-detection.md。
-		const command = channel.kind === "bun-global" ? `bun ${bunGlobalInstallArgs(spec, { registry: true }).join(" ")}` : channel.kind === "portable-prefix" ? `npm ${npmGlobalInstallArgs(spec, { prefixDir: `"${channel.prefixDir}"`, registry: true }).join(" ")}` : "";
+		// 前缀通道代跑用的是用户配置的 npmCommand（可能是绝对路径/包装命令），提示必须同源，否则粘了跑不通；
+		// bun 通道用自带本体（绝对路径优先）即可。
+		const command = channel.kind === "bun-global" ? `bun ${bunGlobalInstallArgs(spec, { registry: true }).join(" ")}` : channel.kind === "portable-prefix" ? `${this.configuredNpmCommand().join(" ")} ${npmGlobalInstallArgs(spec, { prefixDir: `"${channel.prefixDir}"`, registry: true }).join(" ")}` : "";
 		const hint = command ? this.translate("mainExtension.piUpdateRegistryLagHint", { version, command }) : this.translate("mainExtension.piUpdateRegistryLagHintManual", { version, registry: PI_OFFICIAL_REGISTRY });
 		return new Error(`${detail}\n${hint}`);
 	}
@@ -318,6 +324,11 @@ export class PiSelfUpdateRunner {
 		}
 	}
 
+	/** 用户配置的 npm 命令（与包资源安装同源）：裸 npm 在 GUI PATH 里找不到时，配置的包装命令同样生效。 */
+	private configuredNpmCommand(): string[] {
+		return readConfiguredNpmCommand(join(this.homeDir(), ".pi", "agent", "settings.json"));
+	}
+
 	/**
 	 * 旧引导前缀代跑：npm 落回用户全局目录时前缀副本永远停旧，必须显式 --prefix。
 	 * 参数与 pi 自身的 npm 分支（`getSelfUpdateCommandForMethod` 的 "npm" 分支）一致：`--ignore-scripts`
@@ -325,9 +336,7 @@ export class PiSelfUpdateRunner {
 	 * 时新版本会被拦下。
 	 */
 	private async runNpmPrefixUpdate(prefixDir: string, version: string, packageName?: string): Promise<string> {
-		// 复用 pi settings.json 的 npmCommand（与包资源安装同源）：裸 npm 在 GUI PATH 里找不到时，
-		// 用户配置的包装命令在这里同样生效（#318/#263）。
-		const configured = readConfiguredNpmCommand(join(this.homeDir(), ".pi", "agent", "settings.json"));
+		const configured = this.configuredNpmCommand();
 		return this.runPackageInstall(configured[0], [...configured.slice(1), ...npmGlobalInstallArgs(`${packageName ?? PI_PACKAGE_NAME}@${version}`, { prefixDir })], 300_000);
 	}
 }

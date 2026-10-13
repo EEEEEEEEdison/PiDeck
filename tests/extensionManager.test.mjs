@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
@@ -278,12 +278,13 @@ test("pickBunCommand：只有本地绝对路径才允许退回裸 bun（包装�
 	assert.equal(manager.selfUpdate.pickBunCommand("bun"), "bun");
 });
 
-test("bun 本体与已知候选都不存在时才回退裸 bun（候选探测看盘，用 fs 桩隔离环境）", () => {
-	// 候选列表包含 /usr/local/bin、~/.bun/bin 等真实位置，为了让断言与开发机是否装过 bun 无关，
-	// 这里把 fs 桩成「什么都不存在」。
+test("bun 候选探测看盘：命中候选就用绝对路径，全都不存在才回退裸 bun（fs 桩隔离环境）", () => {
+	// 候选列表包含 /usr/local/bin、~/.bun/bin 等真实位置：用可切换的 fs 桩隔离开发机环境，
+	// 先只让一个 home 下候选「存在」（探测循环必须是活的，删掉循环断言就会红），再全部抽空。
+	let existing = new Set();
 	const load = createTsSandbox({
 		stubs: {
-			"node:fs": { existsSync: () => false },
+			"node:fs": { existsSync: (path) => existing.has(String(path)) },
 			"../fs/trash": { trashPath: async () => {} },
 			"../logging/sharedLogger": { getAppLogger: () => null },
 			"../pi/PiProcess": { PiProcess: { invalidateVersionCache: () => {} } },
@@ -292,7 +293,37 @@ test("bun 本体与已知候选都不存在时才回退裸 bun（候选探测看
 	});
 	const { ExtensionManager } = load("src/main/extensions/ExtensionManager.ts");
 	const manager = new ExtensionManager({}, () => ({}));
-	assert.equal(manager.selfUpdate.pickBunCommand("/tmp/nowhere/.bun/bin/bun"), "bun");
+	const bunName = process.platform === "win32" ? "bun.exe" : "bun";
+	const candidate = join(homedir(), ".linuxbrew", "bin", bunName);
+	existing = new Set([candidate]);
+	assert.equal(manager.selfUpdate.pickBunCommand(join("/tmp/nowhere/.bun/bin", bunName)), candidate);
+	existing = new Set();
+	assert.equal(manager.selfUpdate.pickBunCommand(join("/tmp/nowhere/.bun/bin", bunName)), "bun");
+});
+
+test("自定义 BUN_INSTALL 的 shim（<root>/bin/pi + <root>/install/global）按 bun 通道代跑", async () => {
+	// 回归（2026-10 评审）：这类路径靠形状无法与普通全局安装区分；不细化的话 Windows 上只能落到
+	// pi 自身的 gate（“Update pi manually”）。
+	const root = await mkdtemp(join(tmpdir(), "pideck-bun-custom-"));
+	try {
+		await mkdir(join(root, "bin"), { recursive: true });
+		await mkdir(join(root, "install", "global", "node_modules"), { recursive: true });
+		const piPath = join(root, "bin", process.platform === "win32" ? "pi.exe" : "pi");
+		await writeFile(piPath, "", "utf8");
+		const manager = createUpdatePiManager(piPath, (key) => key);
+		const calls = [];
+		manager.selfUpdate.runBunGlobalUpdate = async (command, _version, _packageName, installRoot) => {
+			calls.push({ command, installRoot });
+			throw new Error("stop after capture");
+		};
+
+		await assert.rejects(manager.updatePi(), /stop after capture/);
+		assert.equal(calls.length, 1, "必须走 bun 通道代跑");
+		// 安装根要作为 BUN_INSTALL 传给 bun：自定义根自动推断，不靠用户 shell rc。
+		assert.equal(calls[0].installRoot, root);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
 });
 
 test("bun 本体不在 $BUN_INSTALL/bin 时按已知位置探测（linuxbrew/nix 不再 ENOENT）", async () => {
@@ -392,6 +423,33 @@ test("a stale lightweight extension scan cannot overwrite a newer force refresh"
 	);
 	assert.equal((await manager.list(false)).raw, "fresh");
 	assert.equal((await manager.list(true)).raw, "fresh");
+});
+
+test("缓存失效（install/uninstall 路径）会丢弃在飞的旧列表并重新扫描", async () => {
+	// 回归（2026-10 评审）：W3 把缓存代数机搬进 PiExtensionCatalog 后，这条「generation 变了就丢弃旧结果、
+	// 重入 list()」的分支一度只剩源码可读、没有测试；这里是它的直测。
+	const { ExtensionManager } = loadExtensionManagerModule();
+	const manager = new ExtensionManager({}, () => ({}));
+	const first = deferred();
+	const second = deferred();
+	let calls = 0;
+	manager.catalog.loadList = () => {
+		calls += 1;
+		return calls === 1 ? first.promise : second.promise;
+	};
+
+	const pending = manager.list(false);
+	// 模拟安装/卸载：generation 递增，在飞的旧请求结果必须被丢弃。
+	manager.invalidateListCache();
+	first.resolve({ extensions: [], raw: "stale" });
+	// 让重入的 list() 跑到第二次 loadList。
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(calls, 2, "代际变化后必须重新扫描");
+	second.resolve({ extensions: [{ id: "fresh", source: "npm:fresh" }], raw: "fresh" });
+
+	const result = await pending;
+	assert.equal(result.raw, "fresh");
+	assert.equal((await manager.list(false)).raw, "fresh", "新结果要写回缓存");
 });
 
 /**
