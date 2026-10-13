@@ -107,7 +107,7 @@ test("DSH 路径：request/context 上报路由模型后，assistant 终态消�
 	assert.deepEqual({ ...assistant.model }, { provider: "deepseek", modelId: "deepseek-chat" });
 });
 
-test("渲染比较：model 变化判为不等（否则 reconcileRuns 复用旧引用，行头模型不刷新）", () => {
+test("渲染比较：model 变化判为不等（否则 reconcileRuns 复用旧引用，底部模型不刷新）", () => {
 	const base = { id: "m1", agentId: "agent-1", role: "assistant", text: "x", timestamp: 1, stopReason: "stop" };
 	assert.equal(sameChatMessageForRender(base, { ...base }), true);
 	// 思考骨架先建、message_end 才补 provider/model：只有 model 变化时也必须重渲染

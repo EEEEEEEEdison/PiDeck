@@ -18,10 +18,10 @@ import { formatTime } from "../TimelineFormat";
  *   而不是统一的终端图标——否则同一会话里分不清是哪个 CLI 在回答；工具已删除时
  *   回退通用终端图标 + 通用名「ACP」。
  * - 头像走品牌内联 SVG（Fallback），不拉远程图，保证离线会话也能辨认。
- * - 时间后跟本轮实际使用的模型（provider + modelId）：同一会话内用户会频繁换模型，
- *   只在输入框显示当前模型不足以回看历史轮；文案是数据不是词典，不占位时不留空格。
+ * - 行头只留时间戳；本轮模型名与耗时一起放 turn 尾部（见 TurnRow 底部耗时行），
+ *   同一会话频繁换模型时用户视线本来就在回复底部。
  */
-export function TurnAuthorHeader(props: { backend?: AgentBackend; acpToolId?: string; endedAt: number; model?: { provider: string; modelId: string } }) {
+export function TurnAuthorHeader(props: { backend?: AgentBackend; acpToolId?: string; endedAt: number }) {
 	const backend: AgentBackend = props.backend ?? "pi";
 	const isDsh = backend === "dsh";
 	const isAcp = backend === "acp";
@@ -39,13 +39,6 @@ export function TurnAuthorHeader(props: { backend?: AgentBackend; acpToolId?: st
 			{/* 时间/耗时数字统一走界面字体（与输入框下方统计条一致），不跟代码/路径一起用等宽字体；
 			    数字本身等宽，流式跳动也不会左右抖（Segoe UI 等基数字体实测通过）。 */}
 			<time className="shrink-0 text-body leading-none text-muted-foreground tabular-nums">{formatTime(props.endedAt)}</time>
-			{props.model && (
-				// 模型名长短不一（如 Kwai-Kolors/Kolors），限宽截断 + title 给全量 provider/model，
-				// 不让长名字把行头撑开或换行。
-				<span className="min-w-0 truncate text-body leading-none text-muted-foreground/80" title={`${props.model.provider}/${props.model.modelId}`} data-turn-model={props.model.modelId}>
-					{props.model.modelId}
-				</span>
-			)}
 		</div>
 	);
 }

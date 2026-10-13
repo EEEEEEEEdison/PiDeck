@@ -272,6 +272,7 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	// 本轮回答用的模型（逐轮展示）：取本轮最后一条带模型信息的 assistant 消息。
 	// 同一会话内用户会频繁换模型，只有逐轮记录才能看出哪段是谁答的；
 	// 旧数据/ACP 会话没有该字段时留空，行头不占位。
+	// 本轮模型名：取最后一条带 model 的 assistant 消息（同轮内一般同源），显示在底部耗时行。
 	let turnModel: ChatMessage["model"];
 	for (let index = assistantMessages.length - 1; index >= 0 && !turnModel; index -= 1) {
 		turnModel = assistantMessages[index]?.message.model;
@@ -300,9 +301,9 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	return (
 		<article ref={rowRef} className={`turn-row mb-6 w-full min-w-0 max-w-full ${props.agentRunning && !isComplete ? "turn-row--running" : isComplete ? "turn-row--complete" : "turn-row--pending"} ${props.fresh ? "turn-row--fresh" : ""} ${props.topFresh ? "turn-row--top-fresh" : ""}`} data-message-id={run.id}>
 			<div className="flex min-w-0 flex-col gap-3">
-				{/* 行头：头像 + Pi/DSH 署名 + 时间。耗时不放行头——回复生成时用户视线在底部，
-				    统一显示在 turn 尾部（见底部耗时行），不用翻回开头看跑了多久。 */}
-				<TurnAuthorHeader backend={props.backend} acpToolId={props.acpToolId} endedAt={run.endedAt} model={turnModel} />
+				{/* 行头：头像 + Pi/DSH 署名 + 时间。耗时与本轮模型名都不放行头——回复生成时用户视线在底部，
+				    统一显示在 turn 尾部（见底部耗时行），不用翻回开头看跑了多久、用的是哪个模型。 */}
+				<TurnAuthorHeader backend={props.backend} acpToolId={props.acpToolId} endedAt={run.endedAt} />
 
 				{/* 执行过程折叠栏：中间内容（思考/工具/中间回答）统一收进容器，
 				    由 stepsVisible 整体控制显隐；最终回答在容器外常驻。
@@ -437,14 +438,15 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 					</div>
 				))}
 
-				{/* 操作栏 + 尾部耗时：合并为同一行，耗时排在行末（少占一行高度）。
+				{/* 操作栏 + 尾部耗时/模型：合并为同一行，耗时与模型排在行末（少占一行高度）。
 				    耗时：回复生成中由 LiveDuration 实时计时（100ms 连续跳动，用户视线在底部），
 				    回复结束后固定为总耗时。全轮只有一个耗时显示点（行头只留时间戳），
 				    避免开头结尾重复；无最终回答的轮（纯工具/思考）只有耗时、无按钮，同样可见。
-				    透明度：半透明降噪（hover/focus-within 恢复）必须盖住整行——按钮图标与行末耗时同一层，
+				    本轮模型名跟在耗时之后（同一行同一层）：回看历史轮用的是哪个模型时视线不用翻回行头。
+				    透明度：半透明降噪（hover/focus-within 恢复）必须盖住整行——按钮图标与行末耗时/模型同一层，
 				    否则出现「图标偏淡、数字偏深」的割裂观感；无按钮时不降噪（没有需要弱化的交互件）。
 				    ask_question 等待回答期间不增长：冻结在提问弹起时刻，等待不计入处理耗时。 */}
-				{((mergedText && !editing) || showDuration) && (
+				{((mergedText && !editing) || showDuration || turnModel) && (
 					<div className={`flex min-h-6 items-center gap-1${mergedText && !editing ? " opacity-55 transition-opacity hover:opacity-100 focus-within:opacity-100" : ""}`}>
 						{mergedText && !editing && (
 							<>
@@ -477,6 +479,17 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 								{/* 耗时数字与行头时间一致用界面字体（见 TurnAuthorHeader 注释）；tabular-nums 保持跳动不抖 */}
 								<span className="text-body leading-none tabular-nums">{isRunLive && run.askPending ? formatDuration(Math.max(0, (run.askPendingAt ?? effectiveStart) - effectiveStart)) : isRunLive ? <LiveDuration startedAt={effectiveStart} isStreaming /> : formatDuration(duration)}</span>
 							</div>
+						)}
+						{turnModel && (
+							/* 本轮实际使用的模型（provider + modelId）跟在耗时后面：同一会话内用户会频繁换模型，
+							   只在输入框显示当前模型不足以回看历史轮。
+							   做成小标签而不是同号纯文本：左边耗时是读数（text-body + 等宽数字），
+							   模型名是名字，同色同号时两段会连成一句「2m18s global:xxx」读不断。
+							   模型名长短不一（如 global:deepseek-v4.1-flash），限宽截断 + title 给全量 provider/model，
+							   不让长名字把行末撑开或换行。 */
+							<span className="ml-1 min-w-0 max-w-[16rem] truncate rounded-sm bg-muted/60 px-1.5 py-0.5 text-caption font-medium leading-none text-muted-foreground" title={`${turnModel.provider}/${turnModel.modelId}`} data-turn-model={turnModel.modelId}>
+								{turnModel.modelId}
+							</span>
 						)}
 					</div>
 				)}
