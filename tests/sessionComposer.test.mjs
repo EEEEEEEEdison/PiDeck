@@ -510,8 +510,9 @@ test("selected Session reference messages zip original indices with compressed m
 test("DSH busy send defaults to followUp; menu insert is explicit steer", () => {
 	const controller = readFileSync("src/renderer/src/hooks/useSessionComposerController.ts", "utf8");
 	const promptDispatch = readFileSync("src/renderer/src/hooks/session/useSessionPromptDispatch.ts", "utf8");
-	// Enter / 主发送按钮：忙碌投递走统一策略（设置项 busySendDelivery）。
-	assert.match(controller, /resolveBusySendDelivery\(isBusy, store\.get\(busySendDeliveryAtom\)\)/);
+	// Enter / 主发送按钮：忙碌投递走统一策略（设置项 busySendDelivery；ACP 额外传后端提示）。
+	// 第三参为可选后端参数，正则不要求紧跟收尾括号（a87fe0d75 加参后此断言曾误报绿红）。
+	assert.match(controller, /resolveBusySendDelivery\(\s*isBusy,\s*store\.get\(busySendDeliveryAtom\)/);
 	// 非队列入口（submitPromptSnapshot）同样走统一策略，不按后端分叉。
 	assert.match(promptDispatch, /resolveBusySendDelivery\(/);
 });
