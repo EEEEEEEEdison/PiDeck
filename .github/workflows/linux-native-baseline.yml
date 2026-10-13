@@ -80,23 +80,28 @@ jobs:
           NODE_OPTIONS: "--max-old-space-size=4096"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 证据四：打进安装包的 pty.node 就是重建后的产物，且能在 glibc 2.28 上加载
-      - name: Extract packaged deb
+      # 证据四：跟 release.yml 同一条命令——打进安装包的 pty.node 必须落在基线内
+      - name: Extract packaged deb and locate app.asar.unpacked
         run: |
-          mkdir -p /tmp/pideck-deb
-          dpkg-deb -x release/*.deb /tmp/pideck-deb
-          ls -l /tmp/pideck-deb/opt/PiDeck/resources/app.asar.unpacked/node_modules/node-pty/build/Release/pty.node
+          set -euo pipefail
+          extract="$RUNNER_TEMP/pideck-deb"
+          rm -rf "$extract"
+          mkdir -p "$extract"
+          dpkg-deb -x release/*.deb "$extract"
+          unpacked="$(find "$extract" -maxdepth 4 -type d -name app.asar.unpacked | head -n 1)"
+          if [ -z "$unpacked" ]; then
+            echo "找不到 app.asar.unpacked"
+            exit 1
+          fi
+          ls -l "$unpacked/node_modules/node-pty/build/Release/pty.node"
+          echo "PIDECK_UNPACKED=$unpacked" >> "$GITHUB_ENV"
 
-      - name: Verify packaged pty.node baseline
-        run: node scripts/linux-native-baseline.js verify /tmp/pideck-deb/opt/PiDeck/resources/app.asar.unpacked/node_modules/node-pty/build/Release/pty.node
+      - name: Verify packaged native modules against the glibc 2.28 baseline
+        run: node scripts/linux-native-baseline.js scan --root "$PIDECK_UNPACKED" --fail
 
       - name: Smoke test packaged pty.node on Debian 10 (glibc 2.28)
-        run: |
-          docker run --rm -v /tmp/pideck-deb:/pkg -v "$PWD:/repo" -w /pkg node:18-buster-slim \
-            node /repo/scripts/linux-native-baseline.js smoke --module-dir /pkg/opt/PiDeck/resources/app.asar.unpacked/node_modules/node-pty
-
-      - name: Report packaged native modules
-        run: node scripts/linux-native-baseline.js scan --root /tmp/pideck-deb/opt/PiDeck/resources/app.asar.unpacked
+        run: docker run --rm -v "$PIDECK_UNPACKED:/pkg" -v "$PWD:/repo" -w /pkg node:18-buster-slim \
+          node /repo/scripts/linux-native-baseline.js smoke --module-dir /pkg/node_modules/node-pty
 
       - name: Upload rebuilt artifacts
         uses: actions/upload-artifact@v4

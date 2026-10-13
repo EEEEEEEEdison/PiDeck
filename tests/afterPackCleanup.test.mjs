@@ -326,3 +326,50 @@ test("afterPack cleanup drops unused Electron shader DLLs but keeps ffmpeg/vulka
 		await rm(appOutDir, { recursive: true, force: true });
 	}
 });
+
+/**
+ * #257 的实际根因不是「打包漏了原生模块」，而是 runner（ubuntu-24.04 系，glibc 2.39）现编的
+ * pty.node 需要 GLIBC_2.34，国产发行版（glibc 2.28）上无法 dlopen。打包门禁因此除了
+ * 「产物在包里」还要核对符号基线。
+ */
+const { assertLinuxNativeBaseline } = require("../scripts/after-pack-node-pty.js");
+
+function fakeAddon(overrides) {
+	return { file: "/pkg/node-pty/build/Release/pty.node", format: "elf64-x86-64", arch: "x64", glibc: [], glibcxx: [], ...overrides };
+}
+
+test("afterPack baseline gate rejects a Linux pty.node built on a newer glibc", () => {
+	const describe = () => fakeAddon({ glibc: ["2.2.5", "2.28", "2.32", "2.34"], glibcxx: ["3.4.22"] });
+	assert.throws(() => assertLinuxNativeBaseline("/pkg/pty.node", { describeAddon: describe }), /超出 glibc 2\.28 基线：GLIBC_2\.32 GLIBC_2\.34/);
+});
+
+test("afterPack baseline gate accepts a pty.node rebuilt on the glibc 2.28 baseline", () => {
+	const describe = () => fakeAddon({ glibc: ["2.2.5", "2.28"], glibcxx: ["3.4.22"] });
+	const verdict = assertLinuxNativeBaseline("/pkg/pty.node", { describeAddon: describe });
+	assert.equal(verdict.ok, true);
+});
+
+test("afterPack baseline gate rejects a pty.node requiring a newer libstdc++", () => {
+	const describe = () => fakeAddon({ glibc: ["2.28"], glibcxx: ["3.4.25", "3.4.29"] });
+	assert.throws(() => assertLinuxNativeBaseline("/pkg/pty.node", { describeAddon: describe }), /GLIBCXX_3\.4\.29/);
+});
+
+test("afterPack baseline gate degrades when objdump is unavailable but not when the artifact is unreadable", () => {
+	const missingObjdump = () => {
+		throw new Error("无法执行 objdump: spawnSync objdump ENOENT");
+	};
+	assert.equal(assertLinuxNativeBaseline("/pkg/pty.node", { describeAddon: missingObjdump }), null, "本地缺 binutils 不该阻断打包");
+
+	const nonElf = () => fakeAddon({ skipped: true, format: "pe", arch: "非 ELF" });
+	assert.equal(assertLinuxNativeBaseline("/pkg/pty.node", { describeAddon: nonElf }), null);
+
+	const broken = () => {
+		throw new Error("objdump -T 失败（1）: bad object");
+	};
+	assert.throws(() => assertLinuxNativeBaseline("/pkg/pty.node", { describeAddon: broken }), /objdump -T 失败/, "其它解析失败必须 fail-closed");
+});
+
+test("afterPack cleanup wires the glibc baseline gate for Linux targets only", () => {
+	const source = readFileSync(join(import.meta.dirname, "..", "scripts", "after-pack-cleanup.js"), "utf8");
+	assert.match(source, /CURRENT_PLATFORM\s*\.startsWith\("linux"\)\s*\)\s*assertLinuxNativeBaseline\(/, "打包 Linux 目标时必须核对原生模块 glibc 基线");
+});

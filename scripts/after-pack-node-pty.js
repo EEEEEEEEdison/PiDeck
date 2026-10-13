@@ -10,6 +10,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const asar = require("@electron/asar");
 const { dirSize, rmDir } = require("./after-pack-file-utils");
+const { describeAddon, evaluateBaseline, formatAddonLine } = require("./linux-native-baseline");
 
 const NODE_PTY_RELATIVE_ROOT = "node_modules/node-pty";
 const NODE_PTY_PRUNABLE_DIRECTORIES = ["src", "third_party", "deps", "scripts"];
@@ -102,7 +103,47 @@ function assertNodePtyRuntimeArtifact(asarPath, targetPlatform) {
 	throw new Error(`[afterPack] node-pty runtime artifact missing for ${targetPlatform}: ${details}`);
 }
 
+/**
+ * Linux 额外核对 glibc/GLIBCXX 符号基线（#257 用户反馈的实际根因）。
+ *
+ * ubuntu-24.04(-arm) 自带 glibc 2.39，npm ci 现编的 pty.node 会把 openpty/forkpty 绑到
+ * GLIBC_2.34（2.34 起这两个符号从 libutil.so.1 并入 libc.so.6），而统信 UOS 20 /
+ * 麒麟 V10 仍是 glibc 2.28：dlopen 失败后 node-pty 的 loader 会把真实错误掩盖成
+ * "Cannot find module './prebuilds/linux-arm64//pty.node'"，看起来像打包漏了原生模块。
+ * 基线内产物由 release.yml 的 Debian 10 容器重建步骤产出；这里 fail-closed，防止重建被
+ * 跳过或 runner 工具链升级后静默回退。
+ *
+ * objdump 不存在时只告警不拦：权威门禁是 CI 里对打包产物的 `scan --fail`，本地缺 binutils
+ * 不该阻断打包。
+ *
+ * @param {string} filePath 已确认存在的 app.asar.unpacked 内原生模块路径
+ * @param {{describeAddon?: typeof describeAddon}} [options] 测试注入点
+ */
+function assertLinuxNativeBaseline(filePath, options = {}) {
+	const read = options.describeAddon ?? describeAddon;
+	let addon;
+	try {
+		addon = read(filePath);
+	} catch (error) {
+		const message = error?.message ?? String(error);
+		if (!/无法执行 objdump/.test(message)) throw error;
+		console.warn(`[afterPack] 跳过 glibc 基线核对：${message}`);
+		return null;
+	}
+	if (addon.skipped) {
+		console.warn(`[afterPack] 跳过 glibc 基线核对：${filePath} 不是 ELF 产物`);
+		return null;
+	}
+	const verdict = evaluateBaseline(addon);
+	console.log(`[afterPack] ${formatAddonLine(addon, verdict)}`);
+	if (!verdict.ok) {
+		throw new Error(`[afterPack] node-pty 产物超出 glibc ${verdict.glibcCeiling} 基线：${verdict.offenders.join(" ")}（${filePath}）；需在基线容器内重建，见 scripts/linux-native-baseline.js`);
+	}
+	return verdict;
+}
+
 module.exports = {
+	assertLinuxNativeBaseline,
 	assertNodePtyRuntimeArtifact,
 	cleanNodePtyCompileTimeDirectories,
 };
