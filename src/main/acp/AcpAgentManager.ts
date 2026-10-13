@@ -26,6 +26,19 @@ import { acpPromptBlocks, appendAcpUserPrompt, initialAcpProjection, projectAcpS
 /** ACP 协议握手版本(v1)。 */
 const ACP_PROTOCOL_VERSION = 1;
 
+/**
+ * AUTH_REQUIRED(-32000)的统一出口：kimi/codex adapter 实测用该惯例码表示未登录。
+ * 挂上 i18nKey/i18nParams/debugDetails——sendPrompt 的返回结果与 create 的 thrown
+ * error（经 coordinator descriptorFromThrownError 透传）共用同一描述符结构，
+ * 渲染层据此弹本地化登录引导（原文留在 debugDetails）。
+ */
+function authRequiredDescriptor(error: unknown, tool: AcpToolConfig): { i18nKey: string; i18nParams: { tool: string }; debugDetails: string } | undefined {
+	if (error instanceof AcpRpcError && error.code === ACP_ERROR_CODE.authRequired) {
+		return { i18nKey: "acp.authRequired", i18nParams: { tool: tool.name }, debugDetails: error.message };
+	}
+	return undefined;
+}
+
 /** initialize/session 握手超时:CLI 冷启动(npm 包)可能要十几秒。 */
 const HANDSHAKE_TIMEOUT_MS = 60_000;
 /** session/prompt 回合兑底超时。测试用 deps.promptTurnTimeoutMs 注入缩短。 */
@@ -268,7 +281,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 			conn,
 			projection: initialAcpProjection(),
 			updateChain: Promise.resolve(),
-			agentInfo: { capabilities: { loadSession: false, agentThought: false, sessionList: false }, protocolVersion: ACP_PROTOCOL_VERSION },
+			agentInfo: { capabilities: { loadSession: false, agentThought: false, sessionList: false, promptImage: false }, protocolVersion: ACP_PROTOCOL_VERSION },
 			status: "starting",
 			turnActive: false,
 			permissions: new AcpPermissionRequests(conn, (event) => this.emit(ipcChannels.agentsUiRequest, { agentId, ...event }), this.deps.permissionTimeoutMs),
@@ -286,7 +299,10 @@ export class AcpAgentManager implements SessionAgentGateway {
 			this.runtimes.delete(agentId);
 			this.killProcess(runtime);
 			this.emit(ipcChannels.agentsState, this.list());
-			throw error instanceof Error ? error : new Error(String(error));
+			const thrown = error instanceof Error ? error : new Error(String(error));
+			// AUTH_REQUIRED：附 I18nDescriptor 再抛，coordinator 透传为本地化登录引导 toast。
+			Object.assign(thrown, authRequiredDescriptor(thrown, tool) ?? {});
+			throw thrown;
 		}
 
 		this.wireConnection(runtime);
@@ -346,6 +362,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 				loadSession: agentCaps.loadSession === true,
 				agentThought: agentCaps.promptCapabilities?.agentThought === true,
 				sessionList: typeof agentCaps.sessionCapabilities?.list === "object" && agentCaps.sessionCapabilities.list !== null,
+				promptImage: agentCaps.promptCapabilities?.image === true,
 			},
 			protocolVersion: ACP_PROTOCOL_VERSION,
 		};
@@ -448,8 +465,8 @@ export class AcpAgentManager implements SessionAgentGateway {
 			runtime.title = runtime.projection.title ?? runtime.title;
 			return;
 		}
-		// plan/todos 变更不走 messages 通道，主动 emit 才能让待办列表即时刷新。
-		if (runtime.projection.todos) this.emitRuntimeState(runtime.tab.id);
+		// plan/todos 与 usage 变更不走 messages 通道，主动 emit 才能让待办列表/上下文仪表即时刷新。
+		if (runtime.projection.todos || update.sessionUpdate === "usage_update") this.emitRuntimeState(runtime.tab.id);
 		this.applyProjectionTitle(runtime);
 		this.scheduleFlush(runtime);
 	}
@@ -500,13 +517,18 @@ export class AcpAgentManager implements SessionAgentGateway {
 	async sendPrompt(input: SendPromptInput): Promise<SendPromptResult> {
 		const runtime = this.requireRuntime(input.agentId);
 		if (!runtime.conn || runtime.conn.isClosed()) {
-			return { accepted: false, error: "ACP agent process is not running", delivery: "rejected" };
+			return { accepted: false, error: "ACP agent process is not running", delivery: "rejected", i18nKey: "acp.processNotRunning", i18nParams: { tool: runtime.tool.name } };
 		}
 		if (input.agentMessage) {
-			return { accepted: false, error: "Host instructions are not supported by ACP backend", delivery: "rejected" };
+			return { accepted: false, error: "Host instructions are not supported by ACP backend", delivery: "rejected", i18nKey: "acp.hostInstructionsUnsupported", i18nParams: { tool: runtime.tool.name } };
+		}
+		// 图片按能力门控：agent 未声明 promptCapabilities.image 时发 image 块只会换来整回合
+		// 协议错误（raw JSON-RPC 文本对用户无意义）；拒收并回填草稿，用本地化文案说明。
+		if (input.images?.length && !runtime.agentInfo.capabilities.promptImage) {
+			return { accepted: false, error: `ACP agent ${runtime.tool.name} does not accept image input`, delivery: "rejected", i18nKey: "acp.imagesNotSupported", i18nParams: { tool: runtime.tool.name } };
 		}
 		if (runtime.turnActive) {
-			return { accepted: false, error: "ACP agent is still responding; stop or wait for the current turn", delivery: "rejected" };
+			return { accepted: false, error: "ACP agent is still responding; stop or wait for the current turn", delivery: "rejected", i18nKey: "acp.turnBusy", i18nParams: { tool: runtime.tool.name } };
 		}
 		const prompt = acpPromptBlocks(input.message, input.images);
 		// 用户消息先落投影:ACP 规范不保证 agent 回显 user_message_chunk(OpenCode 等根本不发),
@@ -572,7 +594,9 @@ export class AcpAgentManager implements SessionAgentGateway {
 			this.emitRuntimeState(input.agentId);
 			const message = error instanceof Error ? error.message : String(error);
 			const hasOutput = runtime.projection.messages.slice(seededIndex + 1).some((entry) => entry.role === "assistant" || entry.role === "tool");
-			return { accepted: false, error: message, delivery: hasOutput || error instanceof AcpTimeoutError ? "unknown" : "rejected" };
+			// AUTH_REQUIRED（凭据过期等回合期失败）：描述符随拒收结果透出登录引导。
+			const descriptor = authRequiredDescriptor(error, runtime.tool);
+			return { accepted: false, error: message, delivery: hasOutput || error instanceof AcpTimeoutError ? "unknown" : "rejected", ...(descriptor ?? {}) };
 		}
 		runtime.turnActive = false;
 		runtime.permissions.cancelAll();
@@ -671,6 +695,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 	}
 
 	private buildRuntimeState(runtime: AcpAgentRuntime): AgentRuntimeState {
+		const usage = runtime.projection.usage;
 		return {
 			isStreaming: runtime.turnActive,
 			isTurnActive: runtime.turnActive,
@@ -679,6 +704,11 @@ export class AcpAgentManager implements SessionAgentGateway {
 			provider: "acp",
 			modelId: runtime.tool.id,
 			todos: runtime.projection.todos,
+			// usage_update（opencode/kimi 等非标准但广泛流传的会话用量通知）→ 上下文仪表数据源。
+			...(usage?.used !== undefined ? { contextTokens: usage.used } : {}),
+			...(usage?.size !== undefined ? { contextWindow: usage.size } : {}),
+			...(usage?.used !== undefined && usage?.size !== undefined ? { contextPercent: Math.max(0, Math.min(100, Math.round((usage.used / usage.size) * 1000) / 10)) } : {}),
+			...(usage?.costAmount !== undefined ? { cost: usage.costAmount } : {}),
 		};
 	}
 

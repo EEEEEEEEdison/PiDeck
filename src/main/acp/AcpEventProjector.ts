@@ -38,6 +38,8 @@ export type AcpProjectionState = {
 	commands: PiCommand[];
 	/** 最近一次 session_info_update 的标题(供 catalog 回写)。 */
 	title?: string;
+	/** 非标准但广泛流传(opencode/kimi)的 usage_update 投影:上下文用量 + 费用,manager 映射进 runtime.state 上下文仪表。 */
+	usage?: AcpSessionUsage;
 	/**
 	 * 本地 prompt 回显待去重队列（文本 + agent 已回显的字符数）。
 	 * 见 appendAcpUserPrompt：agent 回显 user_message_chunk 时按前缀消费，
@@ -71,6 +73,37 @@ let messageCounter = 0;
 function nextMessageId(): string {
 	messageCounter += 1;
 	return `acp-${Date.now().toString(36)}-${messageCounter.toString(36)}`;
+}
+
+/** usage_update 的宽容读取：字段位形在实现间不完全一致（顶层 or usage 子对象）。 */
+export type AcpSessionUsage = {
+	used?: number;
+	size?: number;
+	costAmount?: number;
+	costCurrency?: string;
+};
+
+function parseUsageUpdate(update: Record<string, unknown>): AcpSessionUsage | undefined {
+	const nested = typeof update.usage === "object" && update.usage !== null ? (update.usage as Record<string, unknown>) : undefined;
+	const pick = (key: string): unknown => update[key] ?? nested?.[key];
+	const used = pick("used");
+	const size = pick("size");
+	const costRaw = pick("cost");
+	let costAmount: number | undefined;
+	let costCurrency: string | undefined;
+	if (typeof costRaw === "object" && costRaw !== null) {
+		const cost = costRaw as Record<string, unknown>;
+		if (typeof cost.amount === "number" && Number.isFinite(cost.amount)) costAmount = cost.amount;
+		if (typeof cost.currency === "string" && cost.currency) costCurrency = cost.currency;
+	} else if (typeof costRaw === "number" && Number.isFinite(costRaw)) {
+		costAmount = costRaw;
+	}
+	const usage: AcpSessionUsage = {};
+	if (typeof used === "number" && Number.isFinite(used)) usage.used = used;
+	if (typeof size === "number" && Number.isFinite(size) && size > 0) usage.size = size;
+	if (costAmount !== undefined) usage.costAmount = costAmount;
+	if (costCurrency) usage.costCurrency = costCurrency;
+	return usage.used !== undefined || usage.size !== undefined || usage.costAmount !== undefined ? usage : undefined;
 }
 
 /** 工具正文解包标准 content；旧 CLI 的直接文本块也可读，不改变出站协议。 */
@@ -245,12 +278,20 @@ export function projectAcpSessionUpdate(state: AcpProjectionState, update: AcpSe
 			return next;
 		}
 		case "available_commands_update": {
-			const commandsUpdate = update as { commands?: Array<{ name?: unknown; description?: unknown }> };
-			next.commands = (Array.isArray(commandsUpdate.commands) ? commandsUpdate.commands : []).map((command) => ({
+			// 键名宽容读取:规范 SDK 是 commands,opencode 等实现实际发 availableCommands
+			//(2027-02 live smoke 实测;只读兼容不改出站协议);两者都缺则清空。
+			const commandsUpdate = update as { commands?: Array<{ name?: unknown; description?: unknown }>; availableCommands?: Array<{ name?: unknown; description?: unknown }> };
+			const raw = Array.isArray(commandsUpdate.commands) ? commandsUpdate.commands : Array.isArray(commandsUpdate.availableCommands) ? commandsUpdate.availableCommands : [];
+			next.commands = raw.map((command) => ({
 				name: typeof command?.name === "string" ? command.name : "",
 				...(typeof command?.description === "string" && command.description ? { description: command.description } : {}),
 				source: "acp",
 			}));
+			return next;
+		}
+		case "usage_update": {
+			const parsed = parseUsageUpdate(update as unknown as Record<string, unknown>);
+			if (parsed) next.usage = parsed;
 			return next;
 		}
 		case "session_info_update": {

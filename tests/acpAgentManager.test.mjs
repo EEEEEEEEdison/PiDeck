@@ -357,11 +357,107 @@ test("turnActive 期间重复 sendPrompt 被拒绝(agentMessage 同样不支持)
 	const second = await manager.sendPrompt({ agentId: tab.id, message: "b" });
 	assert.equal(second.accepted, false);
 	assert.match(second.error, /still responding/);
+	// 拒收携带本地化描述符：渲染层 translateI18nDescriptor 据此弹本地化 toast 而非英文原文。
+	assert.equal(second.i18nKey, "acp.turnBusy");
+	assert.equal(second.i18nParams?.tool, TOOL.name);
 	const withInstructions = await manager.sendPrompt({ agentId: tab.id, message: "c", agentMessage: "host rules" });
 	assert.equal(withInstructions.accepted, false);
 	assert.match(withInstructions.error, /Host instructions/);
+	assert.equal(withInstructions.i18nKey, "acp.hostInstructionsUnsupported");
 	void first;
 	await manager.stop(tab.id);
+});
+
+test("图片能力门控:agent 未声明 promptCapabilities.image 时带图发送被拒收并本地化;声明后放行且图块进发件帧", async (t) => {
+	let lastPrompt;
+	const mk = (capabilities) =>
+		harness(t, {
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: capabilities };
+				if (frame.method === "session/new") return { sessionId: "sess-img-cap" };
+				if (frame.method === "session/prompt") {
+					lastPrompt = frame.params;
+					return { stopReason: "end_turn" };
+				}
+				return {};
+			},
+		});
+	const images = [{ type: "image", mimeType: "image/png", data: "aW1n" }];
+	// 未声明图片能力:拒收(turn 未启,草稿回填由渲染层完成)
+	const denied = mk({ loadSession: false });
+	const deniedTab = await denied.createAgent();
+	const deniedResult = await denied.manager.sendPrompt({ agentId: deniedTab.id, message: "带图", images });
+	assert.equal(deniedResult.accepted, false);
+	assert.equal(deniedResult.delivery, "rejected");
+	assert.equal(deniedResult.i18nKey, "acp.imagesNotSupported");
+	assert.equal(deniedResult.i18nParams?.tool, TOOL.name);
+	assert.equal(lastPrompt, undefined, "拒收不得发出 session/prompt 帧");
+	// 声明图片能力:放行,prompt 帧携带 image 块(规范 content 顺序:文本后图)
+	const allowed = mk({ promptCapabilities: { image: true } });
+	const allowedTab = await allowed.createAgent();
+	const allowedResult = await allowed.manager.sendPrompt({ agentId: allowedTab.id, message: "带图", images });
+	assert.equal(allowedResult.accepted, true);
+	assert.deepEqual(lastPrompt.prompt, [
+		{ type: "text", text: "带图" },
+		{ type: "image", data: "aW1n", mimeType: "image/png" },
+	]);
+});
+
+test("AUTH_REQUIRED(回合期):-32000 拒收携带登录引导描述符(debugDetails 保留 RPC 原文)", async (t) => {
+	const { manager, createAgent } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-auth" };
+			if (frame.method === "session/prompt") return { __error: true, code: -32000, message: "Authentication required" };
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	const result = await manager.sendPrompt({ agentId: tab.id, message: "hi" });
+	assert.equal(result.accepted, false);
+	assert.equal(result.delivery, "rejected");
+	assert.equal(result.i18nKey, "acp.authRequired");
+	assert.equal(result.i18nParams?.tool, TOOL.name);
+	assert.equal(result.debugDetails, "ACP RPC error -32000: Authentication required", "RPC 原文必须留在 debugDetails 供排查");
+});
+
+test("usage_update 通知映射进 runtime.state 上下文仪表(used/size→contextTokens/Window/Percent,cost→cost)", async (t) => {
+	const { manager, createAgent, lastProc } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-usage" };
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	lastProc().writeFromCli({
+		jsonrpc: "2.0",
+		method: "session/update",
+		params: { sessionId: "sess-usage", update: { sessionUpdate: "usage_update", used: 25528, size: 1_000_000, cost: { amount: 0.42, currency: "USD" } } },
+	});
+	await waitFor(async () => (await manager.getRuntimeState(tab.id)).contextTokens === 25528, "usage 投影进 runtime.state");
+	const state = await manager.getRuntimeState(tab.id);
+	assert.equal(state.contextTokens, 25528);
+	assert.equal(state.contextWindow, 1_000_000);
+	assert.equal(state.contextPercent, 2.6);
+	assert.equal(state.cost, 0.42);
+	assert.equal(state.provider, "acp");
+});
+
+test("AUTH_REQUIRED(首启):session/new 返回 -32000 时 create 抛出带描述符的错误(coordinator 透传为登录引导 toast)", async (t) => {
+	const { createAgent, manager } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { __error: true, code: -32000, message: "Authentication required" };
+			return {};
+		},
+	});
+	const failure = await createAgent().catch((error) => error);
+	assert.ok(failure instanceof Error);
+	assert.match(failure.message, /Authentication required/);
+	assert.equal(failure.i18nKey, "acp.authRequired");
+	assert.equal(failure.i18nParams?.tool, TOOL.name);
+	assert.equal(manager.list().length, 0, "首启失败不留进程垃圾");
 });
 
 test("permission 审批:select label 映射 optionId 回传;cancel 走 cancelled 结局", async (t) => {

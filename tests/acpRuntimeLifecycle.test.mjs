@@ -11,6 +11,12 @@ function basicHandler(frame) {
 	return undefined;
 }
 
+/** 物化用例需要 agent 声明图片能力（sendPrompt 的图片块按 promptCapabilities.image 门控）。 */
+function imageCapableHandler(frame) {
+	if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { promptCapabilities: { image: true } } };
+	return basicHandler(frame);
+}
+
 function imageGate() {
 	let release;
 	let started = false;
@@ -31,7 +37,7 @@ function imageGate() {
 
 test("abort during local image materialization does not dispatch a new prompt after cancel", async (t) => {
 	const gate = imageGate();
-	const { manager, createAgent, lastProc } = harness(t, { handler: basicHandler }, { imageStore: gate.imageStore, promptTurnTimeoutMs: 40 });
+	const { manager, createAgent, lastProc } = harness(t, { handler: imageCapableHandler }, { imageStore: gate.imageStore, promptTurnTimeoutMs: 40 });
 	const tab = await createAgent();
 	const sending = manager.sendPrompt({ agentId: tab.id, message: "Question", images: [{ type: "image", data: "picture", mimeType: "image/png" }] });
 	await waitFor(gate.started, "image materialization");
@@ -60,7 +66,7 @@ test("prompt rejection cancels every pending permission without waiting for its 
 
 test("stopping a runtime while materialization is pending suppresses late timeline flushes", async (t) => {
 	const gate = imageGate();
-	const { manager, createAgent, events, lastProc } = harness(t, { handler: basicHandler }, { imageStore: gate.imageStore });
+	const { manager, createAgent, events, lastProc } = harness(t, { handler: imageCapableHandler }, { imageStore: gate.imageStore });
 	const tab = await createAgent();
 	const sending = manager.sendPrompt({ agentId: tab.id, message: "Question", images: [{ type: "image", data: "picture", mimeType: "image/png" }] });
 	await waitFor(gate.started, "image materialization");

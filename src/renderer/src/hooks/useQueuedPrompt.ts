@@ -301,6 +301,9 @@ export function useQueuedPrompt(options: UseQueuedPromptOptions) {
 	async function flushQueuedSteerPrompts(sessionId: string) {
 		if (suppressedRef.current.has(sessionId)) return; // 用户正在停止该回合：不得再插队
 		if (!isSessionRuntimeBusy(sessionId)) return;
+		// ACP 协议无 steer 通道：忙碌时派发只会被 AcpAgentManager 拒收成失败队列项；
+		// steer 项保留给空闲 drain（claimIdleHead 按序发，空闲时 steer 语义≈直发）。
+		if (store.get(sessionRecordsAtom)[sessionId]?.backend === "acp") return;
 		const flush = beginFlush(sessionId);
 		if (!flush) return;
 		try {

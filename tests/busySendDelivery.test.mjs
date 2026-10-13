@@ -37,6 +37,19 @@ describe("resolveBusySendDelivery", () => {
 	test("忙碌且未配置时回落 steer（与出厂默认一致）", () => {
 		assert.equal(resolveBusySendDelivery(true, undefined), "steer");
 	});
+	test("ACP 后端忙碌恒 followUp：协议无 steer 通道，设置项对它失效", () => {
+		assert.equal(resolveBusySendDelivery(true, "steer", "acp"), "followUp");
+		assert.equal(resolveBusySendDelivery(true, "followUp", "acp"), "followUp");
+		assert.equal(resolveBusySendDelivery(true, undefined, "acp"), "followUp");
+	});
+	test("ACP 后端空闲仍直发（无需队列语义）", () => {
+		assert.equal(resolveBusySendDelivery(false, "steer", "acp"), undefined);
+	});
+	test("其他后端不受影响：缺省 backend 按设置照常解析", () => {
+		assert.equal(resolveBusySendDelivery(true, "steer", "pi"), "steer");
+		assert.equal(resolveBusySendDelivery(true, "followUp", "dsh"), "followUp");
+		assert.equal(resolveBusySendDelivery(true, "steer"), "steer");
+	});
 });
 
 /**

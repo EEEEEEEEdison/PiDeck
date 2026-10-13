@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 5537e8c567a357c7db6b3b1647d7eb368f80dab9a81ba8aa4cb69a191bd4623d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 342b559ef3de9e10392f678295a935b49c460b928a6265b04f86817c630467fc（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -207,6 +207,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.newAnonymousSession": "匿名會話",
 	"app.newAcpSession": "ACP 工具會話",
 	"app.acpNoTools": "尚未登記 ACP 工具，去設定新增",
+	"acp.processNotRunning": "{tool} 程序未在執行，請重試",
+	"acp.hostInstructionsUnsupported": "ACP 後端不支援內部指令",
+	"acp.turnBusy": "{tool} 正在回覆中，請等待本輪結束或先停止當前回覆",
+	"acp.imagesNotSupported": "{tool} 不支援圖片輸入，請移除圖片後重試",
+	"acp.authRequired": "「{tool}」未登入或憑據失效：請先在終端執行該 CLI 完成登入，再回到這裡重試",
 	"acp.toolNameRequired": "名稱必填",
 	"acp.toolCommandRequired": "命令必填",
 	"acp.toolDuplicateName": "名稱與現有工具重複",
@@ -936,6 +941,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.sendSteerDesc": "steer · 下一次 LLM 呼叫前生效",
 	"app.sendSteerTitle": "加入當前回合",
 	"app.queuedSteerUnavailable": "僅執行中可插入當前回合",
+	"app.queuedSteerBackendUnsupported": "該會話的 agent 不支援插入當前回合（ACP 協議無 steer 通道）",
 	"app.queuedBehaviorLocked": "傳送中或結果未知時不能改投遞方式",
 	"app.queuedBehaviorSteerShort": "插入",
 	"app.queuedBehaviorFollowUpShort": "排隊",
@@ -5024,7 +5030,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.tpsDisplayModeStreaming": "流式 TPS",
 	"settings.tpsDisplayModeEndToEnd": "端到端 TPS",
 	"settings.busySendDelivery": "忙碌時傳送",
-	"settings.busySendDeliveryDesc": "Agent 正在回覆時傳送訊息的預設投遞方式；輸入框上方的佇列面板仍可對每條訊息單獨切換。",
+	"settings.busySendDeliveryDesc": "Agent 正在回覆時傳送訊息的預設投遞方式；輸入框上方的佇列面板仍可對每條訊息單獨切換。ACP 工具會話無 steer 協議通道，恆按排隊傳送。",
 	"settings.busySendDeliverySteer": "插入當前回合（立即送達）",
 	"settings.busySendDeliveryFollowUp": "排隊到下一輪（回覆結束後自動傳送）",
 	"settings.quickMessagesSection": "快捷訊息",

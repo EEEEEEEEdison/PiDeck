@@ -79,6 +79,9 @@ export type AcpAgentInfo = {
 		loadSession: boolean;
 		agentThought: boolean;
 		sessionList: boolean;
+		/** promptCapabilities.image：会话可接收图片附件；未声明时发送图片必须拒收
+		 * （给不支持图片的 agent 发 image 块只会得到整回合协议错误）。 */
+		promptImage: boolean;
 	};
 	/** agent 声明的协议版本。 */
 	protocolVersion: number;

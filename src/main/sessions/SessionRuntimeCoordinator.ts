@@ -32,6 +32,7 @@ import type {
 	AgentUiBatchQuestion,
 } from "../../shared/types";
 import { buildSessionOriginKey } from "../../shared/sessionIdentity";
+import { descriptorFromThrownError } from "../../shared/errorI18n";
 import { createSessionModelPreference } from "../../shared/modelDisplayName";
 import { isRewindCheckpointId, isRewindRestoreScope } from "../../shared/types";
 import type { BridgeEvent } from "../../shared/types/bridge";
@@ -1285,7 +1286,9 @@ export class SessionRuntimeCoordinator {
 				activationMs: Date.now() - pipelineStartedAt,
 			});
 		} catch (error) {
-			return this.rejected(input, errorMessage(error));
+			// 网关可给 thrown error 挂 I18nDescriptor（如 ACP AUTH_REQUIRED 登录引导）：
+			// 透传给渲染层 toast；未挂载时回落通用「发送失败 + 原文」描述符。
+			return this.rejected(input, errorMessage(error), descriptorFromThrownError(error));
 		}
 
 		let lease: DispatchLease;

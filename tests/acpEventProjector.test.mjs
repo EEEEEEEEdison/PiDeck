@@ -102,6 +102,28 @@ test("plan and available_commands_update project last-wins", () => {
 	assert.equal(state.commands.length, 1);
 	assert.equal(state.commands[0].name, "/run");
 	assert.equal(state.commands[0].source, "acp");
+	// opencode 等实现实际发 availableCommands（2027-02 live smoke 实测）：必须等价投影。
+	state = step(state, { sessionUpdate: "available_commands_update", availableCommands: [{ name: "/review", description: "review changes" }] });
+	assert.equal(state.commands.length, 1);
+	assert.equal(state.commands[0].name, "/review");
+});
+
+test("usage_update 投影为 runtime 上下文仪表数据源（opencode 顶层形态 + usage 嵌套形态）", () => {
+	let state = initialAcpProjection();
+	// 顶层形态：opencode 实测帧 {"sessionUpdate":"usage_update","used":25528,"size":1000000,"cost":{"amount":0,"currency":"USD"}}
+	state = step(state, { sessionUpdate: "usage_update", used: 25528, size: 1_000_000, cost: { amount: 1.23, currency: "USD" } });
+	assert.equal(state.usage?.used, 25528);
+	assert.equal(state.usage?.size, 1_000_000);
+	assert.equal(state.usage?.costAmount, 1.23);
+	assert.equal(state.usage?.costCurrency, "USD");
+	// usage 嵌套形态：部分实现把指标放进 usage 子对象；cost 是裸数字；缺字段不抹掉旧值。
+	state = step(state, { sessionUpdate: "usage_update", usage: { used: 41000, size: 200_000, cost: 0.5 } });
+	assert.equal(state.usage?.used, 41000);
+	assert.equal(state.usage?.size, 200_000);
+	assert.equal(state.usage?.costAmount, 0.5);
+	// 空载荷/全部缺失：保留上一份 usage（last-wins 只对有值字段生效）
+	state = step(state, { sessionUpdate: "usage_update" });
+	assert.equal(state.usage?.used, 41000);
 });
 
 test("session_info_update records title and unknown updates are ignored", () => {

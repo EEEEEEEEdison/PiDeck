@@ -144,6 +144,9 @@ test("prompt records one local user message when the agent does not echo it", as
 test("live user echoes do not duplicate a submitted prompt or its image attachments", async (t) => {
 	const { manager, createAgent } = harness(t, {
 		handler: (frame, { writeFromCli }) => {
+			// 能力门控（AcpAgentManager.sendPrompt）要求 agent 声明 promptCapabilities.image 才接受图块；
+			// 本用例测回显去重，不是门控，故显式声明。
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { promptCapabilities: { image: true } } };
 			if (frame.method === "session/prompt") {
 				for (const content of frame.params.prompt) sessionUpdate(writeFromCli, "session-1", { sessionUpdate: "user_message_chunk", content });
 				sessionUpdate(writeFromCli, "session-1", { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Answer" } });

@@ -335,6 +335,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 工具 id 必须自己有 state 才能让受控 Select 刷新。
 	const [guideAcpToolOverride, setGuideAcpToolOverride] = useState<string | undefined>(() => (isGuideBootstrapSession ? readWelcomeAcpToolPreference() : undefined));
 	const isDshBackend = record?.backend === "dsh" || runtime?.backend === "dsh" || (isGuideBootstrapSession && guideBackendOverride === "dsh");
+	// ACP 后端：忙碌投递恒收敛为 followUp（协议无 steer 通道，插队必被 manager 拒收），
+	// 拆分菜单的「插入当前回合」项也整体隐藏。
+	const isAcpBackend = record?.backend === "acp" || runtime?.backend === "acp" || (isGuideBootstrapSession && guideBackendOverride === "acp");
 	const hasImageGenHistory = (messageCache?.messages ?? []).some((message) => Boolean(message.meta?.imageGen));
 	// 生视频不存在 legacy 混排（videogen 是新后端，只有它自己会写 meta.videoGen），不需要历史锁。
 	const isVideoGenBackend = record?.backend === "videogen";
@@ -1569,9 +1572,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			if (intent === "send") {
 				event.preventDefault();
 				// Enter 发送也晋升预览 Tab（promoteAndSend 内部统一处理）。
-				// 忙碌时按「忙碌时投递行为」设置决定语义（pi/dsh 统一，不再按后端分叉）；
+				// 忙碌时按「忙碌时投递行为」设置决定语义；ACP 后端恒收敛 followUp（协议无 steer）。
 				// 空闲直发（undefined）。设置在常用设置→会话，改后即时生效（App 同步 atom）。
-				void promoteAndSend(resolveBusySendDelivery(isBusy, store.get(busySendDeliveryAtom)));
+				void promoteAndSend(resolveBusySendDelivery(isBusy, store.get(busySendDeliveryAtom), isAcpBackend ? "acp" : undefined));
 			}
 		},
 		[closeSuggestions, cursor, draft, getPromptHistory, historyIndex, isBusy, mode, promoteAndSend, savedDraft, selectedSuggestionIndex, selectSuggestion, sendShortcut, sessionId, setDraft, store, suggestionItems, suggestionsOpen],
@@ -2299,14 +2302,17 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			// 忙碌时按「忙碌时投递行为」设置决定语义（pi/dsh 统一，不再按后端分叉）；
 			// 空闲直发。排队项的插入/排队切换走输入框上方队列面板的行内按钮。
 			send: () => {
-				void promoteAndSend(resolveBusySendDelivery(isBusy, store.get(busySendDeliveryAtom)));
+				void promoteAndSend(resolveBusySendDelivery(isBusy, store.get(busySendDeliveryAtom), isAcpBackend ? "acp" : undefined));
 			},
 			// 拆分菜单（发送钮右侧 caret）：把「加入当前回合 / 排队到下一轮 / 并行发送」前置到发送现场。
 			// 主钮仍走「忙碌时投递行为」设置；这三项是显式覆盖，不受设置影响。
 			// steer = 立刻插队进当前回合（仅忙碌时有意义）；followUp = 排队到下一轮再排空。
-			sendSteer: () => {
-				void promoteAndSend("steer");
-			},
+			// ACP 无 steer 通道：置 undefined → 菜单项隐藏（ComposerPanels 按 truthy 渲染该项）。
+			sendSteer: isAcpBackend
+				? undefined
+				: () => {
+						void promoteAndSend("steer");
+					},
 			sendFollowUp: () => {
 				void promoteAndSend("followUp");
 			},
@@ -2318,7 +2324,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			sendQuickMessage: (text: string) => {
 				const trimmed = text.trim();
 				if (!trimmed) return;
-				void promoteAndSend(resolveBusySendDelivery(isBusy, store.get(busySendDeliveryAtom)), trimmed);
+				void promoteAndSend(resolveBusySendDelivery(isBusy, store.get(busySendDeliveryAtom), isAcpBackend ? "acp" : undefined), trimmed);
 			},
 			/**
 			 * 快捷消息直发可用性：与 canSend 同源，但去掉「草稿非空」这一项——
