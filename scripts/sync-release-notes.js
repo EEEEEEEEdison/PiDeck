@@ -229,11 +229,17 @@ function computeDocsSiteUpdate(data, fileContent) {
 	// 补 Ctrl+P 命令面板条目时就撞上）——纯插入会让文档站出现两份同名版本段落。
 	// 这与上面 v0.6.6 的历史重复是同一类问题，只是那次是版本号改名（beta → 正式）造成的。
 	// 替换时保持原位置，不打乱「新版本在上」的倒序。
-	const existingIdx = lines.findIndex((l) => l.trimEnd() === `## ${version}`);
+	// 同版本判定必须忽略尾部的发布日期：把当期版本的日期从 10-12 改成 10-13 后重跑同步，
+	// 按整行（含日期）比对认不出既有段落，会再插一份同名版本（2026-10-13 发版实测），
+	// 因此这里改写「同版本替换」原实现（此前只认完全相同的整行）。
+	const versionBase = (line) => line.trimEnd().replace(/\s*\(\d{4}-\d{2}-\d{2}\)$/, "");
+	const targetVersion = versionBase(`## ${version}`);
+	const existingIdx = lines.findIndex((l) => /^##\s+v0\./.test(l) && versionBase(l) === targetVersion);
 	const startIdx = existingIdx === -1 ? firstVersionIdx : existingIdx;
 	let endIdx = firstVersionIdx;
 	if (existingIdx !== -1) {
-		const nextIdx = lines.findIndex((l, i) => i > existingIdx && /^##\s+v0/.test(l));
+		// 跳到下一个「不同版本」的段落头：同版本的重复段（日期改名或手工插入留下的）一并被替换掉。
+		const nextIdx = lines.findIndex((l, i) => i > existingIdx && /^##\s+v0\./.test(l) && versionBase(l) !== targetVersion);
 		endIdx = nextIdx === -1 ? lines.length : nextIdx;
 	}
 

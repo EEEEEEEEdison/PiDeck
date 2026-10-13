@@ -78,6 +78,23 @@ test("computeDocsSiteUpdate：同版本重跑走替换不重复插入；已同�
 	assert.equal(computeDocsSiteUpdate(docsData("v0.8.0", ["新文案"]), once.newContent).changed, false);
 });
 
+test("computeDocsSiteUpdate：同版本仅发布日期变化时替换原段，且能收敛掉已存在的同版本重复段", () => {
+	// 2026-10-13 发版实测事故：当期版本日期从 10-12 改成 10-13 后重跑同步，
+	// 按整行（含日期）比对会认不出既有段落，于是 docs-site 出现两份 v0.9.0。
+	const content = ["## v0.9.0 (2026-10-12)", "发布时间：2026-10-12", "- 🚀 **旧**", "", "## v0.8.0 (2026-10-07)", "", "## v0.6.6", "历史段", ""].join("\n");
+	const result = computeDocsSiteUpdate(docsData("v0.9.0 (2026-10-13)"), content);
+	assert.equal(result.changed, true);
+	assert.equal((result.newContent.match(/^## v0\.9\.0/gm) ?? []).length, 1);
+	assert.match(result.newContent, /^## v0\.9\.0 \(2026-10-13\)$/m);
+	assert.ok(!result.newContent.includes("2026-10-12"));
+	assert.ok(result.newContent.includes("## v0.6.6"));
+	// 已存在新旧两份时，重跑自愈为单份（不能只替换第一份而留下旧日期段）
+	const duplicated = ["## v0.9.0 (2026-10-13)", "发布时间：2026-10-13", "- 🚀 **新**", "", "## v0.9.0 (2026-10-12)", "发布时间：2026-10-12", "- 🚀 **旧**", "", "## v0.8.0", ""].join("\n");
+	const healed = computeDocsSiteUpdate(docsData("v0.9.0 (2026-10-13)"), duplicated);
+	assert.equal((healed.newContent.match(/^## v0\.9\.0/gm) ?? []).length, 1);
+	assert.ok(!healed.newContent.includes("旧"));
+});
+
 test("computeDocsSiteUpdate：v0.6.6 历史重复只保留第一份，且绝不误删唯一版本段", () => {
 	const dup = ["## v0.8.0", "", "## v0.6.6", "旧 66 第一份", "", "## v0.6.6-beta.1", "旧 66 第二份", "", "## v0.6.5", ""].join("\n");
 	const deduped = computeDocsSiteUpdate(docsData("v0.8.0"), dup);
