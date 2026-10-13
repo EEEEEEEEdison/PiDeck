@@ -26,7 +26,7 @@ async function waitFor(predicate, label = "condition") {
  * handler(frame) 返回 result 即时应答;返回 error 对象应答错误;undefined 挂起。
  * writeFromCli() 让用例直接向 manager 推通知/请求。
  */
-function fakeAgentProcess(t, { handler = () => undefined } = {}) {
+function fakeAgentProcess(t, { handler = () => undefined, spawnError = undefined } = {}) {
 	const stdin = new PassThrough(); // manager → CLI(测试读)
 	const stdout = new PassThrough(); // CLI → manager(测试写)
 	const stderr = new PassThrough();
@@ -61,6 +61,8 @@ function fakeAgentProcess(t, { handler = () => undefined } = {}) {
 			stderr.destroy();
 		},
 	});
+	// ENOENT 等 spawn 失败在 spawn 返回后异步经 error 事件抛出（与真 Node 一致）。
+	if (spawnError) setImmediate(() => proc.emit("error", spawnError));
 	t.after(() => {
 		try {
 			stdin.destroy();
@@ -442,6 +444,50 @@ test("usage_update 通知映射进 runtime.state 上下文仪表(used/size→con
 	assert.equal(state.contextPercent, 2.6);
 	assert.equal(state.cost, 0.42);
 	assert.equal(state.provider, "acp");
+});
+
+test("工具被删/禁用:create 直接拒且标 i18nKey acp.toolMissing（老会话绑定还在不报错 id）", async (t) => {
+	const { createAgent, manager } = harness(t, {
+		handler: () => ({}),
+	});
+	const failure = await manager.create({ projectId: "p1", backend: "acp", agentPreset: "tool-gone" }).catch((error) => error);
+	assert.match(failure.message, /not found or disabled/);
+	assert.equal(failure.i18nKey, "acp.toolMissing");
+	assert.equal(failure.i18nParams?.tool, "tool-gone");
+	void createAgent;
+});
+
+test("CLI 未安装(spawn ENOENT):create 抛出 acp.toolNotInstalled 描述符（带完整命令行供安装引导）", async (t) => {
+	const { createAgent, manager } = harness(t, {
+		spawnError: Object.assign(new Error("spawn gemini ENOENT"), { code: "ENOENT" }),
+		// 挂起 initialize：等 spawn 的 error 事件决定握手结局（真实 CLI 起不来就是应答绝不返回）。
+		handler: () => undefined,
+	});
+	const failure = await createAgent().catch((error) => error);
+	assert.equal(failure.i18nKey, "acp.toolNotInstalled");
+	assert.equal(failure.i18nParams?.tool, TOOL.name);
+	assert.equal(failure.i18nParams?.command, "gemini --experimental-acp");
+	assert.equal(failure.debugDetails, "spawn gemini ENOENT");
+	assert.equal(manager.list().length, 0);
+});
+
+test("握手超时(initialize 挂起):create 抛出 acp.startupTimeout 描述符（中性重试引导）", async (t) => {
+	const { createAgent, manager } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return undefined; // 永不应答
+				if (frame.method === "session/new") return { sessionId: "never" };
+				return {};
+			},
+		},
+		{ handshakeTimeoutMs: 40 },
+	);
+	const failure = await createAgent().catch((error) => error);
+	assert.equal(failure.i18nKey, "acp.startupTimeout");
+	assert.equal(failure.i18nParams?.tool, TOOL.name);
+	assert.match(failure.debugDetails, /timed out after 40ms: initialize/);
+	assert.equal(manager.list().length, 0);
 });
 
 test("AUTH_REQUIRED(首启):session/new 返回 -32000 时 create 抛出带描述符的错误(coordinator 透传为登录引导 toast)", async (t) => {

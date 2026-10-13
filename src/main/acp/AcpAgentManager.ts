@@ -39,6 +39,30 @@ function authRequiredDescriptor(error: unknown, tool: AcpToolConfig): { i18nKey:
 	return undefined;
 }
 
+/** spawn ENOENT（CLI 未安装/不在 PATH）→ 安装引导；debugDetails 保留原文。 */
+function spawnNotInstalledDescriptor(error: unknown, tool: AcpToolConfig): { i18nKey: string; i18nParams: { tool: string; command: string }; debugDetails: string } | undefined {
+	const code = (error as NodeJS.ErrnoException | null | undefined)?.code;
+	const message = error instanceof Error ? error.message : String(error);
+	if (code === "ENOENT" || /spawn .+ ENOENT/i.test(message)) {
+		return { i18nKey: "acp.toolNotInstalled", i18nParams: { tool: tool.name, command: [tool.command, ...tool.args].join(" ") }, debugDetails: message };
+	}
+	return undefined;
+}
+
+/** initialize/session 握手超时（首次 npx 下载 / CLI 冷启动慢）→ 中性重试引导。 */
+function startupTimeoutDescriptor(error: unknown, tool: AcpToolConfig): { i18nKey: string; i18nParams: { tool: string }; debugDetails: string } | undefined {
+	if (error instanceof AcpTimeoutError) {
+		return { i18nKey: "acp.startupTimeout", i18nParams: { tool: tool.name }, debugDetails: error.message };
+	}
+	return undefined;
+}
+
+/** create 抛错前的统一本地化：命中任一描述符即挂到 Error 上（coordinator 透传）。 */
+function localizeCreateFailure(error: Error, tool: AcpToolConfig): void {
+	const descriptor = authRequiredDescriptor(error, tool) ?? spawnNotInstalledDescriptor(error, tool) ?? startupTimeoutDescriptor(error, tool);
+	if (descriptor) Object.assign(error, descriptor);
+}
+
 /** initialize/session 握手超时:CLI 冷启动(npm 包)可能要十几秒。 */
 const HANDSHAKE_TIMEOUT_MS = 60_000;
 /** session/prompt 回合兑底超时。测试用 deps.promptTurnTimeoutMs 注入缩短。 */
@@ -99,6 +123,8 @@ type AcpManagerDeps = {
 	imageStore?: { put(data: string, mimeType: string): Promise<string | null> };
 	/** session/prompt 回合超时(默认 10 分钟)。测试注入短值验证超时补发 session/cancel。 */
 	promptTurnTimeoutMs?: number;
+	/** initialize/session-new/load 握手超时(默认 60s)。测试注入短值验证启动超时本地化。 */
+	handshakeTimeoutMs?: number;
 	/** permission expiry 的测试注入，不新增持久化设置。 */
 	permissionTimeoutMs?: number;
 };
@@ -235,7 +261,8 @@ export class AcpAgentManager implements SessionAgentGateway {
 		// 工具选择:agentPreset 字段承载 AcpToolConfig.id(coordinator 已归一传入)。
 		const toolId = input.agentPreset ?? "";
 		const tool = this.deps.getTools().find((candidate) => candidate.id === toolId && candidate.enabled);
-		if (!tool) throw new Error(`ACP tool not found or disabled: ${toolId || "(none)"}`);
+		// 工具被删/禁用：会话绑定还在（acpToolId 落 catalog），给明确引导而不是裸 id 报错。
+		if (!tool) throw Object.assign(new Error(`ACP tool not found or disabled: ${toolId || "(none)"}`), { i18nKey: "acp.toolMissing", i18nParams: { tool: toolId || "(none)" } });
 		const cwd = project.path;
 
 		const invocation = this.deps.piLocator.createInvocation(tool.command, tool.args);
@@ -300,8 +327,9 @@ export class AcpAgentManager implements SessionAgentGateway {
 			this.killProcess(runtime);
 			this.emit(ipcChannels.agentsState, this.list());
 			const thrown = error instanceof Error ? error : new Error(String(error));
-			// AUTH_REQUIRED：附 I18nDescriptor 再抛，coordinator 透传为本地化登录引导 toast。
-			Object.assign(thrown, authRequiredDescriptor(thrown, tool) ?? {});
+			// AUTH_REQUIRED / CLI 未安装(ENOENT) / 握手超时：附描述符再抛，
+			// coordinator 透传为本地化引导 toast（不命中的错误原样透出原文）。
+			localizeCreateFailure(thrown, tool);
 			throw thrown;
 		}
 
@@ -351,7 +379,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 				protocolVersion: ACP_PROTOCOL_VERSION,
 				clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
 			},
-			HANDSHAKE_TIMEOUT_MS,
+			this.deps.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS,
 		);
 		const initResult = (await Promise.race([initTask, spawnFailure])) as { protocolVersion?: unknown; agentCapabilities?: AcpAgentCapabilities; agentInfo?: { name?: unknown } | null } | null;
 		if (initResult?.protocolVersion !== ACP_PROTOCOL_VERSION) throw new Error(`Unsupported ACP protocolVersion: ${String(initResult?.protocolVersion)}`);
@@ -378,7 +406,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 			runtime.acpSessionId = resumeSessionId;
 			runtime.reloading = true;
 			try {
-				const loaded = (await conn.request("session/load", { sessionId: resumeSessionId, cwd, mcpServers: [] }, HANDSHAKE_TIMEOUT_MS)) as AcpSessionLoadResult;
+				const loaded = (await conn.request("session/load", { sessionId: resumeSessionId, cwd, mcpServers: [] }, this.deps.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS)) as AcpSessionLoadResult;
 				await runtime.updateChain;
 				// 标准 load 响应无 sessionId；保留请求身份。兼容明确回传身份的旧 CLI。
 				setup = { ...loaded, sessionId: typeof loaded?.sessionId === "string" && loaded.sessionId ? loaded.sessionId : resumeSessionId };
@@ -395,7 +423,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 			}
 		}
 		if (!setup?.sessionId) {
-			setup = (await conn.request("session/new", { cwd, mcpServers: [] }, HANDSHAKE_TIMEOUT_MS)) as AcpSessionSetupResult;
+			setup = (await conn.request("session/new", { cwd, mcpServers: [] }, this.deps.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS)) as AcpSessionSetupResult;
 		}
 		if (!setup?.sessionId || typeof setup.sessionId !== "string") throw new Error("ACP session/new returned no sessionId");
 		runtime.acpSessionId = setup.sessionId;
