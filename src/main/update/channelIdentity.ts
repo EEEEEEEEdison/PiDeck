@@ -4,8 +4,18 @@
 declare const __PIDECK_DEV_BUILD__: boolean;
 
 import type { UpdateChannel } from "../../shared/types/app";
+import { app } from "electron";
 
 /** 当前应用构建所属的更新通道（编译期确定，运行期不变）。 */
 export function resolveUpdateChannel(): UpdateChannel {
 	return __PIDECK_DEV_BUILD__ ? "dev" : "stable";
+}
+
+/**
+ * 开发构建：未打包 npm run dev 或 dev 通道安装包（PIDECK_DEV_BUILD=1）。
+ * 开发中功能（ACP 后端）的入口只在开发构建可见，stable 安装包隐藏；
+ * 与 index.ts 的 isDevBuild 同口径（含未打包运行），集中在此避免两处漂移。
+ */
+export function isDevChannelBuild(): boolean {
+	return !app.isPackaged || __PIDECK_DEV_BUILD__;
 }

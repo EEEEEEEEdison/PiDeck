@@ -7,7 +7,7 @@ import { app, dialog, ipcMain, shell } from "electron";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { ipcChannels } from "../../shared/ipc";
-import { resolveUpdateChannel } from "../update/channelIdentity";
+import { isDevChannelBuild, resolveUpdateChannel } from "../update/channelIdentity";
 import { UPDATE_REPO, UPDATE_REPO_OWNER } from "../update/releaseRepo";
 import { probeAllMirrors, type MirrorHealthResult } from "../update/mirrorHealth";
 import { ChangelogService, type ChangelogLanguage } from "../update/ChangelogService";
@@ -1190,6 +1190,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.appGetChannel, () => ({
 		channel: resolveUpdateChannel(),
 		currentVersion: app.getVersion(),
+		// 开发中功能（ACP）入口可见性依据：未打包 dev 或 dev 通道包为 true，stable 恒 false。
+		devBuild: isDevChannelBuild(),
 	}));
 	ipcMain.handle(ipcChannels.appDownloadUpdate, async () => {
 		await updateService?.downloadNow();
