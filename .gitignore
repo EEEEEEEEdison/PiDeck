@@ -23,6 +23,7 @@ docs-site/.vitepress/*.timestamp-*.mjs
 # README 共用图片的生成副本：唯一数据源是 docs/images/<名>，由 docs-site 插件在
 # dev / build 时复制到这里（其余 public/images 下的图仍入库）。
 docs-site/public/images/wechat-qrcode.png
+docs-site/public/images/gpt-recharge-price.png
 *.asar
 
 # Electron/Vite
