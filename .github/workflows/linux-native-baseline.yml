@@ -100,8 +100,7 @@ jobs:
         run: node scripts/linux-native-baseline.js scan --root "$PIDECK_UNPACKED" --fail
 
       - name: Smoke test packaged pty.node on Debian 10 (glibc 2.28)
-        run: docker run --rm -v "$PIDECK_UNPACKED:/pkg" -v "$PWD:/repo" -w /pkg node:18-buster-slim \
-          node /repo/scripts/linux-native-baseline.js smoke --module-dir /pkg/node_modules/node-pty
+        run: docker run --rm -v "$PIDECK_UNPACKED:/pkg" -v "$PWD:/repo" -w /pkg node:18-buster-slim node /repo/scripts/linux-native-baseline.js smoke --module-dir /pkg/node_modules/node-pty
 
       - name: Upload rebuilt artifacts
         uses: actions/upload-artifact@v4
