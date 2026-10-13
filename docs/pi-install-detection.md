@@ -182,6 +182,35 @@ node --test tests/piLocatorInstallations.test.mjs tests/piInstallationOptions.te
   tests/piInstallGuard.test.mjs tests/piLocator.test.mjs tests/piLocatorLoginShell.test.mjs
 ```
 
+### Windows 真机 smoke（2026-10-13）
+
+上述单测在 Linux 宿主上用夹具模拟 win32；启动通道与 bun / npm 前缀 / WSL 更新通道的五个 Windows 形态
+（2026-10 复审遗留项）由 `scripts/smoke-pi-windows-launch.mjs` 在真 Windows 上验证（人工触发，不进 CI）：
+
+| 覆盖 | 断言要点 |
+|---|---|
+| cmd 包裹 | npm `pi.cmd` 走 node-direct 真跑 `--version`；非 npm `.cmd` 回退 `cmd.exe /d /s /c`（windowsVerbatimArguments），含空格/引号/`&` 的 11 个参数原样到达；`.cmd`/`.exe` 参数预算 5000、node 直启 26000 |
+| pi.exe shim | bun 生成的 `<root>\bin\pi.exe` 能被 `normalizeCustomPath` 补全、`check()` 真跑出版本 |
+| 自定义 BUN_INSTALL | `<root>\bin\pi.exe` 先归 `pi-self`，靠 `<root>\install\global\node_modules` 细化为 `bun-global`；`PiSelfUpdateRunner.update()` 真调 pi.dev 最新版 → bun 代跑带 `BUN_INSTALL` 与 `--minimum-release-age=0` → 1.1.0 → 1.2.0，`~/.bun` 前后一致 |
+| portable-prefix | 真跑 `npm install -g --prefix <prefix>` 装出旧版与 `<prefix>\pi.cmd`，再经 `PiSelfUpdateRunner.update()` 真跑 npm 代跑（命令行带 `--prefix <prefix>`）原地更新到最新版 |
+| WSL / UNC | 真探测 + `wsl.exe -e /usr/bin/env PATH=… <pi> --version`；运行时召唤串与 `\\wsl.localhost\`、`\\wsl$\` 一律 `pi-self` |
+
+本机实测（Windows 10.0.26200 / bun 1.4.3 / npm pi 1.2.0 / WSL Ubuntu-26.04）：**11/11 通过**。
+脚本在 `%TEMP%\pideck win smoke` 内自建隔离环境（路径刻意带空格），不写系统目录、不动 `~/.bun`、
+不更新 WSL 里的 pi（只读版本）；`--clean` 清空临时根，`PIDECK_SMOKE_BUN` 可指定已有 bun。
+
+这次真机 smoke 顺带抓到一个 Windows 缺陷（已修 + 回归测试 `tests/piLocator.test.mjs`）：npm 12 的
+`npm.cmd`/`npx.cmd` 改用变量式垫片（`SET "NPM_CLI_JS=%~dp0\node_modules\npm\bin\npm-cli.js"` +
+`"%NODE_EXE%" "%NPM_CLI_JS%" %*`），旧的「全文取第一个 `node_modules\…js`」会抓到变量赋值里的
+`npm-prefix.js`：设置里把 npm 命令填成绝对路径的用户，扩展版本/源查询、旧前缀副本更新与引导安装
+会跑成「打印前缀」——退出码 0 却什么都没装。现在只在**实际执行行**（含 `%*`）上认入口，这类无法
+静态确定目标的垫片回退 `cmd.exe` 跑真实垫片。
+
+两条真机事实（决定 UNC 行为边界，不是缺陷）：
+
+- `\\wsl.localhost\<distro>\…` 经 9P **看不到 Linux 符号链接的目标**（`existsSync` 对 npm/bun 全局 pi 的软链返回 false；目录与普通文件正常），而两种全局安装的 pi 恰恰都是软链；
+- Windows 不能从 UNC 执行 ELF（`execFile` 报 ENOENT、cmd 报找不到路径）。因此 UNC 形态的 WSL pi 过不了 `locator.check()`，`refineChannelForCustomBunRoot` 的磁盘细化也不会把它翻成宿主 bun——守卫是双保险。
+
 ## 后续可做（本次未做）
 
 - **便携 node 版本 / 启动用哪个 node**：当前 PiDeck 拉起 pi 时用的是 PATH 里的 node（或与 shim 同目录的 node）。

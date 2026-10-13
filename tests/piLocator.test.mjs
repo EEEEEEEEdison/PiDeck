@@ -759,6 +759,50 @@ test("Windows shim falls back to cmd.exe for a hand-written wrapper", () => {
 	}
 });
 
+// npm 12 起 npm.cmd/npx.cmd 换成变量式垫片：`SET "NPM_CLI_JS=%~dp0\node_modules\npm\bin\npm-cli.js"`
+// + 执行行 `"%NODE_EXE%" "%NPM_CLI_JS%" %*`。按全文取第一个 `node_modules\...js` 会抓到变量赋值里的
+// `npm-prefix.js`——实测把「装包」跑成「打印前缀」（exit 0 却什么都没装）。入口变量还可能被 prefix
+// 覆盖，静态解析给不出与 cmd 等价的目标，所以这种形态必须回退 cmd.exe 而不是猜。
+test("npm 12+ 的变量式 .cmd 垫片回退 cmd.exe（不再误取 npm-prefix.js）", () => {
+	const body = [
+		":: Created by npm, please don't edit manually.",
+		"@ECHO OFF",
+		"",
+		"SETLOCAL",
+		"",
+		'SET "NODE_EXE=%~dp0\\node.exe"',
+		'IF NOT EXIST "%NODE_EXE%" (',
+		'  SET "NODE_EXE=node"',
+		")",
+		"",
+		'SET "NPM_PREFIX_JS=%~dp0\\node_modules\\npm\\bin\\npm-prefix.js"',
+		'SET "NPM_CLI_JS=%~dp0\\node_modules\\npm\\bin\\npm-cli.js"',
+		`FOR /F "delims=" %%F IN ('CALL "%NODE_EXE%" "%NPM_PREFIX_JS%"') DO (`,
+		'  SET "NPM_PREFIX_NPM_CLI_JS=%%F\\node_modules\\npm\\bin\\npm-cli.js"',
+		")",
+		'IF EXIST "%NPM_PREFIX_NPM_CLI_JS%" (',
+		'  SET "NPM_CLI_JS=%NPM_PREFIX_NPM_CLI_JS%"',
+		")",
+		"",
+		'"%NODE_EXE%" "%NPM_CLI_JS%" %*',
+		"",
+	].join("\r\n");
+	const { root, binDir, piCmd } = makeNpmShimInstall(body, "node_modules/npm/bin/npm-cli.js");
+	// 两个入口都存在：旧实现会命中第一个（npm-prefix.js）并误判成 node 直启。
+	writeFileSync(join(binDir, "node_modules", "npm", "bin", "npm-prefix.js"), "console.log('prefix')", "utf8");
+	try {
+		const { PiLocator } = loadPiLocatorModule("win32", { APPDATA: join(root, "Roaming") }, root);
+		const invocation = new PiLocator().createInvocation(piCmd, ["install", "-g", "pkg"]);
+		assert.match(invocation.command.toLowerCase(), /cmd\.exe$/, "入口在运行时才定，必须回退 cmd.exe");
+		assert.equal(invocation.windowsVerbatimArguments, true);
+		assert.match(invocation.windowsLaunch?.reason ?? "", /变量式|无法静态解析/);
+		// 关键回归：绝不能把变量赋值里的 npm-prefix.js 当成入口。
+		assert.ok(!invocation.args.some((arg) => arg.includes("npm-prefix.js")), `不得解析出 npm-prefix.js：${invocation.args.join(" ")}`);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("Windows shim rejects an entry pointing outside the shim directory", () => {
 	// 垫片来自用户磁盘，属于不可信输入：node_modules 之外的路径必须拒绝。
 	const body = '@echo off\r\nnode "%dp0%\\node_modules\\..\\..\\evil.js" %*\r\n';
