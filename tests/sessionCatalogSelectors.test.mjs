@@ -34,14 +34,22 @@ function compileModule(filePath, imports = {}) {
 }
 
 function loadAtoms() {
+	// session-atoms ⇄ composer-atoms 是模块级循环：双方都只在惰性 action 体内用对方导出。
+	// 先给 session-atoms 一个可后填的桥对象，两模块都编译完后再回填真实导出。
+	const composerExports = {};
 	const sessions = compileModule("src/renderer/src/atoms/session-atoms.ts", {
 		"./recent-session-atoms": compileModule("src/renderer/src/atoms/recent-session-atoms.ts"),
+		"./composer-atoms": composerExports,
 		"../utils/agentRuntimeState": compileModule("src/renderer/src/utils/agentRuntimeState.ts"),
 		"../utils/sessionRecordIdentity": compileModule("src/renderer/src/utils/sessionRecordIdentity.ts"),
 		"../utils/liveTextHandoff": compileModule("src/renderer/src/utils/liveTextHandoff.ts"),
 		"./outlineRevision": compileModule("src/renderer/src/atoms/outlineRevision.ts"),
 		"./outlineProjectionCache": compileModule("src/renderer/src/atoms/outlineProjectionCache.ts"),
 	});
+	const composer = compileModule("src/renderer/src/atoms/composer-atoms.ts", {
+		"./session-atoms": sessions,
+	});
+	Object.assign(composerExports, composer);
 	const selectors = compileModule("src/renderer/src/atoms/session-selectors.ts", {
 		"./session-atoms": sessions,
 		// 展示名拼装与 fork 标记相关，测试不关心文案，直接透传即可。

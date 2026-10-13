@@ -87,6 +87,14 @@ function harness(t, cliOptions, depsExtra = {}) {
 		stubs: {
 			"node:child_process": {
 				spawn: (command, args, options) => {
+					// Windows 树杀出口:同步模拟 taskkill /pid <pid> /T /F(找到匹配 fake 进程并 kill),
+					// 不计入 spawnCalls(那里只记 agent CLI 的 spawn,索引有断言)。
+					if (command === "taskkill") {
+						const pid = Number(args?.[1]);
+						const target = procs.find((record) => record.proc.pid === pid && record.proc.exitCode === null);
+						target?.proc.kill();
+						return Object.assign(new EventEmitter(), { pid: 9999, exitCode: 0, kill() {} });
+					}
 					const record = fakeAgentProcess(t, cliOptions);
 					procs.push(record);
 					spawnCalls.push({ command, args, options });
@@ -132,7 +140,7 @@ test("总开关运行时判定:关闭时拒绝 spawn,打开后同一实例立即
 		{ isEnabled: () => enabled },
 	);
 	// 开关在 create 边界实时判定：关闭时既不起进程，也覆盖「从历史恢复 ACP 会话」这条不经过后端下拉的路径
-	await assert.rejects(() => createAgent(), /ACP backend is disabled in settings/);
+	await assert.rejects(() => createAgent(), /ACP backend is disabled/);
 	assert.equal(spawnCalls.length, 0, "关闭时不得 spawn 任何 CLI");
 	// 设置页打开开关后同一 manager 实例立即生效（网关启动时已常驻注册，开关不需要重启）
 	enabled = true;
@@ -338,6 +346,144 @@ test("abort:进行中的回合发 session/cancel 通知(prompt 挂起不拒绝)"
 	}
 	const result = await sendPromise;
 	assert.equal(result.accepted, true);
+});
+
+test("abort 升级:首次 cancel 后 CLI 无响应,宽限超时强杀进程并按 unknown 结算", async (t) => {
+	let promptSeen = false;
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+				if (frame.method === "session/new") return { sessionId: "sess-esc" };
+				if (frame.method === "session/prompt") {
+					promptSeen = true;
+					return undefined; // 永久挂起:模拟 CLI wedged(opencode 流错误实测)
+				}
+				return {};
+			},
+		},
+		{ abortEscalationMs: 50 },
+	);
+	const tab = await createAgent();
+	const sendPromise = manager.sendPrompt({ agentId: tab.id, message: "hang" });
+	await waitFor(() => promptSeen, "prompt dispatched");
+	await manager.abort(tab.id);
+	// 宽限内 CLI 不回包:升级定时器强杀进程(win32 走 taskkill 桩,其余平台 proc.kill)
+	await waitFor(() => lastProc().proc.exitCode === 0, "escalated force kill");
+	const result = await sendPromise;
+	assert.equal(result.accepted, false);
+	assert.equal(result.delivery, "unknown", "强杀后 CLI 是否已处理不可知,不回填草稿");
+	assert.equal(result.i18nKey, "acp.abortForceStopped");
+	assert.equal(result.i18nParams?.tool, "Gemini CLI");
+	assert.equal(manager.list().length, 0, "runtime 已随强杀移除");
+});
+
+test("abort 升级:二次停止立即强杀,不等宽限", async (t) => {
+	let promptSeen = false;
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+				if (frame.method === "session/new") return { sessionId: "sess-esc2" };
+				if (frame.method === "session/prompt") {
+					promptSeen = true;
+					return undefined;
+				}
+				return {};
+			},
+		},
+		{ abortEscalationMs: 60_000 },
+	);
+	const tab = await createAgent();
+	const sendPromise = manager.sendPrompt({ agentId: tab.id, message: "hang" });
+	await waitFor(() => promptSeen, "prompt dispatched");
+	await manager.abort(tab.id);
+	await manager.abort(tab.id); // 二次停止 → abort_repeat 立即强杀
+	await waitFor(() => lastProc().proc.exitCode === 0, "immediate force kill");
+	const result = await sendPromise;
+	assert.equal(result.accepted, false);
+	assert.equal(result.delivery, "unknown");
+	assert.equal(result.i18nKey, "acp.abortForceStopped");
+});
+
+test("stall 看门狗:全静默超阈值先补 cancel 再强杀", async (t) => {
+	let promptSeen = false;
+	const { manager, createAgent, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+				if (frame.method === "session/new") return { sessionId: "sess-stall" };
+				if (frame.method === "session/prompt") {
+					promptSeen = true;
+					return undefined;
+				}
+				return {};
+			},
+		},
+		{ promptStallTimeoutMs: 80, abortEscalationMs: 50 },
+	);
+	const tab = await createAgent();
+	const sendPromise = manager.sendPrompt({ agentId: tab.id, message: "silent hang" });
+	await waitFor(() => promptSeen, "prompt dispatched");
+	// 不 abort:看门狗自行发现全静默 → cancel(reason stall) → 升级强杀
+	await waitFor(() => lastProc().proc.exitCode === 0, "stall force kill");
+	const stallCancels = lastProc()
+		.methodFrames("session/cancel")
+		.filter((frame) => frame.params?.reason === "stall");
+	assert.equal(stallCancels.length, 1, "强杀前先补发一次 stall cancel");
+	const result = await sendPromise;
+	assert.equal(result.accepted, false);
+	assert.equal(result.i18nKey, "acp.stallForceStopped");
+	assert.equal(result.delivery, "unknown");
+});
+
+test("stall 看门狗:挂起审批期间不判静默(等待用户是合法状态)", async (t) => {
+	let promptSeen = false;
+	const { manager, createAgent, lastProc, events } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+				if (frame.method === "session/new") return { sessionId: "sess-perm" };
+				if (frame.method === "session/prompt") {
+					promptSeen = true;
+					return undefined;
+				}
+				return {};
+			},
+		},
+		{ promptStallTimeoutMs: 60 },
+	);
+	const tab = await createAgent();
+	const sendPromise = manager.sendPrompt({ agentId: tab.id, message: "need approval" });
+	await waitFor(() => promptSeen, "prompt dispatched");
+	// CLI 发起权限请求:回合进入等待用户状态(参数结构必须合法,否则立即回 cancelled 不挂起)
+	lastProc().writeFromCli({
+		jsonrpc: "2.0",
+		id: 999,
+		method: "session/request_permission",
+		params: {
+			sessionId: "sess-perm",
+			toolCall: { toolCallId: "call-1", title: "Run command" },
+			options: [
+				{ optionId: "allow", name: "Allow", kind: "allow_once" },
+				{ optionId: "reject", name: "Reject", kind: "reject_once" },
+			],
+		},
+	});
+	await waitFor(() => events.uiRequests.length > 0, "permission surfaced");
+	await sleep(300); // 远超 stall 阈值:审批挂起期间不得触发看门狗
+	assert.equal(lastProc().proc.exitCode, null, "等待审批不得强杀进程");
+	assert.equal(lastProc().methodFrames("session/cancel").length, 0, "不得补发 stall cancel");
+	assert.equal(manager.list()[0].status, "running");
+	// 用户取消审批 → 权限按 cancelled 回包;回合仍由 CLI 侧收口(挂起由 t.after 的 stopAll 结算)
+	const pendingRequest = events.uiRequests.find((payload) => payload.method === "select");
+	const respond = await manager.sendUIResponse(tab.id, pendingRequest.requestId, { cancelled: true });
+	assert.equal(respond.accepted, true);
+	await waitFor(() => lastProc().frames.some((frame) => frame.id === 999 && frame.result?.outcome?.outcome === "cancelled"), "permission answered");
 });
 
 test("turnActive 期间重复 sendPrompt 被拒绝(agentMessage 同样不支持)", async (t) => {
@@ -608,6 +754,31 @@ test("stop:杀进程、runtime 移除、list 不再含该 agent", async (t) => {
 	);
 	assert.equal(cli.proc.exitCode, 0, "process killed");
 	await assert.rejects(manager.getRuntimeState(tab.id), /No ACP runtime/);
+});
+
+test("stop 后 readMessagesByAcpSessionId 回退内存快照:重入会话时间线不空白", async (t) => {
+	let promptSeen = false;
+	const { manager, events, createAgent, lastProc } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-snap" };
+			if (frame.method === "session/prompt") {
+				promptSeen = true;
+				return undefined; // 挂起:只验证种子消息快照,回合由 t.after stopAll 结算
+			}
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	void manager.sendPrompt({ agentId: tab.id, message: "keep this" });
+	await waitFor(() => promptSeen, "prompt dispatched");
+	await waitFor(() => (events.messages.at(-1)?.messages ?? []).some((entry) => entry.role === "user"), "user bubble flushed");
+	await manager.stop(tab.id);
+	// runtime 已删:快照回退,重入时 session/load 前也有内容可显
+	const snapshot = manager.readMessagesByAcpSessionId("sess-snap");
+	assert.ok(snapshot.length >= 1, "snapshot non-empty after stop");
+	assert.equal(snapshot.at(-1).role, "user");
+	assert.equal(manager.readMessagesByAcpSessionId("sess-unknown").length, 0, "未见过的会话仍为空(跨 Realm 数组不能 deepEqual)");
 });
 
 test("图片物化:消息里的 base64 图经 imageStore 落盘成 ref,put 失败保留 data", async (t) => {

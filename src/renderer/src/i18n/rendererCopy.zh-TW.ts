@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 2a614b0efb441047ffcf4b866a837e92a0e690be993e7f101a93e40955e8a0ca（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: de8351d0a4f0cc1ca35e44e4f63c38269ece9ab300603527b1899470b178f01d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -215,6 +215,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"acp.restoreMissing": "該會話繫結的 ACP 工具已被刪除，請在設定 → ACP 工具裡重新登記後才能恢復與繼續",
 	"acp.hostInstructionsUnsupported": "ACP 後端不支援內部指令",
 	"acp.turnBusy": "{tool} 正在回覆中，請等待本輪結束或先停止當前回覆",
+	"acp.abortForceStopped": "「{tool}」長時間未響應停止請求，已強制結束本輪；重新發送即可繼續",
+	"acp.stallForceStopped": "「{tool}」長時間無任何輸出，已自動停止本輪；請檢查該 CLI 的模型/網路配置後重試",
 	"acp.imagesNotSupported": "{tool} 不支援圖片輸入，請移除圖片後重試",
 	"acp.authRequired": "「{tool}」未登入或憑據失效：請先在終端執行該 CLI 完成登入，再回到這裡重試",
 	"acp.toolNameRequired": "名稱必填",

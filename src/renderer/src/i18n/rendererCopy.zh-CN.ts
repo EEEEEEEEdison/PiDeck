@@ -208,6 +208,8 @@ export const zhCN = {
 	"acp.restoreMissing": "该会话绑定的 ACP 工具已被删除，请在设置 → ACP 工具里重新登记后才能恢复与继续",
 	"acp.hostInstructionsUnsupported": "ACP 后端不支持内部指令",
 	"acp.turnBusy": "{tool} 正在回复中，请等待本轮结束或先停止当前回复",
+	"acp.abortForceStopped": "「{tool}」长时间未响应停止请求，已强制结束本轮；重新发送即可继续",
+	"acp.stallForceStopped": "「{tool}」长时间无任何输出，已自动停止本轮；请检查该 CLI 的模型/网络配置后重试",
 	"acp.imagesNotSupported": "{tool} 不支持图片输入，请移除图片后重试",
 	"acp.authRequired": "「{tool}」未登录或凭据失效：请先在终端运行该 CLI 完成登录，再回到这里重试",
 	"acp.toolNameRequired": "名称必填",

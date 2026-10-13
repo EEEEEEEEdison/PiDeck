@@ -72,6 +72,11 @@ export class AcpPermissionRequests {
 		for (const requestId of this.pending.keys()) this.finish(requestId, { outcome: "cancelled" });
 	}
 
+	/** 回合 stall 看门狗用：审批挂起 = agent 合法等待用户输入，不算挂死。 */
+	hasPending(): boolean {
+		return this.pending.size > 0;
+	}
+
 	private finish(requestId: string, outcome: AcpPermissionOutcome): void {
 		const pending = this.pending.get(requestId);
 		if (!pending) return;

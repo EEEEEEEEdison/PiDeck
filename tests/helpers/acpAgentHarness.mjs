@@ -65,6 +65,14 @@ export function harness(t, cliOptions, depsExtra = {}) {
 		stubs: {
 			"node:child_process": {
 				spawn: (command, args, options) => {
+					// Windows 树杀出口:同步模拟 taskkill(匹配 pid 且未退出的 fake 进程),
+					// 不计入 spawnCalls(那里只记 agent CLI 的 spawn,索引有断言)。
+					if (command === "taskkill") {
+						const pid = Number(args?.[1]);
+						const target = procs.find((record) => record.proc.pid === pid && record.proc.exitCode === null);
+						target?.proc.kill();
+						return Object.assign(new EventEmitter(), { pid: 9999, exitCode: 0, kill() {} });
+					}
 					const record = fakeAgentProcess(t, cliOptions);
 					procs.push(record);
 					spawnCalls.push({ command, args, options });

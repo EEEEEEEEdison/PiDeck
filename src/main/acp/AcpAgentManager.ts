@@ -71,6 +71,13 @@ const PROMPT_TURN_TIMEOUT_MS = 10 * 60_000;
 /** 流式消息 flush 节流:每 chunk 都 emit 会打爆 IPC(与 DSH 实测同因)。 */
 const FLUSH_THROTTLE_MS = 80;
 
+/** abort 后等 CLI 自行收口的宽限;超时回合仍未结算则升级强杀(CLI wedged 不处理 cancel 的实测兑底)。 */
+const ABORT_ESCALATION_MS = 5_000;
+/** 回合内全静默(无任何 session/update 且无挂起审批)的 stall 判定阈值;深思回合正常也有 thought/tool 流。 */
+const PROMPT_STALL_TIMEOUT_MS = 90_000;
+/** 每会话保留的 ACP 消息内存快照条数:stop 后重入时间线的临时数据源,激活后 load 重放覆盖。 */
+const MESSAGE_SNAPSHOT_LIMIT = 16;
+
 type AcpAgentRuntime = {
 	tab: AgentTab;
 	/** agent 侧 sessionId(ACP 会话身份,catalog 持久化为 acpSessionId)。 */
@@ -91,6 +98,14 @@ type AcpAgentRuntime = {
 	reloading: boolean;
 	flushTimer: NodeJS.Timeout | null;
 	flushPending: boolean;
+	/** abort/超时升级强杀前的宽限定时器;回合正常结算时清除。 */
+	abortEscalateTimer: NodeJS.Timeout | null;
+	/** 回合 stall 看门狗 interval;回合结算时清除。 */
+	stallTimer: NodeJS.Timeout | null;
+	/** 最近一次 session/update 或回合派发的时间戳,stall 判定基准。 */
+	lastUpdateAt: number;
+	/** 本回合升级强杀原因;sendPrompt catch 依此定向结算(delivery=unknown + 本地化文案)。 */
+	escalatedStop: "abort_repeat" | "abort_no_response" | "stall" | null;
 	/** 会话标题(session_info_update / new 返回值;供 catalog 自动标题)。 */
 	title?: string;
 	/** session/new|load 与 set_config_option 返回的会话级配置(模型/思考档/模式)。
@@ -127,6 +142,10 @@ type AcpManagerDeps = {
 	handshakeTimeoutMs?: number;
 	/** permission expiry 的测试注入，不新增持久化设置。 */
 	permissionTimeoutMs?: number;
+	/** abort 升级强杀宽限(默认 5s)。测试注入短值验证升级路径。 */
+	abortEscalationMs?: number;
+	/** 回合无输出 stall 判定阈值(默认 90s)。测试注入短值验证看门狗。 */
+	promptStallTimeoutMs?: number;
 };
 
 export class AcpAgentManager implements SessionAgentGateway {
@@ -139,6 +158,9 @@ export class AcpAgentManager implements SessionAgentGateway {
 	readonly capabilities: ReadonlySet<AgentGatewayCapability> = new Set<AgentGatewayCapability>(["getCommands"]);
 
 	private readonly runtimes = new Map<string, AcpAgentRuntime>();
+	/** acpSessionId → 最近一次 flush 的消息快照（cap MESSAGE_SNAPSHOT_LIMIT）：
+	 *  stop/升级强杀后 runtime 删除，重入会话时 readMessagesByAcpSessionId 的临时数据源。 */
+	private readonly messageSnapshots = new Map<string, ChatMessage[]>();
 	private readonly outputListeners = new Set<(channel: string, payload: unknown) => void>();
 
 	constructor(private readonly deps: AcpManagerDeps) {}
@@ -168,13 +190,17 @@ export class AcpAgentManager implements SessionAgentGateway {
 		return this.runtimes.get(agentId)?.projection.messages ?? [];
 	}
 
-	/** 按 agent 侧 sessionId 找消息(未激活/已停止返回空数组:历史在 agent 侧,需激活后 load 重放)。 */
+	/**
+	 * 按 agent 侧 sessionId 找消息。runtime 在场返回全量投影；已停止（stop/升级强杀）
+	 * 返回最近一次 flush 的内存快照（cap MESSAGE_SNAPSHOT_LIMIT）——重入会话时时间线
+	 * 不再空白，激活后 session/load 重放会覆盖为完整历史（无 load 能力则快照即全部可见历史）。
+	 */
 	readMessagesByAcpSessionId(acpSessionId: string): ChatMessage[] {
 		if (!acpSessionId) return [];
 		for (const runtime of this.runtimes.values()) {
 			if (runtime.acpSessionId === acpSessionId) return runtime.projection.messages;
 		}
-		return [];
+		return this.messageSnapshots.get(acpSessionId) ?? [];
 	}
 
 	getMessages(agentId: string): ChatMessage[] {
@@ -255,7 +281,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 	async create(input: CreateAgentInput): Promise<AgentTab> {
 		// 开关运行时判定:关闭时拒绝 spawn(渲染层已隐藏 ACP 入口,这里是边界防御;
 		// 也覆盖「从历史恢复 ACP 会话」这类不经过后端下拉的启动路径)。
-		if (!this.deps.isEnabled()) throw new Error("ACP backend is disabled in settings");
+		if (!this.deps.isEnabled()) throw new Error("ACP backend is disabled (settings off or stable channel)");
 		const project = this.deps.getProject(input.projectId);
 		if (!project) throw new Error(`Project not found: ${input.projectId}`);
 		// 工具选择:agentPreset 字段承载 AcpToolConfig.id(coordinator 已归一传入)。
@@ -316,6 +342,10 @@ export class AcpAgentManager implements SessionAgentGateway {
 			reloading: false,
 			flushTimer: null,
 			flushPending: false,
+			abortEscalateTimer: null,
+			stallTimer: null,
+			lastUpdateAt: 0,
+			escalatedStop: null,
 		};
 		this.runtimes.set(agentId, runtime);
 		this.emit(ipcChannels.agentsState, this.list());
@@ -447,6 +477,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 		// fs/read_text_file 等未声明能力,规范约定回 method not found(AcpConnection 默认行为)。
 		conn.on("closed", (error: Error | null) => {
 			if (runtime.conn && runtime.conn.isClosed() && runtime.status === "closed") return;
+			this.clearTurnTimers(runtime);
 			runtime.status = "error";
 			runtime.tab.status = "error";
 			runtime.turnActive = false;
@@ -471,6 +502,8 @@ export class AcpAgentManager implements SessionAgentGateway {
 	private async handleSessionUpdate(runtime: AcpAgentRuntime, notification: AcpRpcNotification): Promise<void> {
 		if (runtime.status === "closed" || !this.runtimes.has(runtime.tab.id) || notification.method !== "session/update") return;
 		if (notification.params?.sessionId !== runtime.acpSessionId) return;
+		// 回合中收到任何 update 都刷新活跃时间：stall 看门狗只关心全静默。
+		if (runtime.turnActive) runtime.lastUpdateAt = Date.now();
 		const rawUpdate = notification.params.update;
 		if (!rawUpdate || typeof rawUpdate !== "object" || !("sessionUpdate" in rawUpdate) || typeof rawUpdate.sessionUpdate !== "string") return;
 		const update = rawUpdate as AcpSessionUpdate;
@@ -567,6 +600,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 		this.applyProjectionTitle(runtime);
 		runtime.turnActive = true;
 		runtime.cancelling = false;
+		runtime.escalatedStop = null;
 		runtime.status = "running";
 		runtime.tab.status = "running";
 		this.emit(ipcChannels.agentsState, this.list());
@@ -582,16 +616,21 @@ export class AcpAgentManager implements SessionAgentGateway {
 			if (this.runtimes.get(runtime.tab.id) !== runtime || runtime.conn.isClosed()) throw new Error("ACP agent process stopped before prompt dispatch");
 			if (runtime.cancelling) throw new Error("ACP prompt cancelled before dispatch");
 			this.flushMessages(runtime, true);
+			// 回合 stall 看门狗:全静默(无 update/无挂起审批)超阈值先 cancel 再升级强杀,
+			// 否则 CLI 侧流错误吞掉回合(opencode 实测)时 UI 只能等 10 分钟兑底超时。
+			this.armStallWatchdog(runtime);
 			// 长回合请求不套默认 60s 短超时:深思模型单回合可超分钟级,超时应由 abort/stop/连接死亡驱动;
 			// 10 分钟兑底防真悬死(实测 codex-acp 思考型回合 >60s,见 scripts/acpLiveSmoke.mjs)。
 			// 可注入 deps.promptTurnTimeoutMs 供测试缩短。
 			const result = (await runtime.conn.request("session/prompt", { sessionId: runtime.acpSessionId, prompt }, this.deps.promptTurnTimeoutMs ?? PROMPT_TURN_TIMEOUT_MS)) as AcpSessionPromptResult;
+			this.clearTurnTimers(runtime);
 			// 结算前先排空 update 链:result 帧与末批 update 同为 stdout 行序分发,
 			// 但链上每步含异步物化,settle 提前会把在途流式块拆成新回合。
 			await runtime.updateChain;
 			runtime.projection = settleAcpTurn(runtime.projection, result?.stopReason ?? "end_turn");
 		} catch (error) {
 			await runtime.updateChain;
+			this.clearTurnTimers(runtime);
 			// 派发失败（JSON-RPC 拒绝 / 连接死）且 agent 未产出任何内容：撤回刚落的用户条目，
 			// 否则时间线会留一条没有回复的「幽灵消息」，而渲染层已把草稿回填输入框（会重发）。
 			// 用户主动取消(cancelling)不撤回:语义同 pi 后端 abort,用户消息留在时间线。
@@ -622,6 +661,18 @@ export class AcpAgentManager implements SessionAgentGateway {
 			this.emitRuntimeState(input.agentId);
 			const message = error instanceof Error ? error.message : String(error);
 			const hasOutput = runtime.projection.messages.slice(seededIndex + 1).some((entry) => entry.role === "assistant" || entry.role === "tool");
+			// 升级强杀（abort 宽限超时/二次停止/stall）：用户消息已留在时间线（cancelling 不回滚），
+			// delivery=unknown（CLI 是否已处理不可知，不回填草稿避免重发重复），文案本地化并带原因。
+			if (runtime.escalatedStop) {
+				return {
+					accepted: false,
+					error: message,
+					delivery: "unknown",
+					i18nKey: runtime.escalatedStop === "stall" ? "acp.stallForceStopped" : "acp.abortForceStopped",
+					i18nParams: { tool: runtime.tool.name },
+					debugDetails: `escalated=${runtime.escalatedStop}: ${message}`,
+				};
+			}
 			// AUTH_REQUIRED（凭据过期等回合期失败）：描述符随拒收结果透出登录引导。
 			const descriptor = authRequiredDescriptor(error, runtime.tool);
 			return { accepted: false, error: message, delivery: hasOutput || error instanceof AcpTimeoutError ? "unknown" : "rejected", ...(descriptor ?? {}) };
@@ -641,10 +692,19 @@ export class AcpAgentManager implements SessionAgentGateway {
 	async abort(agentId: string): Promise<void> {
 		const runtime = this.runtimes.get(agentId);
 		if (!runtime?.conn || runtime.conn.isClosed() || !runtime.turnActive) return;
+		if (runtime.cancelling) {
+			// 二次停止:cancel 已发出但回合仍未收口(CLI wedged),不再等待,立即强杀。
+			// 强杀 → conn.close 拒绝在途 session/prompt → sendPrompt catch 定向结算。
+			this.forceStopRuntime(runtime, "abort_repeat");
+			return;
+		}
 		// session/cancel 后仍接收尾部 update，原 prompt 返回才收口；审批则立即全部结算。
 		runtime.cancelling = true;
 		runtime.permissions.cancelAll();
 		runtime.conn.notify("session/cancel", { sessionId: runtime.acpSessionId, reason: "user_stop" });
+		// cancel 只是通知:CLI 可能既不处理也不回包(opencode 流错误后实测 wedged)。
+		// 宽限内回合自行结算则定时器被清;超时升级强杀,保证「停止」最终必然生效。
+		this.scheduleAbortEscalation(runtime, "abort_no_response");
 	}
 
 	async stop(agentId: string): Promise<void> {
@@ -654,6 +714,10 @@ export class AcpAgentManager implements SessionAgentGateway {
 		runtime.tab.status = "closed";
 		this.failPendingPermissions(runtime);
 		this.killProcess(runtime);
+		// 删除前先推一次终态:stop()/abort 升级强杀都走这里,渲染层需要 closed 事件把
+		// 会话从 running 收口(删除后的 list() 不再含该 agent,不会产生逐 agent 事件;
+		// 用户主动停止另有 coordinator 的 detach 事件,此推送与其幂等)。
+		this.emit(ipcChannels.agentsState, this.list());
 		this.runtimes.delete(agentId);
 		this.emit(ipcChannels.agentsState, this.list());
 	}
@@ -778,11 +842,92 @@ export class AcpAgentManager implements SessionAgentGateway {
 			messages: runtime.projection.messages,
 			totalLength: runtime.projection.messages.length,
 		});
+		// 内存快照：stop/升级强杀后 runtime 删除，重入会话时 readMessagesByAcpSessionId
+		// 用它避免时间线空白；激活后 session/load 重放会覆盖为完整历史。
+		if (runtime.acpSessionId) {
+			this.messageSnapshots.set(runtime.acpSessionId, runtime.projection.messages.slice(-MESSAGE_SNAPSHOT_LIMIT));
+		}
 	}
 
 	/** 连接关闭/stop 时撤销全部审批；RPC 回包与 timer 清理由权限 owner 配对。 */
 	private failPendingPermissions(runtime: AcpAgentRuntime): void {
 		runtime.permissions.cancelAll();
+	}
+
+	/** 清回合辅助定时器（abort 升级宽限/stall 看门狗）；回合结算、stop、连接死亡共用。 */
+	private clearTurnTimers(runtime: AcpAgentRuntime): void {
+		this.clearAbortEscalation(runtime);
+		this.clearStallWatchdog(runtime);
+	}
+
+	private clearAbortEscalation(runtime: AcpAgentRuntime): void {
+		if (runtime.abortEscalateTimer) {
+			clearTimeout(runtime.abortEscalateTimer);
+			runtime.abortEscalateTimer = null;
+		}
+	}
+
+	private clearStallWatchdog(runtime: AcpAgentRuntime): void {
+		if (runtime.stallTimer) {
+			clearInterval(runtime.stallTimer);
+			runtime.stallTimer = null;
+		}
+	}
+
+	/**
+	 * abort 升级强杀出口：标记原因后走 stop() 同一路径（杀进程 → conn.close →
+	 * 在途 session/prompt 被拒 → sendPrompt catch 定向结算）。
+	 * cancelling 同步置位：强杀语义等价用户取消，不回滚用户消息。
+	 */
+	private forceStopRuntime(runtime: AcpAgentRuntime, reason: "abort_repeat" | "abort_no_response" | "stall"): void {
+		if (this.runtimes.get(runtime.tab.id) !== runtime) return;
+		this.clearTurnTimers(runtime);
+		runtime.cancelling = true;
+		runtime.escalatedStop = reason;
+		this.deps.logger?.warn("acp", `[${runtime.tool.name}] force-stopping wedged agent (${reason})`, { agentId: runtime.tab.id, acpSessionId: runtime.acpSessionId });
+		void this.stop(runtime.tab.id);
+	}
+
+	/** armed abort 升级：宽限内回合自行结算则 clearTurnTimers 取消；超时仍未结算强杀。 */
+	private scheduleAbortEscalation(runtime: AcpAgentRuntime, reason: "abort_no_response" | "stall"): void {
+		if (runtime.abortEscalateTimer || !runtime.turnActive) return;
+		runtime.abortEscalateTimer = setTimeout(() => {
+			runtime.abortEscalateTimer = null;
+			if (this.runtimes.get(runtime.tab.id) !== runtime || !runtime.turnActive) return;
+			this.forceStopRuntime(runtime, reason);
+		}, this.deps.abortEscalationMs ?? ABORT_ESCALATION_MS);
+		runtime.abortEscalateTimer.unref?.();
+	}
+
+	/**
+	 * 回合 stall 看门狗：派发时布防，interval 检查 turnActive 期间是否长时间无任何
+	 * session/update。全静默超阈值 → 先补发 cancel（agent 可能只是模型侧卡住，还活着），
+	 * 再经 abort 升级宽限强杀——两级都由 forceStopRuntime 收口。
+	 * 挂起审批不算静默：那是 agent 合法等待用户输入。
+	 */
+	private armStallWatchdog(runtime: AcpAgentRuntime): void {
+		this.clearStallWatchdog(runtime);
+		runtime.lastUpdateAt = Date.now();
+		const timeoutMs = this.deps.promptStallTimeoutMs ?? PROMPT_STALL_TIMEOUT_MS;
+		const intervalMs = Math.max(50, Math.min(5_000, Math.floor(timeoutMs / 3)));
+		runtime.stallTimer = setInterval(() => {
+			if (this.runtimes.get(runtime.tab.id) !== runtime || !runtime.turnActive) {
+				this.clearStallWatchdog(runtime);
+				return;
+			}
+			if (runtime.permissions.hasPending()) return;
+			if (Date.now() - runtime.lastUpdateAt < timeoutMs) return;
+			this.clearStallWatchdog(runtime);
+			runtime.cancelling = true;
+			runtime.permissions.cancelAll();
+			try {
+				runtime.conn?.notify("session/cancel", { sessionId: runtime.acpSessionId, reason: "stall" });
+			} catch {
+				// 连接已死:closed handler 会结算,这里不再补刀。
+			}
+			this.scheduleAbortEscalation(runtime, "stall");
+		}, intervalMs);
+		runtime.stallTimer.unref?.();
 	}
 
 	private killProcess(runtime: AcpAgentRuntime): void {
@@ -791,11 +936,30 @@ export class AcpAgentManager implements SessionAgentGateway {
 			runtime.flushTimer = null;
 			runtime.flushPending = false;
 		}
+		this.clearTurnTimers(runtime);
 		runtime.conn?.close();
 		const proc = runtime.proc;
 		if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
-		proc.kill();
 		runtime.proc = null;
+		// Windows 下 spawn 常经 cmd.exe 垫片（.cmd shim），proc.kill() 只杀垫片进程，
+		// CLI 孙进程成为孤儿（opencode 实测残留）；taskkill /T 按进程树强杀。
+		// spawn 失败（taskkill 缺失等）兑底 proc.kill()——必须挂 error 监听（AGENTS 安全约束）。
+		if (process.platform === "win32" && typeof proc.pid === "number") {
+			try {
+				const killer = spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+				killer.on("error", () => {
+					try {
+						proc.kill();
+					} catch {}
+				});
+			} catch {
+				try {
+					proc.kill();
+				} catch {}
+			}
+			return;
+		}
+		proc.kill();
 	}
 }
 
