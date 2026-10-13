@@ -24,6 +24,7 @@ function makeManager({ version = "0.80.0", installedVersion = "1.0.0", latestVer
 				},
 			},
 			"../pi/PiProcess": { PiProcess: { invalidateVersionCache: () => invalidations++ } },
+			"./PiProcess": { PiProcess: { invalidateVersionCache: () => invalidations++ } },
 			"../fs/trash": { trashPath: async () => {} },
 			"../logging/sharedLogger": { getAppLogger: () => ({ error: (...args) => logs.push(args) }) },
 			// 旧前缀形态代跑 npm 时用它解析 npm 命令；固定回 npm，避免读到本机真实 settings。
@@ -112,7 +113,7 @@ test("a timed-out version check reports an explicit timeout instead of a bare ab
 	// hangUntilAbort 的 net.fetch 桩永不 resolve，只有 signal 中止才 reject；
 	// 实现必须把无 reason 的 abort（"This operation was aborted"）转成明确超时文案。
 	const fixture = makeManager({ hangUntilAbort: true });
-	await assert.rejects(fixture.manager.fetchPiLatestVersion("1.0.0", 5), /timed out/i);
+	await assert.rejects(fixture.manager.selfUpdate.fetchLatestVersion("1.0.0", 5), /timed out/i);
 });
 
 test("bun 全局安装的 pi：PiDeck 代跑 bun install -g，不再调 pi update --self", async () => {
@@ -170,8 +171,8 @@ test("zero exit status does not count as a self-update when the selected pi rema
 
 test("self-update uses one settings snapshot for checking, execution and verification", async () => {
 	const fixture = makeManager();
-	const fetchVersion = fixture.manager.fetchPiLatestVersion.bind(fixture.manager);
-	fixture.manager.fetchPiLatestVersion = async (...args) => {
+	const fetchVersion = fixture.manager.selfUpdate.fetchLatestVersion.bind(fixture.manager.selfUpdate);
+	fixture.manager.selfUpdate.fetchLatestVersion = async (...args) => {
 		fixture.changeSettings({ customPiPath: "/other/pi", wslEnabled: false });
 		return fetchVersion(...args);
 	};
