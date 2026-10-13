@@ -243,6 +243,10 @@ export function sameChatMessageForRender(previous: ChatMessage, next: ChatMessag
 		// 空文本消息（纯工具回合骨架）的 stopReason 可能是唯一变化（pending→stop/toolUse），
 		// 漏比较会导致 reconcileRuns 复用旧引用、最终/中间分类不更新。
 		previous.stopReason !== next.stopReason ||
+		// 模型可能在同一消息上后补（思考骨架先建、message_end 才带 provider/model），
+		// 漏比较会让 reconcileRuns 复用旧引用，行头一直不显示模型。
+		previous.model?.provider !== next.model?.provider ||
+		previous.model?.modelId !== next.model?.modelId ||
 		!sameImageGenMetaForRender(previous.meta?.imageGen, next.meta?.imageGen)
 	) {
 		return false;

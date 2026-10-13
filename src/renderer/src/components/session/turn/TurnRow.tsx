@@ -269,6 +269,13 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	const containsImageGen = assistantMessages.some((item) => Boolean(item.message.meta?.imageGen));
 	// 编辑目标与编辑初值同源：最后一条有可见正文的 assistant 消息，加载/保存/按钮显隐都指向它
 	const editableMessage = pickEditableAssistantMessage(assistantMessages);
+	// 本轮回答用的模型（逐轮展示）：取本轮最后一条带模型信息的 assistant 消息。
+	// 同一会话内用户会频繁换模型，只有逐轮记录才能看出哪段是谁答的；
+	// 旧数据/ACP 会话没有该字段时留空，行头不占位。
+	let turnModel: ChatMessage["model"];
+	for (let index = assistantMessages.length - 1; index >= 0 && !turnModel; index -= 1) {
+		turnModel = assistantMessages[index]?.message.model;
+	}
 
 	// 本轮没有任何可渲染内容时不输出空容器
 	if (displayItems.length === 0 && allImages.length === 0) return null;
@@ -295,7 +302,7 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 			<div className="flex min-w-0 flex-col gap-3">
 				{/* 行头：头像 + Pi/DSH 署名 + 时间。耗时不放行头——回复生成时用户视线在底部，
 				    统一显示在 turn 尾部（见底部耗时行），不用翻回开头看跑了多久。 */}
-				<TurnAuthorHeader backend={props.backend} acpToolId={props.acpToolId} endedAt={run.endedAt} />
+				<TurnAuthorHeader backend={props.backend} acpToolId={props.acpToolId} endedAt={run.endedAt} model={turnModel} />
 
 				{/* 执行过程折叠栏：中间内容（思考/工具/中间回答）统一收进容器，
 				    由 stepsVisible 整体控制显隐；最终回答在容器外常驻。

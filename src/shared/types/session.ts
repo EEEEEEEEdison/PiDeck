@@ -35,6 +35,13 @@ export type ChatMessage = {
 	 * 历史会话/旧版本数据可能缺失，渲染层需回退启发式判定。
 	 */
 	stopReason?: string;
+	/**
+	 * 本条 assistant 消息实际使用的模型（provider + modelId）。
+	 * 来源：pi 会话文件每条 assistant 消息自带 provider/model 字段，实时链路由
+	 * message_end 的完整消息提供；DSH 用当轮 request/context 上报的路由模型。
+	 * 旧数据、非模型产出的消息（错误/扩展输出）与 ACP 会话可能缺失，渲染层按缺省不显示。
+	 */
+	model?: { provider: string; modelId: string };
 };
 
 /**

@@ -5169,6 +5169,12 @@ export class AgentManager {
 		// 否则 message_end 缺 stopReason 时消息永远停 in pending，渲染层回退启发式失效。
 		const extractedStopReason = partialMessage && typeof partialMessage === "object" ? (nonEmptyString(asRecord(partialMessage)?.stopReason) ?? "") : "";
 		const finalStopReason = extractedStopReason && extractedStopReason !== "pending" ? extractedStopReason : undefined;
+		// 本条消息用的模型：message_end 的完整消息带 provider/model（message_start 骨架也有）。
+		// 缺省不覆盖旧值——delta 路径的消息对象可能不带这两个字段。
+		const messageRecord = partialMessage && typeof partialMessage === "object" ? asRecord(partialMessage) : undefined;
+		const modelProvider = nonEmptyString(messageRecord?.provider);
+		const modelId = nonEmptyString(messageRecord?.model);
+		const extractedModel = modelProvider && modelId ? { provider: modelProvider, modelId } : undefined;
 
 		if (existing) {
 			// 已有骨架：有抽出文本才覆盖；fallbackDelta 仅作追加兜底（终态路径）。
@@ -5179,6 +5185,9 @@ export class AgentManager {
 			// 终态（message_end）带真实 stopReason 时更新；骨架占位值（pending）不覆盖旧值。
 			if (finalStopReason) {
 				existing.stopReason = finalStopReason;
+			}
+			if (extractedModel) {
+				existing.model = extractedModel;
 			}
 			// 保留原始时间戳，不随 delta 刷新。
 			this.markMessagesDirtyFrom(agentId, existingIndex);
@@ -5193,6 +5202,7 @@ export class AgentManager {
 				text: text || "",
 				timestamp: Date.now(),
 				...(finalStopReason ? { stopReason: finalStopReason } : {}),
+				...(extractedModel ? { model: extractedModel } : {}),
 			});
 			this.markMessagesDirtyFrom(agentId, list.length - 1);
 		}

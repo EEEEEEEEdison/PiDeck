@@ -8,7 +8,9 @@ const backendMark = readFileSync("src/renderer/src/components/session/SessionSou
 const timeline = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
 
 test("TurnRow always mounts a Pi/DSH author header, not DSH-only text", () => {
-	assert.match(turnRow, /<TurnAuthorHeader backend=\{props\.backend\} acpToolId=\{props\.acpToolId\} endedAt=\{run\.endedAt\} \/>/);
+	// 行头签名：头像 + 时间 + 本轮实际使用的模型（model 允许缺省，旧数据/ACP 会话不显示）。
+	// 正则必须空白容忍，否则改一次格式化整组断言就红。
+	assert.match(turnRow, /<TurnAuthorHeader[\s\S]*?backend=\{props\.backend\}[\s\S]*?acpToolId=\{props\.acpToolId\}[\s\S]*?endedAt=\{run\.endedAt\}[\s\S]*?model=\{turnModel\}[\s\S]*?\/>/);
 	// 旧策略：Pi 默认不署名、只给 DSH 短标签。时间线行头已改回两边都用 logo。
 	assert.doesNotMatch(turnRow, /props\.backend === "dsh" &&/);
 	assert.doesNotMatch(turnRow, /sessionBackend\.dsh/);
@@ -36,6 +38,18 @@ test("TurnAuthorHeader uses shadcn Avatar logos without a visible name", () => {
 	assert.match(timeline, /acpToolId=\{session\?\.acpToolId\}/);
 	assert.match(header, /sessionBackend\.acp/);
 	assert.doesNotMatch(header, /<span[^>]*>\{\s*name\s*\}<\/span>/);
+});
+
+test("TurnAuthorHeader shows the turn model after the time (data-only, no dictionary copy)", () => {
+	// 同一会话内用户会频繁换模型，行头逐轮显示本条回答用的模型；provider/model 是数据，
+	// 不进词典；缺省时不占位。
+	assert.match(header, /model\?: \{ provider: string; modelId: string \}/);
+	assert.match(header, /props\.model && \(/);
+	assert.match(header, /data-turn-model=\{props\.model\.modelId\}/);
+	assert.match(header, /\{props\.model\.modelId\}/);
+	// 模型名长短不一，必须限宽截断 + title 给全量 provider/model
+	assert.match(header, /min-w-0 truncate[^"]*"/);
+	assert.match(header, /title=\{`\$\{props\.model\.provider\}\/\$\{props\.model\.modelId\}`\}/);
 });
 
 test("sidebar SessionBackendMark still hides Pi to avoid list noise", () => {
