@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: e08156f7bf2cb2adcaca632a145ba4ce38dfa324e1653349df3a81f12de460f0（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 662653f962bba543918b43f22bd80e2c4100bb07a9e5ffda7b263889eea837d7（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4754,6 +4754,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.announcementNotificationDesc": "收到新公告時彈出提醒（預設開啟；輸入或會話執行中會自動延後彈出）。關閉後側欄公告入口與提醒一併隱藏",
 	"settings.enablePiProxy": "啟用 Pi agent 代理",
 	"settings.enablePiProxyDesc": "開啟後所有 Pi 會話預設走下方地址（重啟會話後生效）。僅儲存地址不開啟開關時，可配合右鍵選單「會話代理」或下方供應商白名單按需啟用",
+	"settings.piProxySwitchOverridden": "「按模型走代理」名單已啟用：名單內模型強制走代理、名單外強制直連，此開關不再參與決策。清空名單後開關恢復生效。",
 	"settings.piProxyModels": "按模型走代理",
 	"settings.piProxyModelsDesc": "粒度比供應商更細：僅名單內模型強制走代理（即使全域關閉也複用上方地址），名單外強制直連。條目格式為 provider/模型ID，留空則不按模型過濾（回落供應商名單/全域設定）",
 	"settings.piProxyModelsHint": "與按供應商白名單可共存：模型名單優先匹配，供應商名單兜底；新建會話首條請求即按模型自動匹配代理",

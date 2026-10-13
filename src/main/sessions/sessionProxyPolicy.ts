@@ -1,3 +1,4 @@
+import { hasPiProxyListFilter } from "../../shared/piProxyList";
 import type { AppSettings } from "../../shared/types";
 import type { SessionProxyMode, SessionProxyOverride } from "../../shared/types/session";
 
@@ -100,9 +101,9 @@ export function resolveModelProxyMode(provider: string | undefined, modelId: str
  * 兼容性：只配置供应商名单（piProxyModels 为空）时行为与旧版完全一致。
  */
 export function resolveListedProxyMode(provider: string | undefined, modelId: string | undefined, piProxyProviders: ReadonlyArray<string> | undefined, piProxyModels: ReadonlyArray<string> | undefined): SessionProxyMode | undefined {
-	const providersEnabled = (piProxyProviders?.length ?? 0) > 0;
-	const modelsEnabled = (piProxyModels?.length ?? 0) > 0;
-	if (!providersEnabled && !modelsEnabled) return undefined;
+	// 名单是否启用的判断与设置页共用同一实现：名单非空时主开关完全失效（设置页据此置灰），
+	// 两边各写一份会在策略调整后静默失真。
+	if (!hasPiProxyListFilter(piProxyProviders, piProxyModels)) return undefined;
 	// 模型名单粒度更细，先于供应商名单判定（同模型不同 provider 的场景交给供应商名单兜底）。
 	const modelMode = resolveModelProxyMode(provider, modelId, piProxyModels);
 	if (modelMode === "on") return "on";

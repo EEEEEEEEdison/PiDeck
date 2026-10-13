@@ -12,6 +12,7 @@ import { desktopApi } from "../../../desktopApi";
 // 分组折叠复用模型选择器同一套机制：groupModelsByProvider 按提供商分组 +
 // commandPickerExpansion 的「派生默认展开 + 用户覆盖」纯状态机（搜索激活时强制展开）。
 import { groupModelsByProvider } from "../../session/sessionPickerOptions";
+import { hasPiProxyListFilter } from "../../../../../shared/piProxyList";
 import { INITIAL_PICKER_GROUP_SELECTION, applyPickerGroupAction, resolveGroupExpanded, type PickerGroupSelection } from "../../ui-shadcn/commandPickerExpansion";
 
 /** 代理相关字段：用于判断代理 tab 是否有未保存变更。 */
@@ -89,6 +90,10 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 	// 已选但不在当前 models.json 的条目（可能已删模型/改名），单独小节展示可取消，防止坏值残留不可见。
 	const extraModelKeys = useMemo(() => [...selectedModels].filter((key) => !availableModelKeys.has(key)).sort((a, b) => a.localeCompare(b)), [selectedModels, availableModelKeys]);
 	const hasModelFilter = (draft.piProxyModels?.length ?? 0) > 0;
+	// 名单非空时 pi 代理策略完全由名单决定（名单内强制走代理、名单外强制直连），
+	// 主开关不再参与任何决策——置灰并给出提示，避免用户反复开关却毫无效果。
+	// 判据与主进程 resolveListedProxyMode 共用 hasPiProxyListFilter，防止两处语义漂移。
+	const proxyListActive = hasPiProxyListFilter(draft.piProxyProviders, draft.piProxyModels);
 	// 搜索：本地即时过滤（provider/modelId 与显示名均可命中），仅影响显示，不影响已保存名单。
 	const modelSearchQuery = modelSearch.trim().toLowerCase();
 	const visibleModels = useMemo(() => {
@@ -196,7 +201,19 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 				</div>
 			)}
 			<SettingsSection id="settings-section-proxy-pi-agent" title={t("settings.piProxy")} description={t("settings.piProxyDesc")}>
-				<SettingSwitchRow anchor="proxy-enable-pi" title={t("settings.enablePiProxy")} description={t("settings.enablePiProxyDesc")} checked={draft.piProxyEnabled} onChange={(checked) => updateDraft({ piProxyEnabled: checked })} />
+				<SettingSwitchRow
+					anchor="proxy-enable-pi"
+					title={t("settings.enablePiProxy")}
+					description={
+						<>
+							{t("settings.enablePiProxyDesc")}
+							{proxyListActive && <span className="mt-0.5 block text-amber-600/90 dark:text-amber-400/90">{t("settings.piProxySwitchOverridden")}</span>}
+						</>
+					}
+					checked={draft.piProxyEnabled}
+					disabled={proxyListActive}
+					onChange={(checked) => updateDraft({ piProxyEnabled: checked })}
+				/>
 				{/* 配置与开关解耦：地址/绕过/测试始终可编辑，关闭开关时仅保存配置不启用——
             单会话「会话代理」的 on 模式会复用下方地址，无需全局开启。 */}
 				<div className="setting-proxy-panel">
