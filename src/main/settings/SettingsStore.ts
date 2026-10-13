@@ -322,6 +322,9 @@ Gitmoji 对应关系：
 
 	// ── 更新检测：检查永远自动；自动下载默认开启（v0.7.4 起取代 disableUpdateCheck）──
 	autoDownloadUpdates: true,
+	// pi-ai 模型目录自动更新：后台检查（与应用更新同一轮，2h 一次）发现新版本即自动拉取覆盖层，
+	// 默认开；与设置页手动「更新到最新」同一链路（manifest 校验 + 上一版备份，可还原）。
+	catalogAutoUpdate: true,
 	// 更新源：默认国内 AtomGit 源（第一首选）；用户可切 GitHub 官方源（见 updateSources.ts）
 	updateSource: "atomgit",
 	// 自定义镜像前缀（保留向下兼容字段），空串 = 未填

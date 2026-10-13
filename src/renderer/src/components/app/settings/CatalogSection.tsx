@@ -5,6 +5,7 @@ import { desktopApi } from "../../../desktopApi";
 import { updateStatusAtom } from "../../../atoms/update-atoms";
 import { Button } from "../../ui-shadcn/button";
 import { SettingsSection } from "./SettingsStorageTab";
+import { SettingSwitchRow } from "./SettingRows";
 import type { CatalogCheckResult, CatalogUpdateFailCode, CatalogUpdateResult, CatalogUpdateStatus } from "../../../../../shared/types/catalog";
 import type { UpdateSourceId } from "../../../../../shared/types/settings";
 import { normalizeCustomMirrorHost, UPDATE_SOURCE_MIRRORS } from "../../../../../shared/updateSources";
@@ -42,8 +43,11 @@ function sourceText(info: CatalogUpdateStatus["builtin"]): string {
  * 设置页「模型目录」：查看内置/覆盖版本状态，从 GitHub（main 分支）拉取最新
  * pi-ai 模型目录覆盖到 userData，支持一键还原与恢复上一个覆盖版。
  * 状态与操作结果不落本地配置——目录文件由主进程统一管理，本组件只读展示。
+ *
+ * 开关（autoUpdate 等）由设置页 tab 传入：后台检查发现新版本默认直接自动更新，
+ * 关掉后退回「只提示、手动更新」的旧行为。
  */
-export function CatalogSection(props: { updateSource?: UpdateSourceId; customUpdateSourceUrl?: string }) {
+export function CatalogSection(props: { updateSource?: UpdateSourceId; customUpdateSourceUrl?: string; autoUpdate?: boolean; autoUpdateDirty?: boolean; onAutoUpdateChange?: (checked: boolean) => void }) {
 	const [status, setStatus] = useState<CatalogUpdateStatus | null>(null);
 	const [busy, setBusy] = useState<BusyKind>(null);
 	const [notice, setNotice] = useState<Notice>(null);
@@ -126,6 +130,11 @@ export function CatalogSection(props: { updateSource?: UpdateSourceId; customUpd
 					<span>{t("settings.catalogBackup")}</span>
 					<span className="font-medium text-foreground">{status?.hasBackup ? t("settings.catalogHasBackup") : t("settings.catalogNone")}</span>
 				</div>
+			</div>
+
+			{/* 自动更新开关：后台检查发现新版本即拉取，与下面「更新到最新」同一链路（带校验与备份） */}
+			<div className="mt-2">
+				<SettingSwitchRow anchor="dev-catalog-auto-update" title={t("settings.catalogAutoUpdate")} description={t("settings.catalogAutoUpdateDesc")} checked={props.autoUpdate !== false} dirty={props.autoUpdateDirty} onChange={(checked) => props.onAutoUpdateChange?.(checked)} />
 			</div>
 
 			{notice && <div className={`mt-2 rounded-md border px-3 py-2 text-caption ${notice.kind === "ok" ? "border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 text-text-primary" : "border-destructive/40 bg-destructive/10 text-destructive"}`}>{notice.text}</div>}

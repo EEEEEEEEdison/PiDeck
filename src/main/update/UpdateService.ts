@@ -15,7 +15,7 @@
 import type { AppSettings } from "../../shared/types/settings";
 import type { AppUpdateDeliveryMode, AppUpdateDownloadState, AppUpdateStatusSnapshot, UpdateChannel } from "../../shared/types/app";
 import type { PiUpdateCheckResult } from "../../shared/types";
-import type { CatalogCheckResult } from "../../shared/types/catalog";
+import type { CatalogCheckResult, CatalogUpdateResult } from "../../shared/types/catalog";
 import type { SettingsStore } from "../settings/SettingsStore";
 import { normalizeUpdateSource, normalizeCustomMirrorHost, updateSourceFeedUrl, updateSourceLatestReleaseUrl } from "./updateSources";
 import type { AutoUpdaterLike } from "./autoUpdaterTypes";
@@ -35,6 +35,11 @@ export type UpdateServiceDeps = {
 	checkPiUpdate?: () => Promise<PiUpdateCheckResult>;
 	/** 内置模型目录（pi-ai-catalog）远端检查（PiAiCatalogUpdater.checkRemote 注入）。 */
 	checkCatalogUpdate?: () => Promise<CatalogCheckResult>;
+	/**
+	 * 后台检查发现目录新版本时自动拉取（设置 `catalogAutoUpdate`，默认开）。
+	 * 与设置页「更新到最新」是同一入口（下载 → manifest 校验 → 备份 → 原子替换）。
+	 */
+	updateCatalog?: () => Promise<CatalogUpdateResult>;
 	/** 推送给渲染层（mainWindow.webContents.send 注入）。 */
 	sendToRenderer?: (snapshot: AppUpdateStatusSnapshot) => void;
 	log?: (level: "info" | "warn", message: string, details?: Record<string, unknown>) => void;
@@ -139,6 +144,9 @@ export class UpdateService {
 				const error = toErrorMessage(catalogResult.reason);
 				void this.deps.log?.("warn", "Catalog update check failed", { error });
 			}
+			// 检测到新版本就按设置自动拉取（设置页手动更新的同一条链路）；
+			// 内部已兜底，失败不会影响本轮 app/pi 两路结果。
+			await this.autoApplyCatalogUpdate();
 			// 检查时间持久化（低频写，2h 一次），供 UI 显示上次检查时间。
 			await this.deps.settingsStore.update({ updateLastCheckAt: Date.now() }).catch(() => undefined);
 			this.pushSnapshot();
@@ -436,6 +444,37 @@ export class UpdateService {
 	private async checkCatalog(): Promise<CatalogCheckResult | null> {
 		if (!this.deps.checkCatalogUpdate) return null;
 		return this.deps.checkCatalogUpdate();
+	}
+
+	/**
+	 * 检测到目录新版本后自动更新（设置 `catalogAutoUpdate` 为 false 时关闭，默认开）。
+	 *
+	 * 自动与手动共用 PiAiCatalogUpdater.update：下载双源兜底、manifest 校验不过不上盘、
+	 * 写覆盖层前备份上一版，所以「自动」只是省掉一次点击，不降低任何安全边界。
+	 * 失败或远端并不更新时保留「有更新」快照，用户仍可在设置页手动重试；
+	 * 成功则改写快照为已生效，避免设置页常驻一条已经处理掉的提示。
+	 */
+	private async autoApplyCatalogUpdate(): Promise<void> {
+		const checked = this.lastCatalog;
+		if (!this.deps.updateCatalog || !checked?.ok || !checked.hasUpdate) return;
+		if (this.deps.settingsStore.get().catalogAutoUpdate === false) return;
+		try {
+			const applied = await this.deps.updateCatalog();
+			if (!applied.ok) {
+				void this.deps.log?.("warn", "Catalog auto update failed", { code: applied.code, message: applied.message });
+				return;
+			}
+			if (!applied.updated) {
+				// 远端不高于当前生效版本（例如另一实例刚更新过）：保留检查结果交给用户判断。
+				void this.deps.log?.("info", "Catalog auto update skipped: no newer catalog", { remote: checked.remoteVersion });
+				return;
+			}
+			this.lastCatalog = { ok: true, remoteVersion: checked.remoteVersion, localVersion: checked.remoteVersion, hasUpdate: false };
+			void this.deps.log?.("info", "Catalog auto updated", { version: checked.remoteVersion });
+		} catch (error) {
+			// 自动更新绝不能把后台检查变成失败：只记日志，快照保持「有更新」。
+			void this.deps.log?.("warn", "Catalog auto update failed", { error: toErrorMessage(error) });
+		}
 	}
 
 	private getAutoUpdater(): AutoUpdaterLike {

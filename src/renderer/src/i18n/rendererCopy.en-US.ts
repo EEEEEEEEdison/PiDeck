@@ -4591,6 +4591,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.catalogSectionDesc":
 		"The built-in model catalog ships with each release (packaged resource). When new models land, pull the pre-generated catalog from the GitHub main branch to overlay locally (reuses the app update GitHub mirror config for better reachability); the overlay lives only in the app data directory and can be reverted anytime.",
 	"settings.catalogUpdateSource": "Catalog update source (same as app update)",
+	"settings.catalogAutoUpdate": "Update catalog automatically",
+	"settings.catalogAutoUpdateDesc": "When the background check (same cycle as the app update) finds a newer catalog, download and enable it automatically — no need to click “Update to latest”. The overlay is verified and the previous version is backed up, so it can be restored at any time.",
 	"settings.catalogBuiltin": "Built-in",
 	"settings.catalogOverlay": "Overlay (latest pi-ai)",
 	"settings.catalogModelCount": "models",

@@ -4573,6 +4573,8 @@ export const zhCN = {
 	"settings.catalogSectionTitle": "模型目录",
 	"settings.catalogSectionDesc": "内置模型目录随版本发布（打包资源）；模型上新时可从 GitHub main 分支拉取预生成目录覆盖到本地（复用应用更新的 GitHub 镜像配置，国内可达性更好），覆盖文件仅写入应用数据目录，可随时一键还原。",
 	"settings.catalogUpdateSource": "目录更新源（与应用更新同源）",
+	"settings.catalogAutoUpdate": "自动更新模型目录",
+	"settings.catalogAutoUpdateDesc": "后台检查（与应用更新同一轮）发现新版本时自动拉取并启用，无需手动点「更新到最新」；覆盖层带校验与上一版备份，可随时还原。",
 	"settings.catalogBuiltin": "内置目录",
 	"settings.catalogOverlay": "覆盖版本（最新 pi-ai）",
 	"settings.catalogModelCount": "条模型",

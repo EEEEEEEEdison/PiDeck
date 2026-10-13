@@ -599,6 +599,12 @@ export type AppSettings = {
 	 */
 	autoDownloadUpdates: boolean;
 	/**
+	 * 是否自动更新 pi-ai 模型目录（后台检查发现新版本时直接拉取并启用覆盖层）。
+	 * 默认 true：覆盖层写入带 manifest 校验与上一版备份，可随时一键还原；
+	 * 关闭后只在设置页提示有更新，由用户手动点「更新到最新」。
+	 */
+	catalogAutoUpdate: boolean;
+	/**
 	 * 更新源："github" 走 GitHub Release 官方源（app-update.yml 原生链路）；
 	 * 其余为国内镜像前缀代理（generic provider 拼 releases/latest/download）；
 	 * "custom" 用 customUpdateSourceUrl 的镜像前缀。
@@ -1093,6 +1099,7 @@ export function createDefaultAppSettings(): AppSettings {
 		imageGenWatermark: false,
 		imageGenOutputFormat: "png",
 		autoDownloadUpdates: true,
+		catalogAutoUpdate: true,
 		// 与主进程 defaultSettings 保持一致：更新源默认 GitHub 官方，自定义镜像前缀留空
 		updateSource: "github",
 		customUpdateSourceUrl: "",

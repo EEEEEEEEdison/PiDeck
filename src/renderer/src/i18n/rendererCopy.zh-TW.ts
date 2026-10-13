@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: d20f5e4c493a1c3471217c00d1b32501a3b1fd7724344df6f6f5f7f0dc6c7bef（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 2a614b0efb441047ffcf4b866a837e92a0e690be993e7f101a93e40955e8a0ca（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4580,6 +4580,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.catalogSectionTitle": "模型目錄",
 	"settings.catalogSectionDesc": "內建模型目錄隨版本釋出（打包資源）；模型上新時可從 GitHub main 分支拉取預生成目錄覆蓋到本地（複用應用更新的 GitHub 映象配置，國內可達性更好），覆蓋檔案僅寫入應用資料目錄，可隨時一鍵還原。",
 	"settings.catalogUpdateSource": "目錄更新源（與應用更新同源）",
+	"settings.catalogAutoUpdate": "自動更新模型目錄",
+	"settings.catalogAutoUpdateDesc": "後臺檢查（與應用更新同一輪）發現新版本時自動拉取並啟用，無需手動點「更新到最新」；覆蓋層帶校驗與上一版備份，可隨時還原。",
 	"settings.catalogBuiltin": "內建目錄",
 	"settings.catalogOverlay": "覆蓋版本（最新 pi-ai）",
 	"settings.catalogModelCount": "條模型",

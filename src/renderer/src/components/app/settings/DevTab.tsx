@@ -451,7 +451,7 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 			)}
 
 			{/* 模型目录：内置随版本发布，可从 GitHub 拉取最新覆盖 */}
-			<CatalogSection updateSource={draft.updateSource} customUpdateSourceUrl={draft.customUpdateSourceUrl} />
+			<CatalogSection updateSource={draft.updateSource} customUpdateSourceUrl={draft.customUpdateSourceUrl} autoUpdate={draft.catalogAutoUpdate} autoUpdateDirty={isDirty("catalogAutoUpdate")} onAutoUpdateChange={(checked) => updateDraft({ catalogAutoUpdate: checked })} />
 
 			{/* 运行 */}
 			<SettingsSection id="settings-section-dev-runtime" title={t("settings.sectionRuntime")}>

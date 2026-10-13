@@ -126,6 +126,12 @@ const SETTINGS_ROW_ANCHORS = [
 	},
 	{
 		tab: "dev",
+		slug: "dev-catalog-auto-update",
+		labelKey: "settings.catalogAutoUpdate",
+		keywords: ["模型目录", "目录自动更新", "自动更新", "pi-ai", "catalog", "auto update"],
+	},
+	{
+		tab: "dev",
 		slug: "dev-rpc-timeout",
 		labelKey: "settings.rpcTimeout",
 		keywords: ["rpc 超时", "超时", "timeout", "rpcTimeout", "等太久", "请求超时"],

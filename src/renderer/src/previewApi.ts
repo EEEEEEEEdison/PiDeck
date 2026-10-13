@@ -223,6 +223,7 @@ let previewSettings: AppSettings = {
 	imageGenWatermark: false,
 	imageGenOutputFormat: "png",
 	autoDownloadUpdates: true,
+	catalogAutoUpdate: true,
 	// 与主进程 defaultSettings 保持一致：更新源默认 GitHub 官方，自定义镜像前缀留空
 	updateSource: "github",
 	customUpdateSourceUrl: "",

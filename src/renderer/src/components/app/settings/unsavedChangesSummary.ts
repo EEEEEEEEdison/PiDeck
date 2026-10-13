@@ -140,6 +140,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "customPiPath", tab: "dev", itemKey: "settings.customPiPath" },
 	{ field: "dshRunnerNodePath", tab: "dev", itemKey: "settings.dshRunnerNode" },
 	{ field: "autoDownloadUpdates", tab: "dev", itemKey: "settings.autoDownloadUpdates" },
+	{ field: "catalogAutoUpdate", tab: "dev", itemKey: "settings.catalogAutoUpdate" },
 	{ field: "rpcTimeout", tab: "dev", itemKey: "settings.rpcTimeout" },
 	{ field: "maxEditorFileSizeMB", tab: "dev", itemKey: "settings.maxEditorFileSize" },
 	{ field: "electronChromiumSandbox", tab: "dev", itemKey: "settings.electronSandbox" },

@@ -186,6 +186,7 @@ function createAutomaticService(options = {}) {
 		settingsStore: settings,
 		checkPiUpdate: options.checkPiUpdate,
 		checkCatalogUpdate: options.checkCatalogUpdate,
+		updateCatalog: options.updateCatalog,
 		sendToRenderer: (snapshot) => snapshots.push(structuredClone(snapshot)),
 		log: (level, message, details) => logs.push({ level, message, details }),
 		getCurrentVersion: () => "0.7.3-beta",
@@ -467,6 +468,160 @@ test("a rejected catalog checker logs a warning and keeps the previous snapshot"
 	assert.equal(snapshots.at(-1).catalog, null);
 	// rejected 才会打 warn（与 app/pi 两路一致）；ok:false 只进快照 error 字段。
 	assert.ok(logs.some(({ level, message }) => level === "warn" && message.includes("Catalog")));
+});
+
+// --- catalog (model directory) auto update -----------------------------
+
+/**
+ * 拼装层守卫：自动更新靠 main/index.ts 注入 updateCatalog、设置页把开关接到 UpdateService。
+ * 这两处都不在 UpdateService 的行为测试覆盖范围内，漏了会退化成「开关无效但仍然显示已开启」。
+ */
+test("catalog auto update is wired end to end", () => {
+	const main = readFileSync("src/main/index.ts", "utf8");
+	const devTab = readFileSync("src/renderer/src/components/app/settings/DevTab.tsx", "utf8");
+	assert.match(main, /updateCatalog: \(\) => catalogUpdater\.update\(\)/);
+	assert.match(devTab, /onAutoUpdateChange=\{\(checked\) => updateDraft\(\{ catalogAutoUpdate: checked \}\)\}/);
+});
+
+/** 检查器固定返回「发现 1.2.0 新版本」，便于只变化自动更新那一路。 */
+function detectedCatalogCheck() {
+	return async () => ({ ok: true, remoteVersion: "1.2.0", localVersion: "1.0.4", hasUpdate: true });
+}
+
+test("catalog auto update pulls a detected catalog during the background check", async (t) => {
+	const updater = createFakeUpdater();
+	updater.checkImpl = async () => {
+		updater.emitChecking();
+		updater.emitNotAvailable();
+	};
+	let calls = 0;
+	const { service, snapshots, logs } = createAutomaticService({
+		updater,
+		checkPiUpdate: async () => ({ hasUpdate: false }),
+		checkCatalogUpdate: detectedCatalogCheck(),
+		updateCatalog: async () => {
+			calls += 1;
+			return { ok: true, updated: true };
+		},
+	});
+	stopAfter(t, service);
+
+	await service.checkNow();
+	// 设置未显式关闭（默认开）→ 后台检查发现新版本直接拉取，不需用户点「更新到最新」
+	assert.equal(calls, 1);
+	const snapshot = snapshots.at(-1);
+	assert.equal(snapshot.catalog.hasUpdate, false);
+	assert.equal(snapshot.catalog.localVersion, "1.2.0");
+	assert.equal(snapshot.catalog.latestVersion, "1.2.0");
+	assert.ok(logs.some(({ level, message }) => level === "info" && message === "Catalog auto updated"));
+});
+
+test("catalog auto update stays off when the setting is disabled", async (t) => {
+	const updater = createFakeUpdater();
+	updater.checkImpl = async () => {
+		updater.emitChecking();
+		updater.emitNotAvailable();
+	};
+	let calls = 0;
+	const { service, snapshots } = createAutomaticService({
+		updater,
+		settings: { catalogAutoUpdate: false },
+		checkCatalogUpdate: detectedCatalogCheck(),
+		updateCatalog: async () => {
+			calls += 1;
+			return { ok: true, updated: true };
+		},
+	});
+	stopAfter(t, service);
+
+	await service.checkNow();
+	// 关掉自动更新 = 旧行为：只提示，等用户手动点按钮
+	assert.equal(calls, 0);
+	assert.equal(snapshots.at(-1).catalog.hasUpdate, true);
+});
+
+test("catalog auto update does not run when the check found nothing newer", async (t) => {
+	const updater = createFakeUpdater();
+	updater.checkImpl = async () => {
+		updater.emitChecking();
+		updater.emitNotAvailable();
+	};
+	let calls = 0;
+	const { service } = createAutomaticService({
+		updater,
+		checkCatalogUpdate: async () => ({ ok: true, remoteVersion: "1.2.0", localVersion: "1.2.0", hasUpdate: false }),
+		updateCatalog: async () => {
+			calls += 1;
+			return { ok: true, updated: false };
+		},
+	});
+	stopAfter(t, service);
+
+	await service.checkNow();
+	assert.equal(calls, 0);
+});
+
+test("catalog auto update keeps the pending state when the updater reports no change", async (t) => {
+	const updater = createFakeUpdater();
+	updater.checkImpl = async () => {
+		updater.emitChecking();
+		updater.emitNotAvailable();
+	};
+	const { service, snapshots, logs } = createAutomaticService({
+		updater,
+		checkCatalogUpdate: detectedCatalogCheck(),
+		// 远端不高于当前生效版本（例如另一实例刚更新过）：没实际落盘就不能标记为已处理
+		updateCatalog: async () => ({ ok: true, updated: false }),
+	});
+	stopAfter(t, service);
+
+	await service.checkNow();
+	assert.equal(snapshots.at(-1).catalog.hasUpdate, true);
+	assert.ok(logs.some(({ level, message }) => level === "info" && message.includes("no newer catalog")));
+});
+
+test("catalog auto update failure is logged and leaves the manual entry usable", async (t) => {
+	const updater = createFakeUpdater();
+	updater.checkImpl = async () => {
+		updater.emitChecking();
+		updater.emitNotAvailable();
+	};
+	const { service, snapshots, logs } = createAutomaticService({
+		updater,
+		checkCatalogUpdate: detectedCatalogCheck(),
+		updateCatalog: async () => ({ ok: false, code: "network", message: "both mirrors failed" }),
+	});
+	stopAfter(t, service);
+
+	await service.checkNow();
+	// 失败不掩盖「有更新」：设置页仍可手动重试；日志带失败码便于定位
+	assert.equal(snapshots.at(-1).catalog.hasUpdate, true);
+	const warn = logs.find(({ level, message }) => level === "warn" && message === "Catalog auto update failed");
+	assert.equal(warn?.details?.code, "network");
+});
+
+test("catalog auto update rejection cannot fail the whole check", async (t) => {
+	const updater = createFakeUpdater();
+	updater.checkImpl = async () => {
+		updater.emitChecking();
+		updater.emitNotAvailable();
+	};
+	const { service, snapshots, logs } = createAutomaticService({
+		updater,
+		checkPiUpdate: async () => ({ hasUpdate: false, latestVersion: "0.9.0" }),
+		checkCatalogUpdate: detectedCatalogCheck(),
+		updateCatalog: async () => {
+			throw new Error("download exploded");
+		},
+	});
+	stopAfter(t, service);
+
+	await service.checkNow();
+	// 自动更新在后台跑，异常不得冒泡打断本轮检查（app/pi 两路结果照常入快照）
+	const snapshot = snapshots.at(-1);
+	assert.equal(snapshot.catalog.hasUpdate, true);
+	assert.equal(snapshot.piCli.latestVersion, "0.9.0");
+	assert.ok(logs.some(({ level, message, details }) => level === "warn" && message === "Catalog auto update failed" && /download exploded/.test(String(details?.error))));
 });
 
 // --- manual delivery (unsigned macOS) ----------------------------------
