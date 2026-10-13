@@ -22,6 +22,9 @@ import { posix, win32 } from "node:path";
  * 空格拼接的召唤命令（`wsl -d <distro> -u <user> <linux pi 路径>`，见 PiLocator 的 WSL 分支），
  * 不是 `wsl://` 标记；自定义路径还可能直接是 UNC 互操作路径（`\\wsl.localhost\<distro>\…`）。
  * 落入 bun 推导会让 PiDeck 拿**宿主**的包管理器去装 pi（装错机器）。
+ *
+ * 除判定外，这里也集中「该通道实际要跑什么 argv」的纯构造（npm/bun 全局安装参数）与 bun 版本探测的
+ * 解析：代跑与失败提示共用同一条命令构造器，避免「代跑加了 flag、提示里还是旧命令」的漂移。
  */
 export type PiSelfUpdateChannel =
 	| { kind: "pi-self" }
@@ -69,6 +72,48 @@ function resolveBunInstallRoot(command: string): string | undefined {
 	// 自定义 BUN_INSTALL：`<root>/install/global/node_modules/…` 的 `<root>` 就是根。
 	const installGlobal = /^(.*?)[\\/]install[\\/]global[\\/]node_modules(?:[\\/]|$)/i.exec(command);
 	return installGlobal?.[1];
+}
+
+/** 官方 npm registry；bun 的默认源也是它，更新失败提示统一指向这里。 */
+export const PI_OFFICIAL_REGISTRY = "https://registry.npmjs.org";
+const OFFICIAL_REGISTRY_FLAG = `--registry=${PI_OFFICIAL_REGISTRY}`;
+
+/**
+ * npm 全局安装参数（代跑与「源未同步」提示共用）。参数与 pi 自身的 npm 分支一致（`--ignore-scripts`
+ * 安装脚本隔离、`--min-release-age=0` 绕过刚发布版本被用户发布的年龄门拦下）；`registry` 只在提示里
+ * 打开（代跑必须尊重用户配置的源）；`prefixDir` 给旧引导前缀副本，缺了它 npm 会装到用户真实全局目录。
+ */
+export function npmGlobalInstallArgs(spec: string, options: { prefixDir?: string; registry?: boolean } = {}): string[] {
+	return ["install", "-g", "--ignore-scripts", "--min-release-age=0", spec, ...(options.prefixDir ? ["--prefix", options.prefixDir] : []), ...(options.registry ? [OFFICIAL_REGISTRY_FLAG] : [])];
+}
+
+/**
+ * bun 全局安装参数；参数与 pi 自身的 bun 分支一致（`--minimum-release-age=0` 绕过 bunfig 的发布年龄门）。
+ * `releaseAgeFlag` 只对 bun ≥ 1.3 打开（开关本身是 1.3 才引入的）。
+ */
+export function bunGlobalInstallArgs(spec: string, options: { releaseAgeFlag?: boolean; registry?: boolean } = {}): string[] {
+	return ["install", "-g", "--ignore-scripts", ...(options.releaseAgeFlag ? ["--minimum-release-age=0"] : []), spec, ...(options.registry ? [OFFICIAL_REGISTRY_FLAG] : [])];
+}
+
+/** 年龄门开关在 bun 1.3 引入（1.3 之前无此开关，发了也不会有集合）。 */
+export const BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG = "1.3.0";
+
+/**
+ * `bun --version` 输出的版本（如 `1.4.3`，实测单行裸版本号）。只认「整行就是一个版本」的行：直接抓版本号
+ * 子串会在包装命令（mise/asdf 等）的摸幅里抽到无关版本，把老 bun 误判成 ≥ 1.3 后塞进它不认识的
+ * `--minimum-release-age`（1.3 之前无此开关）。
+ */
+export function parseBunVersion(raw: string): string | undefined {
+	for (const line of raw.split(/\r?\n/)) {
+		const match = /^\s*(?:bun\s+)?v?(\d+\.\d+\.\d+(?:[-+][\w.-]+)?)\s*$/i.exec(line);
+		if (match) return match[1];
+	}
+	return undefined;
+}
+
+/** 本地绝对路径形态（POSIX `/…`、Windows `C:\…`、UNC `\\…`）；带空格的安装目录同样合法，只按前缀判定。 */
+export function isLocalAbsolutePath(value: string): boolean {
+	return /^(?:[a-zA-Z]:[\\/]|[\\/])/.test(value);
 }
 
 export function resolvePiSelfUpdateChannel(command: string, platform: NodeJS.Platform = process.platform): PiSelfUpdateChannel {

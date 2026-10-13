@@ -21,7 +21,7 @@ import { discoverExtensionEntries } from "./extensionDiscovery";
 import { parsePiVersion } from "./extensionVersionGate";
 import { redactForReport, truncateText } from "../health/redact";
 import { readConfiguredNpmCommand } from "../resourceWhitelist";
-import { resolvePiSelfUpdateChannel, type PiSelfUpdateChannel } from "../pi/piSelfUpdateChannel";
+import { BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG, bunGlobalInstallArgs, isLocalAbsolutePath, npmGlobalInstallArgs, parseBunVersion, PI_OFFICIAL_REGISTRY, resolvePiSelfUpdateChannel, type PiSelfUpdateChannel } from "../pi/piSelfUpdateChannel";
 
 /** pi 0.70.3 introduced self-update and the packages-only --extensions flag. */
 const MIN_PI_VERSION_FOR_SELF_UPDATE = "0.70.3";
@@ -37,22 +37,6 @@ function supportsPiSelfUpdate(version: string | undefined): boolean {
 	return comparison > 0 || (comparison === 0 && !normalized.includes("-"));
 }
 
-/** 年龄门开关在 bun 1.3 引入（1.3 之前无此开关，发了也不会有集合）。 */
-const BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG = "1.3.0";
-
-/**
- * `bun --version` 输出的版本（如 `1.4.3`，实测单行裸版本号）。只认「整行就是一个版本」的行：直接抓版本号
- * 子串会在包装命令（mise/asdf 等）的摸幅里抽到无关版本，把老 bun 误判成 ≥ 1.3 后塞进它不认识的
- * `--minimum-release-age`（1.3 之前无此开关）。
- */
-function parseBunVersion(raw: string): string | undefined {
-	for (const line of raw.split(/\r?\n/)) {
-		const match = /^\s*(?:bun\s+)?v?(\d+\.\d+\.\d+(?:[-+][\w.-]+)?)\s*$/i.exec(line);
-		if (match) return match[1];
-	}
-	return undefined;
-}
-
 /** 主进程日志用的错误摘要：只取 message，不把堆栈和对象形态丢进日志 detail。 */
 function describeError(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -66,29 +50,6 @@ export { BUILT_IN_EXTENSIONS } from "./builtInExtensions";
 
 /** pi 的 npm 包名。pi.dev 版本接口在包改名迁移期可返回不同 packageName，见 fetchPiLatestVersion。 */
 const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
-
-/** 官方 npm registry；bun 的默认源也是它，更新失败提示统一指向这里。 */
-const PI_OFFICIAL_REGISTRY = "https://registry.npmjs.org";
-const OFFICIAL_REGISTRY_FLAG = `--registry=${PI_OFFICIAL_REGISTRY}`;
-
-/**
- * npm 全局安装参数：PiDeck 代跑与「源未同步」提示共用同一条命令构造器，避免两处命令漂移
- * （历史事故：代跑加了 `--ignore-scripts` / 年龄门开关，提示里还是裸 `install -g <spec>`）。
- * `registry` 只在提示里打开（代跑必须尊重用户配置的源）；`prefixDir` 给旧引导前缀副本。
- */
-function npmGlobalInstallArgs(spec: string, options: { prefixDir?: string; registry?: boolean } = {}): string[] {
-	return ["install", "-g", "--ignore-scripts", "--min-release-age=0", spec, ...(options.prefixDir ? ["--prefix", options.prefixDir] : []), ...(options.registry ? [OFFICIAL_REGISTRY_FLAG] : [])];
-}
-
-/** bun 全局安装参数；`releaseAgeFlag` 只对 bun ≥ 1.3 打开（开关本身是 1.3 才有的）。 */
-function bunGlobalInstallArgs(spec: string, options: { releaseAgeFlag?: boolean; registry?: boolean } = {}): string[] {
-	return ["install", "-g", "--ignore-scripts", ...(options.releaseAgeFlag ? ["--minimum-release-age=0"] : []), spec, ...(options.registry ? [OFFICIAL_REGISTRY_FLAG] : [])];
-}
-
-/** 本地绝对路径形态（POSIX `/…`、Windows `C:\…`、UNC `\\…`）；带空格的安装目录同样合法，只按前缀判定。 */
-function isLocalAbsolutePath(value: string): boolean {
-	return /^(?:[a-zA-Z]:[\\/]|[\\/])/.test(value);
-}
 
 /**
  * 包管理器「目标源里没有这个版本」的错误特征。实测文案：
@@ -652,8 +613,9 @@ export class ExtensionManager {
 		// 通道分派（bun 全局 / 旧引导前缀 → PiDeck 代跑包管理器；其余 → pi 自身）。
 		// 判定依赖 check 返回的 command（选中的 pi 可执行路径形状），见 piSelfUpdateChannel。
 		const channel = resolvePiSelfUpdateChannel(check.command ?? "");
-		// 展示用摘要（不带 flags、前缀路径掩码）：真实参数以 npmGlobalInstallArgs / bunGlobalInstallArgs 为准。
-		const channelLabel = channel.kind === "bun-global" ? `bun install -g ${check.packageName ?? PI_PACKAGE_NAME}@${check.latestVersion}` : channel.kind === "portable-prefix" ? `npm install -g ${check.packageName ?? PI_PACKAGE_NAME}@${check.latestVersion} --prefix <pi-runtime>` : "pi update --self";
+		// 展示用摘要：与代跑共用同一 argv 构造器（真实前缀路径掩码成 <pi-runtime>），不再单独维护映射。
+		const labelSpec = `${check.packageName ?? PI_PACKAGE_NAME}@${check.latestVersion}`;
+		const channelLabel = channel.kind === "bun-global" ? `bun ${bunGlobalInstallArgs(labelSpec).join(" ")}` : channel.kind === "portable-prefix" ? `npm ${npmGlobalInstallArgs(labelSpec, { prefixDir: "<pi-runtime>" }).join(" ")}` : "pi update --self";
 		let output: string;
 		try {
 			if (channel.kind === "bun-global") {

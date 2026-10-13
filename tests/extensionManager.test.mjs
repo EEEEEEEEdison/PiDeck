@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
+import { createBunLayout } from "./helpers/bunLayout.mjs";
 
 /** Resolve production imports from their source directory; stub only desktop side effects. */
 const loadProductionTs = createTsSandbox({
@@ -278,43 +279,38 @@ test("pickBunCommand：只有本地绝对路径才允许退回裸 bun（包装�
 });
 
 test("推导出的 bun 存在时用绝对路径（不依赖 GUI 进程的 PATH）", async () => {
-	const { piPath, root } = await createBunLayout({ withBun: true });
-	const manager = createUpdatePiManager(piPath, (key) => key);
-	const calls = [];
-	manager.runBunGlobalUpdate = async (command) => {
-		calls.push(command);
-		throw new Error("stop after capture");
-	};
+	const layout = await createBunLayout({ withBun: true });
+	try {
+		const manager = createUpdatePiManager(layout.piPath, (key) => key);
+		const calls = [];
+		manager.runBunGlobalUpdate = async (command) => {
+			calls.push(command);
+			throw new Error("stop after capture");
+		};
 
-	await assert.rejects(manager.updatePi(), /stop after capture/);
-	assert.deepEqual(calls, [join(root, ".bun", "bin", process.platform === "win32" ? "bun.exe" : "bun")]);
-	await rm(root, { recursive: true, force: true });
+		await assert.rejects(manager.updatePi(), /stop after capture/);
+		assert.deepEqual(calls, [layout.bunPath]);
+	} finally {
+		await layout.cleanup();
+	}
 });
 
 test("推导出的 bun 不存在时回退裸 bun（Homebrew/scoop 装的 bun 本体不在 ~/.bun/bin）", async () => {
-	const { piPath, root } = await createBunLayout({ withBun: false });
-	const manager = createUpdatePiManager(piPath, (key) => key);
-	const calls = [];
-	manager.runBunGlobalUpdate = async (command) => {
-		calls.push(command);
-		throw new Error("stop after capture");
-	};
+	const layout = await createBunLayout({ withBun: false });
+	try {
+		const manager = createUpdatePiManager(layout.piPath, (key) => key);
+		const calls = [];
+		manager.runBunGlobalUpdate = async (command) => {
+			calls.push(command);
+			throw new Error("stop after capture");
+		};
 
-	await assert.rejects(manager.updatePi(), /stop after capture/);
-	assert.deepEqual(calls, ["bun"]);
-	await rm(root, { recursive: true, force: true });
+		await assert.rejects(manager.updatePi(), /stop after capture/);
+		assert.deepEqual(calls, ["bun"]);
+	} finally {
+		await layout.cleanup();
+	}
 });
-
-/** 真实目录 fixture：造出 `<root>/.bun/bin/pi`，按需决定同目录是否有 bun 本体。 */
-async function createBunLayout({ withBun }) {
-	const root = await mkdtemp(join(tmpdir(), "pideck-bun-"));
-	const binDir = join(root, ".bun", "bin");
-	await mkdir(binDir, { recursive: true });
-	const piPath = join(binDir, process.platform === "win32" ? "pi.exe" : "pi");
-	await writeFile(piPath, "", "utf8");
-	if (withBun) await writeFile(join(binDir, process.platform === "win32" ? "bun.exe" : "bun"), "", "utf8");
-	return { piPath, root };
-}
 
 test("a stale lightweight extension scan cannot overwrite a newer force refresh", async () => {
 	const { ExtensionManager } = loadExtensionManagerModule();

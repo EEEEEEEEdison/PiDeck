@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
+import { createBunLayout } from "./helpers/bunLayout.mjs";
 
 /** Exercise the real update/exec path without launching pi or accessing the network. */
 function makeManager({ version = "0.80.0", installedVersion = "1.0.0", latestVersion = "1.0.0", executionError, stdout = "updated", stderr = "", checkError, hangUntilAbort = false, command } = {}) {
@@ -118,19 +119,10 @@ test("bun 全局安装的 pi：PiDeck 代跑 bun install -g，不再调 pi updat
 	// 回归（2026-10 用户报障）：pi 在 Windows 上不支持 bun 自更新，`pi update --self` 直接报错退出；
 	// 分派器必须按可执行路径形状识别 bun 布局并代跑 bun。用真实目录 fixture：bun 本体存在时才走绝对路径
 	//（不存在则回退裸 bun，那条分支由 extensionManager.test.mjs 单独钉住）。
-	const { mkdir, mkdtemp, rm, writeFile } = await import("node:fs/promises");
-	const { tmpdir } = await import("node:os");
-	const { join } = await import("node:path");
-	const root = await mkdtemp(join(tmpdir(), "pideck-bun-cli-"));
-	const binDir = join(root, ".bun", "bin");
-	await mkdir(binDir, { recursive: true });
-	const bunPi = join(binDir, process.platform === "win32" ? "pi.exe" : "pi");
-	const expectedBun = join(binDir, process.platform === "win32" ? "bun.exe" : "bun");
-	await writeFile(bunPi, "", "utf8");
-	await writeFile(expectedBun, "", "utf8");
+	const layout = await createBunLayout({ withBun: true });
 
 	try {
-		const fixture = makeManager({ version: "1.0.0", latestVersion: "1.1.0", installedVersion: "1.1.0", command: bunPi });
+		const fixture = makeManager({ version: "1.0.0", latestVersion: "1.1.0", installedVersion: "1.1.0", command: layout.piPath });
 		const result = await fixture.manager.updatePi();
 		assert.equal(result.updated, true);
 		assert.ok(
@@ -139,19 +131,19 @@ test("bun 全局安装的 pi：PiDeck 代跑 bun install -g，不再调 pi updat
 		);
 		const install = fixture.commands.find((entry) => entry.args.includes("install"));
 		assert.ok(install, "必须代跑 bun install");
-		assert.equal(install.args[0], expectedBun);
+		assert.equal(install.args[0], layout.bunPath);
 		// 参数与 pi 自身 bun 分支一致（探测到 bun 1.3.5 → 带上年龄门开关）。
 		assert.deepEqual(install.args.slice(1), ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@earendil-works/pi-coding-agent@1.1.0"]);
 		// 年龄门开关的「条件」必须真的来自探测：探测用什么 bun、跑没跑、是不是只代跑一次，全部钉住。
 		const probe = fixture.commands.find((entry) => entry.args.includes("--version"));
 		assert.ok(probe, "判断 bun ≥ 1.3 前必须先探测 --version");
-		assert.equal(probe.args[0], expectedBun);
+		assert.equal(probe.args[0], layout.bunPath);
 		assert.equal(fixture.commands.length, 2, "一次探测 + 一次安装");
 		// 安装根要作为 BUN_INSTALL 传给子进程（GUI 启动读不到 shell rc，不传会装进默认 ~/.bun）。
-		assert.equal(install.options.env.BUN_INSTALL, join(root, ".bun"));
-		assert.match(result.command, /bun install -g @earendil-works\/pi-coding-agent@1\.1\.0/);
+		assert.equal(install.options.env.BUN_INSTALL, layout.installRoot);
+		assert.match(result.command, /bun install -g .*@earendil-works\/pi-coding-agent@1\.1\.0/);
 	} finally {
-		await rm(root, { recursive: true, force: true });
+		await layout.cleanup();
 	}
 });
 
@@ -167,7 +159,7 @@ test("旧引导前缀副本：PiDeck 带 --prefix 代跑 npm，不再让 pi 自�
 	assert.equal(fixture.commands.length, 1, "只代跑 npm，不调 pi update --self");
 	assert.equal(fixture.commands[0].args[0], "npm");
 	assert.deepEqual(fixture.commands[0].args.slice(1), ["install", "-g", "--ignore-scripts", "--min-release-age=0", "@earendil-works/pi-coding-agent@1.1.0", "--prefix", expectedPrefix]);
-	assert.match(result.command, /npm install -g @earendil-works\/pi-coding-agent@1\.1\.0 --prefix <pi-runtime>/);
+	assert.match(result.command, /npm install -g .*@earendil-works\/pi-coding-agent@1\.1\.0 --prefix <pi-runtime>/);
 });
 
 test("zero exit status does not count as a self-update when the selected pi remains outdated", async () => {

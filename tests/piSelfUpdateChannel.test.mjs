@@ -15,7 +15,7 @@ import { test } from "node:test";
 import { join, win32 } from "node:path";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { resolvePiSelfUpdateChannel } = loadTsCommonJs("src/main/pi/piSelfUpdateChannel.ts");
+const { BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG, bunGlobalInstallArgs, isLocalAbsolutePath, npmGlobalInstallArgs, parseBunVersion, PI_OFFICIAL_REGISTRY, resolvePiSelfUpdateChannel } = loadTsCommonJs("src/main/pi/piSelfUpdateChannel.ts");
 
 test("bun 全局 bin（POSIX 形态）→ bun-global，bunCommand 取同目录的 bun 本体", () => {
 	const channel = resolvePiSelfUpdateChannel("/home/tester/.bun/bin/pi", "linux");
@@ -92,4 +92,31 @@ test("运行时 WSL 召唤形态 → pi-self（不能把 WSL 目标的 bun 当�
 	]) {
 		assert.equal(resolvePiSelfUpdateChannel(command, "win32").kind, "pi-self", command);
 	}
+});
+
+test("安装参数构造器：代跑与「源未同步」提示同源（npm/bun 各自的 flags）", () => {
+	// 历史事故：代跑加了 flags、提示里还是裸 install -g，用户粘一条跑不通的命令。
+	assert.equal(npmGlobalInstallArgs("pkg@1").join(" "), "install -g --ignore-scripts --min-release-age=0 pkg@1");
+	assert.equal(npmGlobalInstallArgs("pkg@1", { prefixDir: "/p", registry: true }).join(" "), `install -g --ignore-scripts --min-release-age=0 pkg@1 --prefix /p --registry=${PI_OFFICIAL_REGISTRY}`);
+	assert.equal(bunGlobalInstallArgs("pkg@1", { releaseAgeFlag: true }).join(" "), "install -g --ignore-scripts --minimum-release-age=0 pkg@1");
+	// 老 bun（< 1.3）不发年龄门开关：开关本身是 1.3 才引入的。
+	assert.equal(bunGlobalInstallArgs("pkg@1", { registry: true }).join(" "), `install -g --ignore-scripts pkg@1 --registry=${PI_OFFICIAL_REGISTRY}`);
+	assert.equal(BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG, "1.3.0");
+});
+
+test("bun 版本解析只认整行版本号（包装命令的摸幅不得误判成新 bun）", () => {
+	assert.equal(parseBunVersion("1.4.3\n"), "1.4.3");
+	assert.equal(parseBunVersion("bun 1.3.0\n"), "1.3.0");
+	assert.equal(parseBunVersion("1.3.0-canary.1\n"), "1.3.0-canary.1");
+	// mise/asdf 等包装命令会先打印自己的版本：只能取整行是版本的那一行。
+	assert.equal(parseBunVersion("mise 2024.9.5\n1.2.21\n"), "1.2.21");
+	assert.equal(parseBunVersion("no version here"), undefined);
+});
+
+test("本地绝对路径判定（bun 回退的第二道防线：包装命令串不能退裸 bun）", () => {
+	assert.equal(isLocalAbsolutePath("/home/u/.bun/bin/bun"), true);
+	assert.equal(isLocalAbsolutePath(String.raw`C:\Users\u\.bun\bin\bun.exe`), true);
+	assert.equal(isLocalAbsolutePath(String.raw`\\server\share\bun`), true);
+	assert.equal(isLocalAbsolutePath("bun"), false);
+	assert.equal(isLocalAbsolutePath("wsl -d Ubuntu-24.04 -u dev /home/u/.bun/bin/bun"), false);
 });
