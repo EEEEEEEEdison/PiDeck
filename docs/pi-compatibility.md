@@ -49,7 +49,8 @@
 | 发布配置 schema（`schemas/{settings,models,keybindings,theme}.schema.json`），主题 schema 收紧且启动即校验 | `settings-schema.js`/`keybindings-schema.js` 在 dist 内**没有任何 import 方**（只用于生成给编辑器用的 schema）；运行时校验只在 TUI 主题（`dist/main.js` 的 `setThemeJsonValidator`）。PiDeck 走 RPC，主题是自有的 `userData/custom-themes/`，不写 pi 主题也不写 `$schema` | 无需改动 | 源码核对 | — |
 | 移除 experimental server/client/plugin 栈与 `./client`、`./experimental/plugin` 导出，删除 `pi-client` / `pi-protocol` / `pi-server` / `@earendil-works/chord` | PiDeck 不依赖（package.json 与 lock 无引用）；`.` 与 `./rpc-entry` 导出保留 | 已核对无变化 | package.json / lock 核对 | — |
 | OSC 7501 程序状态上报（1.1.0） | 只存在于 `dist/modes/interactive/`，`bundle/rpc-entry.js` 引用数为 0 → 不会污染 PiDeck 的 stdio JSON-RPC | 已核对无变化 | `grep -c 7501` | — |
-| `agent_settled` 新增 `aborted`（1.1.0） | 现有消费点（会话标题扩展、`AgentManager`、`gitIpc`）只把它当触发信号，不解析 payload | 可选增强 | `pi-deck-session-title.ts`、`AgentManager.ts` | — |
+| `agent_settled` 新增 `aborted`（1.1.0） | `AgentManager` 用 `aborted === true` 抑制成功完成通知；保留本地停止记录与 settled 超时状态作为旧版/迟到事件兜底。取消仍收敛为 idle，不覆盖已有 error 状态 | 已适配（本轮） | `AgentManager.ts`、`tests/agentSettledAbortLifecycle.test.mjs`、`tests/agentSettledContract.test.mjs` | 最低支持 pi 提升到 1.1 后仍保留本地迟到事件保护 |
+| PiDeck 静态模型目录来源更新 | 构建期 `pi-ai` 精确锁定从 1.0.4 更新到 1.2.0；42 个 provider、1649 条模型（chat 1554 / image 61 / classifier 34），相较原目录新增 60、移除 31、字段变更 232。仅更新静态资源，不改 OpenRouter 联网刷新或 DSH 独立依赖 | 已更新（本轮） | `package.json` / lock、`resources/pi-ai-catalog*.json`、目录生成/读取/打包与能力补全测试 | 无 |
 | OpenRouter 按 key 列模型（1.2.0） | 只影响 `pi --list-models` 的条目数；PiDeck 的能力字段仍来自 catalog artifact + endpoint `/models` | 无需改动（行为变化） | — | — |
 | codemode 输出格式（`==> text N/M <==`、`<console_output>`）、`reachesTools`、工具声明 `@` 约束 | 时间线只渲染文本，无解析依赖 | 无需改动 | — | — |
 | `serializeConversation()` 不再带 thinking 块 | pi 内部行为；PiDeck 上下文圆环按会话条目 + 实测提示词装载计算 | 无需改动 | — | — |

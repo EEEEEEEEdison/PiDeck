@@ -4809,9 +4809,10 @@ export class AgentManager {
 			// 若 settled 前已有 agent_start（用户立刻重发），此处才真正解封；
 			// 若还没有新 start，则保持封印，防止 settled 后残留 delta 复活旧气泡。
 			// abort 的 settled（或 abort 后重发时迟到的旧 settled）不算成功完成：
+			// pi 1.1+ 的 aborted 标记也覆盖扩展发起的取消；旧版或迟到事件仍由本地状态兜底。
 			// recentlyAborted 被 agent_start 清除，但 settled 兜底定时器保留到 settled，
-			// 两者任一命中都说明本轮被用户中止，不得触发「已完成」提醒。
-			const isAbortSettled = this.recentlyAborted.has(agentId) || this.abortGate.hasSettledFallback(agentId);
+			// 任一取消信号命中都不得触发「已完成」提醒。
+			const isAbortSettled = typed.aborted === true || this.recentlyAborted.has(agentId) || this.abortGate.hasSettledFallback(agentId);
 			this.noteAgentAbortSettled(agentId);
 			this.recentlyAborted.delete(agentId);
 			if (runtime && runtime.tab.status !== "error" && runtime.tab.status !== "closed") {
