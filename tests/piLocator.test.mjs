@@ -52,6 +52,20 @@ function loadPiLocatorModule(platform = process.platform, envOverrides = {}, hom
 			target: ts.ScriptTarget.ES2022,
 		},
 	});
+	// 沙箱内的 require：相对导入逐层以「发起 import 的文件所在目录」为基准解析。
+	// 若把相对 specifier 直接丢给真实 require，会以 tests/ 为基准 → 生产代码新增本地 import 就整片 MODULE_NOT_FOUND。
+	const sandboxRequire = (baseDir, id) => {
+		if (id in moduleOverrides) return moduleOverrides[id];
+		if (id === "electron") return { app: { getPath: () => homePath } };
+		if (id.startsWith(".")) {
+			const dependencyPath = join(baseDir, id + ".ts");
+			return loadTsFile(dependencyPath, {
+				process: sandbox.process,
+				require: (nested) => sandboxRequire(dirname(dependencyPath), nested),
+			});
+		}
+		return require(id);
+	};
 	const sandbox = {
 		Buffer,
 		TextDecoder,
@@ -61,20 +75,7 @@ function loadPiLocatorModule(platform = process.platform, envOverrides = {}, hom
 			env: { ...process.env, ...envOverrides },
 			platform,
 		},
-		require: (id) => {
-			if (id in moduleOverrides) return moduleOverrides[id];
-			if (id === "electron") {
-				return { app: { getPath: () => homePath } };
-			}
-			// 相对依赖（../wsl/wslPiProbe、../wsl/wslExe）用同一套沙箱环境加载
-			if (id.startsWith(".")) {
-				return loadTsFile(join(PI_LOCATOR_DIR, id + ".ts"), {
-					process: sandbox.process,
-					require: (nested) => (nested in moduleOverrides ? moduleOverrides[nested] : require(nested)),
-				});
-			}
-			return require(id);
-		},
+		require: (id) => sandboxRequire(PI_LOCATOR_DIR, id),
 		...sandboxExtra,
 	};
 	sandbox.global = sandbox;
