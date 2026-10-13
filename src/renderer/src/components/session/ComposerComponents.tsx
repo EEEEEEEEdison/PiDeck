@@ -538,7 +538,10 @@ export function ComposerBottomBar(props: {
 	const modelName = modelFrom?.modelName || modelFrom?.modelId;
 	const modelLabel = modelName ? formatModelRef(modelFrom ?? { provider: "", modelId: "" }) : `${t("app.model")}: -`;
 	// 锁定态只读后端标识：ACP 会话把工具名拼进 title/aria-label（与下拉触发器同一套品牌 logo）。
-	const lockedAcpTool = props.backend === "acp" ? useAtomValue(acpToolsAtom).find((tool) => tool.id === props.acpTool?.toolId) : undefined;
+	// hook 必须无条件调用：写成 `props.backend === "acp" ? useAtomValue(...) : undefined` 会让
+	// 「切到 ACP 后端」这次渲染比上一次多一个 hook，直接抛 React #310（渲染的 hook 数多于上次）。
+	const acpTools = useAtomValue(acpToolsAtom);
+	const lockedAcpTool = props.backend === "acp" ? acpTools.find((tool) => tool.id === props.acpTool?.toolId) : undefined;
 	const modelPendingTitle = props.modelPending
 		? t("app.modelPendingTitle", {
 				from: formatModelRef(props.modelPending.from),
