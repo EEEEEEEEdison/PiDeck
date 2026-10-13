@@ -94,10 +94,14 @@ test("shouldAutoAdvanceBatchAnswer: 多题批次的单值选择才自动前进",
 	// multi_select 需多次勾选，editor 每次击键都写答案（会打字即跳题），都不能自动跳
 	assert.equal(shouldAutoAdvanceBatchAnswer({ type: "multi_select", total: 3 }), false);
 	assert.equal(shouldAutoAdvanceBatchAnswer({ type: "editor", total: 3 }), false);
-	// 单题批次不自动：卡片本身就是确认卡，点选项即提交等于删掉确认步骤，误触无法反悔。
-	assert.equal(shouldAutoAdvanceBatchAnswer({ type: "select", total: 1 }), false);
-	assert.equal(shouldAutoAdvanceBatchAnswer({ type: "confirm", total: 1 }), false);
-	assert.equal(shouldAutoAdvanceBatchAnswer({ type: "select", total: 0 }), false);
+	// 单题批次（total === 1）同样一步提交：末题即直接提交全部，与单卡 select 点击即提交
+	// 的行为对齐（2026-01 用户反馈：点答案后还要再点一次提交很麻烦）。
+	assert.equal(shouldAutoAdvanceBatchAnswer({ type: "select", total: 1 }), true);
+	assert.equal(shouldAutoAdvanceBatchAnswer({ type: "confirm", total: 1 }), true);
+	// multi_select 单题批次仍不自动：多选需要多次勾选，末题提交按钮保留
+	assert.equal(shouldAutoAdvanceBatchAnswer({ type: "multi_select", total: 1 }), false);
+	// total = 0 时卡片不渲染（BatchAskInlineBar 对空批次 return null），策略结果无实际消费方
+	assert.equal(shouldAutoAdvanceBatchAnswer({ type: "select", total: 0 }), true);
 });
 
 test("classifyAskCardStatus: 明确回答视为 answered", () => {

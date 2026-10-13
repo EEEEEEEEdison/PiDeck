@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: de8351d0a4f0cc1ca35e44e4f63c38269ece9ab300603527b1899470b178f01d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: e08156f7bf2cb2adcaca632a145ba4ce38dfa324e1653349df3a81f12de460f0（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -1223,7 +1223,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"ask.batchIncomplete": "還有題目未回答",
 	"ask.batchGoReview": "去審閱",
 	"ask.multiSelectHint": "可多選",
-	"ask.selectedPrefix": "已選擇：",
 	// ── 命令面板（Ctrl/Cmd+P）：模糊搜索设置项并跳转 + 执行操作 ──
 	"command.placeholder": "搜尋設定項或操作…",
 	"command.empty": "沒有匹配的結果",
