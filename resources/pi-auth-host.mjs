@@ -314,6 +314,11 @@ function abortActive(reason) {
 // ---------------------------------------------------------------------------
 
 async function main() {
+	// boot 阶段计时日志（stderr，不碰协议通道）：与 pi-enhance-host 同形——宿主
+	// 报启动超时时，能区分「进程没起来 / SDK 导入慢 / create 卡住」的只有这几行。
+	log(`boot: node ${process.version} execPath=${process.execPath} cwd=${process.cwd()}`);
+	log(`boot: sdk=${sdkEntry}`);
+	const bootStartedAt = Date.now();
 	let ModelRuntime;
 	let VERSION;
 	try {
@@ -323,7 +328,9 @@ async function main() {
 		fatal("sdk-load", error instanceof Error ? error.message : String(error));
 		return;
 	}
+	log(`boot: sdk imported in ${Date.now() - bootStartedAt}ms${sdkVersion ? ` (pi ${sdkVersion})` : ""}`);
 
+	const createStartedAt = Date.now();
 	let runtime;
 	try {
 		// 不传任何覆盖项：让 pi 自己按它的配置目录解析 auth.json，保证登录结果
@@ -333,8 +340,10 @@ async function main() {
 		fatal("runtime-create", error instanceof Error ? error.message : String(error));
 		return;
 	}
+	log(`boot: runtime created in ${Date.now() - createStartedAt}ms`);
 
 	send({ type: "ready", protocolVersion: PROTOCOL_VERSION, piVersion: sdkVersion });
+	log("boot: ready sent");
 
 	for (;;) {
 		const command = await nextCommand();

@@ -31,8 +31,12 @@ export const PI_ENHANCE_PROTOCOL_VERSION = 1;
 /** 助手脚本文件名（打包进 extraResources；dev 在 appPath/resources 下）。 */
 export const PI_ENHANCE_HOST_FILENAME = "pi-enhance-host.mjs";
 
-/** 拉起进程到 ready 的上限：node 启动 + 加载 pi SDK，正常 1s 内，留足余量。 */
-const DEFAULT_BOOT_TIMEOUT_MS = 15_000;
+/**
+ * 拉起进程到 ready 的上限：node 启动 + 加载 pi SDK，热缓存正常 1s 内。
+ * 官方安装（managed install）的 dist/index.js 有几十 MB，冷缓存首次导入叠加
+ * 杀毒实时扫描时实测可到十几秒（issue #341 的机器 15s 未 ready），因此留 30s。
+ */
+const DEFAULT_BOOT_TIMEOUT_MS = 30_000;
 /**
  * 单次增强的上限：模型首 token 在慢供应商/推理档上可能要几十秒，完整改写
  * 千字草稿也就一两分钟；5 分钟足够宽，同时保证进程不会无限期挂着。
@@ -253,7 +257,9 @@ export class EnhancePromptService {
 			this.logger?.warn(`增强助手启动参数解析失败：${launch.reason}${launch.detail ? `（${launch.detail}）` : ""}`);
 			return Promise.resolve("dead");
 		}
-		this.logger?.debug(`启动增强助手：${launch.nodeExe} ${launch.helperPath}`);
+		// sdkEntry 必须进日志：助手报「加载失败/卡住」时，第一步就是核对它拿到的是
+		// 哪个 node、哪个 SDK 入口（managed 安装的版本指针与手工测试未必同一个）。
+		this.logger?.debug(`启动增强助手：${launch.nodeExe} ${launch.helperPath}（SDK: ${launch.sdkEntry}）`);
 		const child = this.spawnFn(launch.nodeExe, [launch.helperPath], {
 			env: launch.env,
 			stdio: ["pipe", "pipe", "pipe"],
@@ -287,17 +293,35 @@ export class EnhancePromptService {
 			this.logger?.warn(`增强助手退出（code ${code ?? "null"}）${tail ? `：${tail}` : ""}`);
 			this.markChildDead("protocol", `增强助手意外退出（code ${code ?? "null"}）${tail ? `：${tail}` : ""}`);
 		});
+		const bootStartedAt = Date.now();
 		const ready = new Promise<"ready" | "dead">((resolveReady) => {
+			// 同一次 spawn 只能有一个终局：超时与 ready 可能同拍到达，重复 resolve 会
+			// 让后到的 ready 又去写已经判死的进程（首帧发不出去，UI 侧表现为无响应）。
+			let settled = false;
 			const bootTimer = setTimeout(() => {
-				this.logger?.warn(`增强助手 boot 超时（${Math.round(this.bootTimeoutMs / 1000)}s）`);
-				resolveReady("dead");
-				this.killChild("boot-timeout");
+				// 定时器阶段先于 poll 阶段：主进程事件循环被占用（大 JSON 解析、同步扫描）时，
+				// 子进程早已写出的 ready 会排在管道里还没被读走。直接在此判死会杀掉一个
+				// 已经握手的助手，并把它的 ready 丢掉——退一个事件循环回合再判，先让待读
+				// 的 stdout 走完（issue #341 的 code null + stderr 已过 ready 就是这个形状）。
+				setImmediate(() => {
+					if (settled) return;
+					settled = true;
+					const elapsed = Date.now() - bootStartedAt;
+					const tail = this.stderrTail.length ? `；stderr: ${this.stderrTail.join(" | ").replace(/\s*\n\s*/g, " | ")}` : "；子进程无任何 stderr 输出";
+					this.logger?.warn(`增强助手 boot 超时（${elapsed}ms/${Math.round(this.bootTimeoutMs / 1000)}s）${tail}`);
+					resolveReady("dead");
+					this.killChild("boot-timeout");
+				});
 			}, this.bootTimeoutMs);
 			this.notifyReady = () => {
+				if (settled) return;
+				settled = true;
 				clearTimeout(bootTimer);
 				resolveReady("ready");
 			};
 			this.notifyDead = () => {
+				if (settled) return;
+				settled = true;
 				clearTimeout(bootTimer);
 				resolveReady("dead");
 			};
@@ -365,7 +389,12 @@ export class EnhancePromptService {
 			if (lf === -1) break;
 			const line = this.buffer.slice(0, lf);
 			this.buffer = this.buffer.slice(lf + 1);
-			this.handleRecord(parseHostRecord(line));
+			if (!line.trim()) continue;
+			const record = parseHostRecord(line);
+			// 非法行必须留痕：SDK/扩展往 stdout 混进一行无换行的日志，会让紧跟其后的
+			// ready 与它拼成一行解析失败，表现为「boot 超时但助手其实已经 ready」。
+			if (!record) this.logger?.warn(`增强助手 stdout 非法行（已忽略）：${JSON.stringify(line.slice(0, 200))}`);
+			this.handleRecord(record);
 		}
 	}
 
