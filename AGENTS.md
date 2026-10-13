@@ -158,6 +158,7 @@ src/
 | 针对性单测（改动涉及的测试文件，日常必跑） | `node --test tests/<相关>.test.mjs` |
 | 全量单测（仅跨域大改动/合并前最终确认） | `npm test` |
 | 单测串行（排查并发干扰） | `npm run test:serial` |
+| 验证退出码（硬性） | 门禁命令禁止用管道吞 rc：`npm run typecheck \| tail` 返回的是 tail 的 0。用 `set -o pipefail` 或重定向到文件后查 `$?`（测试经沙箱 TS 转译对语法错误容错，可能假绿，typecheck/format 是唯一门禁——2026-10 实际漏过一个缺括号） |
 
 改动影响主进程/IPC/会话链路：typecheck + 相关针对性测试；纯 UI 样式微调至少 typecheck。
 
