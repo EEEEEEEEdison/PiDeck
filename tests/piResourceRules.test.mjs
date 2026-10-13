@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
@@ -191,4 +192,19 @@ test("collapsePackageEntry folds filter-free entries back to the plain string fo
 	assert.equal(collapsePackageEntry(unknown), unknown);
 	// 缺 source → 原样返回（调用方不应写回这种条目）
 	assert.deepEqual(collapsePackageEntry({ extensions: ["a"] }), { extensions: ["a"] });
+});
+
+test("resource rules expand ~ and file:// like pi 1.2 normalizePath (#10765)", () => {
+	const home = homedir().replace(/\\/g, "/");
+	// `!~/...` 在 pi 1.2 之前是惰性死条目，现在真正参与排除
+	assert.equal(projectResourceEnabled({ entries: ["!~/skills/pdf/*"], value: `${home}/skills/pdf/x/SKILL.md`, baseDir: `${home}/skills/pdf/x` }), false, "~ 排除规则必须命中");
+	// 精确 `-~path` 同样要展开（pi 的 normalizeExactPattern 先剥 `./` 再归一）
+	assert.equal(projectResourceEnabled({ entries: ["-~/.pi/agent/skills/x/SKILL.md"], value: `${home}/.pi/agent/skills/x/SKILL.md`, baseDir: `${home}/.pi/agent/skills` }), false, "-~ 精确排除必须命中");
+	// 精确 `+~path` 要能覆盖更宽的排除
+	assert.equal(projectResourceEnabled({ entries: ["!*", "!~/skills/*", "+~/.pi/agent/skills/x/SKILL.md"], value: `${home}/.pi/agent/skills/x/SKILL.md`, baseDir: `${home}/.pi/agent/skills` }), true, "+~ 精确包含必须命中");
+	// file:// 形态与路径形态同口径
+	const skillUrl = pathToFileURL(join(home, ".pi/agent/skills/x/SKILL.md")).href;
+	assert.equal(projectResourceEnabled({ entries: [`-${skillUrl}`], value: `${home}/.pi/agent/skills/x/SKILL.md`, baseDir: `${home}/.pi/agent/skills` }), false, "file:// 精确排除必须命中");
+	// 无关条目不受影响，~ 不会被当作通配
+	assert.equal(projectResourceEnabled({ entries: ["!/other/*"], value: `${home}/skills/pdf/x/SKILL.md`, baseDir: `${home}/skills/pdf/x` }), true);
 });
