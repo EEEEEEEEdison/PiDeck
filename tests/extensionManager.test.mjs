@@ -74,6 +74,248 @@ test("checkPiUpdate uses the pi.dev release version for the self-update check", 
 	}
 });
 
+/**
+ * 更新失败提示（回归 issue 反馈：用户只看到「Pi 扩展命令执行失败，请重试。」+ 裸 npm ETARGET，
+ * 误以为是 PiDeck 的 bug）。根因是 pi.dev 已宣布新版本、而用户配置的 npm 镜像尚未同步。
+ * 用真实 updatePi 链路断言：命中特征时补提示，其余失败原样透传。
+ */
+function createUpdatePiManager(command, translate) {
+	const { ExtensionManager } = loadExtensionManagerModule();
+	const manager = new ExtensionManager({ check: async () => assert.fail("update failure must rethrow before the post-update version probe") }, () => ({}), undefined, undefined, translate);
+	// 钉住检查结果，避免本用例触发网络；runPi 只承担「模拟失败退出」这一件事。
+	manager.checkPiUpdateFor = async () => ({ hasUpdate: true, currentVersion: "1.1.0", latestVersion: "1.2.0", command });
+	return manager;
+}
+
+test("updatePi explains missing-version failures as an unsynced package registry", async () => {
+	const translateCalls = [];
+	const manager = createUpdatePiManager("/usr/local/bin/pi", (key, params) => {
+		translateCalls.push({ key, params });
+		return `${key}|${JSON.stringify(params ?? {})}`;
+	});
+	manager.runPi = async () => {
+		throw new Error(["Pi 扩展命令执行失败，请重试。", "npm error code ETARGET", "npm error notarget No matching version found for @earendil-works/pi-coding-agent@1.2.0."].join("\n"));
+	};
+
+	await assert.rejects(manager.updatePi(), (error) => {
+		assert.match(error.message, /npm error code ETARGET/);
+		assert.match(error.message, /mainExtension\.piUpdateRegistryLagHintManual/);
+		assert.match(error.message, /https:\/\/registry\.npmjs\.org/);
+		// pi-self 通道里可能是 pnpm/yarn/brew/managed/WSL：绝不能提示 npm 全局安装（那会在别的目录又装一个 pi）。
+		assert.equal(error.message.includes("npm install -g"), false);
+		return true;
+	});
+	assert.equal(translateCalls.length, 1);
+	assert.equal(translateCalls[0].key, "mainExtension.piUpdateRegistryLagHintManual");
+	// 逐字段断言：translateCalls 的元素来自 vm 沙箱 realm，deepStrictEqual 会因原型不同而失败。
+	assert.equal(translateCalls[0].params.version, "1.2.0");
+	assert.equal(translateCalls[0].params.registry, "https://registry.npmjs.org");
+	assert.equal(translateCalls[0].params.command, undefined);
+});
+
+test("WSL 形态的命令不会被当成宿主 bun/npm 通道（否则会把 pi 装到 Windows 宿主机）", async () => {
+	// 回归（2026-10 评审）：PiLocator.check 对 WSL 返回的是空格拼接的召唤命令
+	// （`wsl -d <distro> -u <user> <linux pi 路径>`），不是 `wsl://` 标记；它若落进 bun 推导，
+	// 推导出的 bun 在宿主上不存在 → 回退裸 `bun` → 在 Windows 上又装一份 pi，选中的 WSL 安装原地不动。
+	const manager = createUpdatePiManager("wsl -d Ubuntu-24.04 -u dev /home/dev/.bun/bin/pi", (key) => key);
+	const hostPackages = [];
+	manager.runBunGlobalUpdate = async () => {
+		hostPackages.push("bun");
+		throw new Error("宿主包管理器不得运行");
+	};
+	manager.runNpmPrefixUpdate = async () => {
+		hostPackages.push("npm");
+		throw new Error("宿主包管理器不得运行");
+	};
+	const piCommands = [];
+	manager.runPi = async (args) => {
+		piCommands.push(args.join(" "));
+		return "updated";
+	};
+	// 成功路径需更新后的版本探测：替掉 helper 里那个「失败必须早于校验」的断言桩。
+	manager.locator = { check: async () => ({ installed: true, version: "1.2.0" }) };
+
+	const result = await manager.updatePi();
+	assert.equal(result.updated, true);
+	assert.equal(hostPackages.length, 0, "WSL 目标必须交回 pi 自更新");
+	assert.equal(piCommands.join("|"), "update --self");
+});
+
+test("updatePi keeps unrelated failures verbatim (no registry hint)", async () => {
+	const manager = createUpdatePiManager("/usr/local/bin/pi", (key) => key);
+	manager.runPi = async () => {
+		throw new Error(["Pi 扩展命令执行失败，请重试。", "npm error code EACCES", "npm error syscall mkdir"].join("\n"));
+	};
+
+	await assert.rejects(manager.updatePi(), (error) => {
+		assert.match(error.message, /npm error code EACCES/);
+		assert.equal(error.message.includes("piUpdateRegistryLagHint"), false);
+		return true;
+	});
+});
+
+test("updatePi registry hint keeps the --prefix of the portable install", async () => {
+	const prefixDir = "/home/u/.config/PiDeck/pi-runtime/pi-global";
+	const manager = createUpdatePiManager(`${prefixDir}/bin/pi`, (key, params) => `${key}|${params?.command ?? ""}`);
+	// 前缀通道由 PiDeck 代跑 npm：替换真实子进程调用，只留「抛 ETARGET」这一步。
+	manager.runNpmPrefixUpdate = async () => {
+		throw new Error("npm error code ETARGET\nnpm error notarget No matching version found for @earendil-works/pi-coding-agent@1.2.0.");
+	};
+
+	await assert.rejects(manager.updatePi(), (error) => {
+		// 提示的命令必须与代跑同源（同样的 flags + --prefix，另加官方源），否则用户粘一条跑不通的命令。
+		assert.ok(error.message.includes(`install -g --ignore-scripts --min-release-age=0 @earendil-works/pi-coding-agent@1.2.0 --prefix "${prefixDir}" --registry=https://registry.npmjs.org`), error.message);
+		return true;
+	});
+});
+
+test("updatePi registry hint also covers the bun install channel", async () => {
+	const manager = createUpdatePiManager("/home/u/.bun/bin/pi", (key, params) => `${key}|${params?.command ?? ""}`);
+	// bun 源缺版本的文案（全版本对齐 oven-sh/bun 源码：No version matching "x" found for specifier "y"）。
+	manager.runBunGlobalUpdate = async () => {
+		throw new Error('error: No version matching "1.2.0" found for specifier "@earendil-works/pi-coding-agent"  (but package exists)');
+	};
+
+	await assert.rejects(manager.updatePi(), (error) => {
+		assert.match(error.message, /No version matching/);
+		assert.match(error.message, /mainExtension\.piUpdateRegistryLagHint/);
+		assert.ok(error.message.includes("bun install -g --ignore-scripts @earendil-works/pi-coding-agent@1.2.0 --registry=https://registry.npmjs.org"), error.message);
+		return true;
+	});
+});
+
+test("updatePi 把发布年龄门失败转成放宽年龄门的提示（不误报镜像未同步）", async () => {
+	const manager = createUpdatePiManager("/home/u/.bun/bin/pi", (key) => key);
+	// 实测文案（bun 1.4.3）：No version matching "<pkg>" found for specifier "<ver>" (blocked by minimum-release-age: N seconds)
+	manager.runBunGlobalUpdate = async () => {
+		throw new Error('error: No version matching "@earendil-works/pi-coding-agent" found for specifier "1.2.0" (blocked by minimum-release-age: 259200 seconds)');
+	};
+
+	await assert.rejects(manager.updatePi(), (error) => {
+		assert.match(error.message, /blocked by minimum-release-age/);
+		assert.match(error.message, /mainExtension\.piUpdateReleaseAgeHint/);
+		assert.equal(error.message.includes("piUpdateRegistryLagHint"), false);
+		return true;
+	});
+});
+
+test("updatePi 也认 npm 的年龄门文案（with a date before），同样给放宽提示", async () => {
+	const manager = createUpdatePiManager("/usr/local/bin/pi", (key) => key);
+	manager.runPi = async () => {
+		throw new Error("npm error code ETARGET\nnpm error notarget No matching version found for @earendil-works/pi-coding-agent@1.2.0 with a date before 2026-10-10T00:00:00.000Z.");
+	};
+
+	await assert.rejects(manager.updatePi(), (error) => {
+		assert.match(error.message, /mainExtension\.piUpdateReleaseAgeHint/);
+		assert.equal(error.message.includes("piUpdateRegistryLagHint"), false);
+		return true;
+	});
+});
+
+test("bun 代跑参数与 pi 自身 bun 分支对齐，年龄门开关按 bun 版本条件注入", async () => {
+	const { ExtensionManager } = loadExtensionManagerModule();
+	const manager = new ExtensionManager({}, () => ({}));
+	const versions = { "BUN_1_2/bun": "1.2.21", "BUN_1_3_0/bun": "1.3.0" };
+	const installs = [];
+	manager.runPackageInstall = (command, args, _timeoutMs, env) => {
+		if (args[0] === "--version") return Promise.resolve(`${versions[command] ?? "1.3.5"}\n`);
+		installs.push({ command, args: args.join(" "), env });
+		return Promise.resolve("installed");
+	};
+
+	assert.equal(await manager.runBunGlobalUpdate("BUN_1_3/bun", "1.2.0", undefined, "/opt/oven"), "installed");
+	assert.equal(await manager.runBunGlobalUpdate("BUN_1_2/bun", "1.2.0", undefined), "installed");
+	assert.equal(await manager.runBunGlobalUpdate("BUN_1_3_0/bun", "1.2.0", undefined), "installed");
+	// bun ≥ 1.3：带上年龄门开关（不带的话配了 bunfig 发布年龄门的机器上 bun 会自己拦下新版本），边界 1.3.0 也算支持。
+	assert.equal(installs[0].args, "install -g --ignore-scripts --minimum-release-age=0 @earendil-works/pi-coding-agent@1.2.0");
+	assert.equal(installs[2].args, "install -g --ignore-scripts --minimum-release-age=0 @earendil-works/pi-coding-agent@1.2.0");
+	// bun < 1.3 没有这个开关：不能把它当已知参数发过去（未知参数会被拒绝，反而弄坏本来能成功的更新）。
+	assert.equal(installs[1].args, "install -g --ignore-scripts @earendil-works/pi-coding-agent@1.2.0");
+	// 自定义安装根要作为 BUN_INSTALL 传给子进程：GUI 启动读不到 shell rc，不传会把包装进默认 ~/.bun。
+	assert.equal(installs[0].env.BUN_INSTALL, "/opt/oven");
+	assert.equal(installs[1].env, undefined);
+});
+
+test("bun 版本探测失败时不注入年龄门开关（探测不得阻塞安装主流程）", async () => {
+	const { ExtensionManager } = loadExtensionManagerModule();
+	const manager = new ExtensionManager({}, () => ({}));
+	const installs = [];
+	manager.runPackageInstall = (command, args) => {
+		if (args[0] === "--version") return Promise.reject(new Error("spawn bun ENOENT"));
+		installs.push(args.join(" "));
+		return Promise.resolve("installed");
+	};
+
+	assert.equal(await manager.runBunGlobalUpdate("bun", "1.2.0", "@earendil-works/pi-coding-agent"), "installed");
+	assert.equal(installs.length, 1);
+	assert.equal(installs[0], "install -g --ignore-scripts @earendil-works/pi-coding-agent@1.2.0");
+});
+
+test("旧引导前缀代跑也带 pi 自身 npm 分支的脚本隔离与年龄门开关", async () => {
+	const { ExtensionManager } = loadExtensionManagerModule();
+	const manager = new ExtensionManager({}, () => ({}));
+	const installs = [];
+	manager.runPackageInstall = (command, args) => {
+		installs.push({ command, args: args.join(" ") });
+		return Promise.resolve("installed");
+	};
+
+	assert.equal(await manager.runNpmPrefixUpdate("/home/u/.config/PiDeck/pi-runtime/pi-global", "1.2.0", undefined), "installed");
+	assert.equal(installs.length, 1);
+	assert.ok(installs[0].args.startsWith("install -g --ignore-scripts --min-release-age=0 @earendil-works/pi-coding-agent@1.2.0 --prefix "), installs[0].args);
+	assert.ok(installs[0].args.endsWith("/home/u/.config/PiDeck/pi-runtime/pi-global"), installs[0].args);
+});
+
+test("pickBunCommand：只有本地绝对路径才允许退回裸 bun（包装命令串宁可响亮失败）", () => {
+	const { ExtensionManager } = loadExtensionManagerModule();
+	const manager = new ExtensionManager({}, () => ({}));
+	// WSL 召唤串之类的包装命令退回裸 `bun` = 拿宿主 bun 去装 pi、装错机器；必须原样返回让它 ENOENT。
+	const wrapped = "wsl -d Ubuntu-24.04 -u dev /home/dev/.bun/bin/bun";
+	assert.equal(manager.pickBunCommand(wrapped), wrapped);
+	// 裸命令名原样交给 PATH；本地绝对路径不存在时（Homebrew/scoop 的 bun 本体在别处）才回退。
+	assert.equal(manager.pickBunCommand("bun"), "bun");
+	assert.equal(manager.pickBunCommand("/nonexistent/.bun/bin/bun"), "bun");
+});
+
+test("推导出的 bun 存在时用绝对路径（不依赖 GUI 进程的 PATH）", async () => {
+	const { piPath, root } = await createBunLayout({ withBun: true });
+	const manager = createUpdatePiManager(piPath, (key) => key);
+	const calls = [];
+	manager.runBunGlobalUpdate = async (command) => {
+		calls.push(command);
+		throw new Error("stop after capture");
+	};
+
+	await assert.rejects(manager.updatePi(), /stop after capture/);
+	assert.deepEqual(calls, [join(root, ".bun", "bin", process.platform === "win32" ? "bun.exe" : "bun")]);
+	await rm(root, { recursive: true, force: true });
+});
+
+test("推导出的 bun 不存在时回退裸 bun（Homebrew/scoop 装的 bun 本体不在 ~/.bun/bin）", async () => {
+	const { piPath, root } = await createBunLayout({ withBun: false });
+	const manager = createUpdatePiManager(piPath, (key) => key);
+	const calls = [];
+	manager.runBunGlobalUpdate = async (command) => {
+		calls.push(command);
+		throw new Error("stop after capture");
+	};
+
+	await assert.rejects(manager.updatePi(), /stop after capture/);
+	assert.deepEqual(calls, ["bun"]);
+	await rm(root, { recursive: true, force: true });
+});
+
+/** 真实目录 fixture：造出 `<root>/.bun/bin/pi`，按需决定同目录是否有 bun 本体。 */
+async function createBunLayout({ withBun }) {
+	const root = await mkdtemp(join(tmpdir(), "pideck-bun-"));
+	const binDir = join(root, ".bun", "bin");
+	await mkdir(binDir, { recursive: true });
+	const piPath = join(binDir, process.platform === "win32" ? "pi.exe" : "pi");
+	await writeFile(piPath, "", "utf8");
+	if (withBun) await writeFile(join(binDir, process.platform === "win32" ? "bun.exe" : "bun"), "", "utf8");
+	return { piPath, root };
+}
+
 test("a stale lightweight extension scan cannot overwrite a newer force refresh", async () => {
 	const { ExtensionManager } = loadExtensionManagerModule();
 	const manager = new ExtensionManager({}, () => ({}));
