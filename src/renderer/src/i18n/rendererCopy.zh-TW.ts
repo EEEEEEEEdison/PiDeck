@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 662653f962bba543918b43f22bd80e2c4100bb07a9e5ffda7b263889eea837d7（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 87bbcd7684eda0503585ea386e9c8bbb1d5ba7b1094bcd8be3dbc0b4a9051e06（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4604,6 +4604,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.catalogRestorePrevOk": "已恢復上一個覆蓋版",
 	"settings.catalogFailNetwork": "網路不可用或下載失敗，請檢查網路/代理後重試",
 	"settings.catalogFailValidation": "下載內容校驗失敗，未應用（倉庫檔案可能異常）",
+	"settings.catalogFailIncompatible": "遠端目錄格式高於當前版本，請先更新 PiDeck 後再重試",
 	"settings.catalogFailWrite": "寫入失敗，當前目錄未受影響",
 	"settings.catalogFailNoBackup": "沒有可恢復的備份",
 	"settings.catalogFailUnexpected": "操作失敗，請重試",

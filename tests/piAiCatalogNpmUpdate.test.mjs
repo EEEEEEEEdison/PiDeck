@@ -324,6 +324,37 @@ test("catalog: 未知源 id 仍按「AtomGit 优先 → GitHub raw」取件", as
 	}
 });
 
+test("catalog: 分支发的是更高 schemaVersion（格式不兼容）：仍回退 npm 生成并生效", async () => {
+	const dir = tempDir();
+	try {
+		// 分支 v3 产物 → 分支路径报 incompatible；npm 回退在本机现场生成，与当前版本天然兼容，
+		// 所以「远端格式高于当前版本」不等于用户拿不到新模型目录（issue #343 的自愈路径）。
+		const v3Catalog = JSON.stringify({ schemaVersion: 3, entries: [{ id: "future", name: "Future", provider: "demo", contextWindow: 1 }] });
+		const v3Manifest = JSON.stringify({
+			schemaVersion: 3,
+			catalogSha256: "0".repeat(64),
+			entryCount: 1,
+			source: { packageName: "@earendil-works/pi-ai", packageVersion: "9.9.9", dataSha256: "a".repeat(64), fileCount: 1 },
+		});
+		const updater = new PiAiCatalogUpdater({
+			userDataDir: dir,
+			fetchImpl: async (url) => {
+				if (url.includes("raw.githubusercontent.com") || url.includes("cdn.jsdelivr.net/gh/")) {
+					return okResponse(url.includes("pi-ai-catalog.manifest.json") ? v3Manifest : v3Catalog);
+				}
+				return makeNpmFetch("9.9.9", ["demo.json"])(url);
+			},
+			timeoutMs: 200,
+		});
+		const result = await updater.update("main");
+		assert.equal(result.ok, true, "分支格式不兼容不应整单失败，npm 回退可自愈");
+		assert.equal(result.updated, true);
+		assert.equal(updater.getStatus().overlay?.packageVersion, "9.9.9");
+	} finally {
+		cleanup(dir);
+	}
+});
+
 test("catalog: 分支源全挂时回退 npm latest", async () => {
 	const dir = tempDir();
 	try {

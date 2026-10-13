@@ -21,6 +21,8 @@ function failText(code: CatalogUpdateFailCode | "unexpected"): string {
 			return t("settings.catalogFailNetwork");
 		case "validation":
 			return t("settings.catalogFailValidation");
+		case "incompatible":
+			return t("settings.catalogFailIncompatible");
 		case "write":
 			return t("settings.catalogFailWrite");
 		case "no-backup":

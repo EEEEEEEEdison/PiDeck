@@ -4615,6 +4615,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.catalogRestorePrevOk": "Restored previous overlay",
 	"settings.catalogFailNetwork": "Network unavailable or download failed; check network/proxy and retry",
 	"settings.catalogFailValidation": "Downloaded content failed validation; not applied (repo files may be broken)",
+	"settings.catalogFailIncompatible": "The remote catalog format is newer than this app version; update PiDeck and retry",
 	"settings.catalogFailWrite": "Write failed; current catalog is unaffected",
 	"settings.catalogFailNoBackup": "No backup to restore",
 	"settings.catalogFailUnexpected": "Operation failed, please retry",

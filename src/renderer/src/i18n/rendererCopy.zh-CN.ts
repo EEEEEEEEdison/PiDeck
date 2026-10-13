@@ -4597,6 +4597,7 @@ export const zhCN = {
 	"settings.catalogRestorePrevOk": "已恢复上一个覆盖版",
 	"settings.catalogFailNetwork": "网络不可用或下载失败，请检查网络/代理后重试",
 	"settings.catalogFailValidation": "下载内容校验失败，未应用（仓库文件可能异常）",
+	"settings.catalogFailIncompatible": "远端目录格式高于当前版本，请先更新 PiDeck 后再重试",
 	"settings.catalogFailWrite": "写入失败，当前目录未受影响",
 	"settings.catalogFailNoBackup": "没有可恢复的备份",
 	"settings.catalogFailUnexpected": "操作失败，请重试",
