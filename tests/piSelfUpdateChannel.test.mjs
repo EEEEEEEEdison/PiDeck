@@ -125,6 +125,9 @@ test("安装参数构造器：代跑与「源未同步」提示同源（npm/bun 
 	assert.equal(npmGlobalInstallArgs("pkg@1").join(" "), "install -g --ignore-scripts --min-release-age=0 pkg@1");
 	assert.equal(npmGlobalInstallArgs("pkg@1", { prefixDir: "/p", registry: true }).join(" "), `install -g --ignore-scripts --min-release-age=0 pkg@1 --prefix /p --registry=${PI_OFFICIAL_REGISTRY}`);
 	assert.equal(bunGlobalInstallArgs("pkg@1", { releaseAgeFlag: true }).join(" "), "install -g --ignore-scripts --minimum-release-age=0 pkg@1");
+	// 作用域包：.npmrc 的 `@scope:registry=` 比默认源更具体、会压过 `--registry`，必须一并指回官方源
+	//（实测 npm 11.19：默认源指 npmmirror 时，加上作用域旗标后只打官方源并拿到新版本）。
+	assert.equal(npmGlobalInstallArgs("@earendil-works/pi-coding-agent@1.2.0", { registry: true }).join(" "), `install -g --ignore-scripts --min-release-age=0 @earendil-works/pi-coding-agent@1.2.0 --registry=${PI_OFFICIAL_REGISTRY} --@earendil-works:registry=${PI_OFFICIAL_REGISTRY}`);
 	// 老 bun（< 1.3）不发年龄门开关：开关本身是 1.3 才引入的。
 	assert.equal(bunGlobalInstallArgs("pkg@1", { registry: true }).join(" "), `install -g --ignore-scripts pkg@1 --registry=${PI_OFFICIAL_REGISTRY}`);
 	assert.equal(BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG, "1.3.0");

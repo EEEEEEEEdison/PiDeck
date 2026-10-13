@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: b1d53883ea4a7eb0a2dbc822dcdf49ed5bc78bde1c31238dd525a89cf0a954c6（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: c7e13f73ea9def1fdb7ca1875079fbadf36615bb4fbcf44670415d188db22c3c（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import type { MainProcessTranslationKey } from "./mainProcessCopy";
 
@@ -232,7 +232,7 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"mainExtension.piVersionUnknown": "無法確定當前 Pi 版本，請重新檢測 Pi 後再更新擴充套件，避免誤更新 Pi 本體。",
 	"mainExtension.piUpdateNotApplied": "更新命令已結束，但所選 Pi 仍未達到目標版本（當前 {current}，目標 {latest}）。請檢查是否更新了其他安裝，以及包管理器或安裝權限。",
 	"mainExtension.piUpdateRegistryLagHint": "這通常是包源尚未同步該版本：pi.dev 已釋出 {version}，但你配置的 registry（npm/bun 源，國內映象如 npmmirror 常有同步延遲）裡還沒有。可臨時改用官方源重試：{command}，或等映象同步後再更新。",
-	"mainExtension.piUpdateRegistryLagHintManual": "這通常是當前包源尚未同步該版本：pi.dev 已釋出 {version}，但你配置的 registry 裡還沒有（國內映象常有同步延遲）。可臨時把包管理器（npm/pnpm/yarn/bun）的 registry 指向 {registry}，或等映象同步後重試更新。",
+	"mainExtension.piUpdateRegistryLagHintManual": "這通常是當前包源尚未同步該版本：pi.dev 已釋出 {version}，但你配置的 registry 裡還沒有（國內映象常有同步延遲）。可臨時把包管理器（npm/pnpm/yarn/bun）的 registry 指向 {registry}（給 @earendil-works 單獨配過作用域源的話也一併指回），或等映象同步後重試更新。",
 	"mainExtension.piUpdateReleaseAgeHint": "這次失敗是「釋出年齡門」攔下的：pi.dev 剛釋出 {version}，但你的包管理器只允許安裝釋出滿一定時間的版本。可在配置裡臨時放寬（bun 的 bunfig.toml minimumReleaseAge / npm 的 min-release-age），重試時分別加上 --minimum-release-age=0 或 --min-release-age=0。",
 	"mainExtension.piVersionTooOldForDisable": "當前 Pi 版本過低（{version}），停用擴充套件需要 Pi ≥ 0.60，請先升級 Pi。",
 	"mainPi.pathRequired": "請輸入 pi.cmd 或 Pi 路徑。",

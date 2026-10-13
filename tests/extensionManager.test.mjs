@@ -167,6 +167,8 @@ test("updatePi registry hint keeps the --prefix of the portable install", async 
 	await assert.rejects(manager.updatePi(), (error) => {
 		// 提示的命令必须与代跑同源（同样的 flags + --prefix，另加官方源），否则用户粘一条跑不通的命令。
 		assert.ok(error.message.includes(`install -g --ignore-scripts --min-release-age=0 @earendil-works/pi-coding-agent@1.2.0 --prefix "${prefixDir}" --registry=https://registry.npmjs.org`), error.message);
+		// 作用域源会压过 --registry：提示必须把 @earendil-works 的作用域源也指回官方源。
+		assert.ok(error.message.includes("--@earendil-works:registry=https://registry.npmjs.org"), error.message);
 		return true;
 	});
 });

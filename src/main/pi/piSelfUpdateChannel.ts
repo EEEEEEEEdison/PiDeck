@@ -79,12 +79,26 @@ export const PI_OFFICIAL_REGISTRY = "https://registry.npmjs.org";
 const OFFICIAL_REGISTRY_FLAG = `--registry=${PI_OFFICIAL_REGISTRY}`;
 
 /**
+ * 作用域包的作用域源旗标（`@scope/name@ver` → `--@scope:registry=<官方源>`）。
+ *
+ * 为什么光有 `--registry` 不够：.npmrc 里的 `@scope:registry=` 比默认源更具体，会压过 `--registry`。
+ * 实测（npm 11.19.0）：默认源指 npmmirror、作用域源指官方时，`npm view @earendil-works/…`
+ * 只打了 `https://registry.npmjs.org/…`（308ms，拿到新版本）；只给默认源则 3 次 ECONNRESET、85s 后返回旧版本。
+ * 非作用域包返回 undefined（没有可覆盖的 scope）。
+ */
+function scopedRegistryFlag(spec: string): string | undefined {
+	const match = /^(@[^/]+)\//.exec(spec);
+	return match ? `--${match[1]}:registry=${PI_OFFICIAL_REGISTRY}` : undefined;
+}
+
+/**
  * npm 全局安装参数（代跑与「源未同步」提示共用）。参数与 pi 自身的 npm 分支一致（`--ignore-scripts`
  * 安装脚本隔离、`--min-release-age=0` 绕过刚发布版本被用户发布的年龄门拦下）；`registry` 只在提示里
  * 打开（代跑必须尊重用户配置的源）；`prefixDir` 给旧引导前缀副本，缺了它 npm 会装到用户真实全局目录。
  */
 export function npmGlobalInstallArgs(spec: string, options: { prefixDir?: string; registry?: boolean } = {}): string[] {
-	return ["install", "-g", "--ignore-scripts", "--min-release-age=0", spec, ...(options.prefixDir ? ["--prefix", options.prefixDir] : []), ...(options.registry ? [OFFICIAL_REGISTRY_FLAG] : [])];
+	const scopedFlag = options.registry ? scopedRegistryFlag(spec) : undefined;
+	return ["install", "-g", "--ignore-scripts", "--min-release-age=0", spec, ...(options.prefixDir ? ["--prefix", options.prefixDir] : []), ...(options.registry ? [OFFICIAL_REGISTRY_FLAG] : []), ...(scopedFlag ? [scopedFlag] : [])];
 }
 
 /**
