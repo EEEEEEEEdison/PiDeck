@@ -760,7 +760,10 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 									disabled={responding}
 									onClick={() => {
 										if (shouldSuppressAskClick()) return;
+										// 点击即提交（对齐 CLI select 与 confirm/批量卡）：先写高亮提供即时反馈，
+										// 应答失败 rollback 后高亮保留，改点其他选项或直接回车即可重发。
 										commitSingleDraft({ selectedOption: option });
+										submitValue(option);
 									}}
 									title={parsed.description || parsed.label}
 								>
@@ -794,25 +797,6 @@ export function SessionRuntimeUiOverlay({ sessionId, runtime, ui, responder, onE
 								</Button>
 							</div>
 						) : null}
-					</div>
-				) : null}
-				{selectedOption ? (
-					<div className="mt-1 flex w-full min-w-0 items-center gap-1.5">
-						<span className="min-w-0 flex-1 truncate text-caption text-text-secondary">
-							{t("ask.selectedPrefix")}
-							{splitAskOption(selectedOption).label}
-						</span>
-						<Button
-							variant="default"
-							disabled={responding}
-							onClick={() => {
-								submitValue(selectedOption);
-								// 提交后清除选中态：应答失败（rollback）或用户重复点击时，不会把上一轮的旧选择再发出去
-								commitSingleDraft({ selectedOption: "" });
-							}}
-						>
-							{t("ask.submit")}
-						</Button>
 					</div>
 				) : null}
 				{request.method === "confirm" ? (
