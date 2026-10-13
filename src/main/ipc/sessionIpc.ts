@@ -13,6 +13,7 @@ import { canonicalizeSessionPath } from "../../shared/sessionIdentity";
 import { createSessionModelPreference } from "../../shared/modelDisplayName";
 import { modelThinkingLevelOf } from "../../shared/modelThinkingLevels";
 import type {
+	AvailableModel,
 	CreateSessionDraftInput,
 	CreateAnonymousSessionInput,
 	CreateAnonymousSessionResult,
@@ -354,6 +355,11 @@ export type SessionIpcDeps = {
 	replaceAgentSession: (agentId: string, fn: () => Promise<unknown>, options?: { markForked?: boolean; markSuperseded?: boolean }) => Promise<unknown>;
 	/** fork/clone 统一命令层（与 Web HTTP 共用）：重发/编辑 fork 化语义只在这一处维护。 */
 	sessionForkCommands: SessionForkCommands;
+	/**
+	 * 模型存在性校验用的 pi 目录模型：必须与模型选择器同源（capability 快照 ∪ CLI 缓存）。
+	 * 未装配（单测/无 pi 运行时的宿主）时退回仅 CLI 缓存（models.json）的旧行为。
+	 */
+	validationCatalogModels?: () => AvailableModel[] | null | undefined;
 	/** DSH 后端专用 IPC 依赖（C1 分组；未装配 = 无 DSH 后端）。 */
 	dshBackend?: DshBackendIpcDeps;
 };
@@ -429,7 +435,14 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		exportCatalogSessionHtml,
 		replaceAgentSession,
 		dshBackend,
+		validationCatalogModels,
 	} = deps;
+	/**
+	 * 创建草稿 / 匿名会话 / 引导页默认解析共用的模型存在性校验数据源。
+	 * 必须与模型选择器同源：选择器展示的是 capability 快照，只用 CLI 缓存会把
+	 * auth 渠道模型判为不存在，首发的点选被静默换成配置默认模型（issue #340）。
+	 */
+	const selectableModels = validationCatalogModels ?? getCachedModelList;
 	// C1：DSH 后端依赖从 dshBackend 分组解构（未装配 = 空对象，相关通道降级）。
 	const {
 		listDshModels,
@@ -665,7 +678,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 								provider: model.provider,
 								modelId: model.modelId,
 							},
-							getCachedModelList(),
+							selectableModels(),
 						)
 					) {
 						model = undefined;
@@ -680,9 +693,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 					backend: input.backend,
 					settings: settingsResult.parsed,
 					models: modelsResult.parsed,
-					// pi 目录快照（同步，冷时 null）：lastUsed/welcomeModel 的存在性校验
-					// 按 models.json ∪ 目录判定，与选择器可选范围一致。
-					catalogModels: getCachedModelList(),
+					// pi 目录（同步读）：lastUsed/welcomeModel 的存在性校验按
+					// models.json ∪ capability 快照判定，与选择器可选范围一致。
+					catalogModels: selectableModels(),
 					// lastUsed 语义：用户最近一次实际发送所用模型；仅无显式默认与偏好时参与。
 					lastUsedModel: settingsStore.get().lastUsedModel,
 					welcomeModel: input.welcomeModel && typeof input.welcomeModel.provider === "string" && typeof input.welcomeModel.modelId === "string" ? input.welcomeModel : undefined,
@@ -733,8 +746,9 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				backend,
 				settings: settingsResult.parsed,
 				models: modelsResult.parsed,
-				// 与 createDraft 同源：存在性校验含 pi 目录，否则引导页预选与创建再次分叉。
-				catalogModels: getCachedModelList(),
+				// 与 createDraft 同源：存在性校验含 capability 快照（auth 渠道模型也在内），
+				// 否则引导页预选与创建再次分叉。
+				catalogModels: selectableModels(),
 				// lastUsed 语义：引导页预选默认 = 用户最后一次实际使用的模型。
 				lastUsedModel: settingsStore.get().lastUsedModel,
 			});
