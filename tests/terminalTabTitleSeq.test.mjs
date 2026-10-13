@@ -24,8 +24,8 @@ const makeFakePty = () => ({
 function loadManager() {
 	const load = createTsSandbox({
 		stubs: {
-			// 键名与源码 import specifier 一致：`import * as pty from "node-pty"`
-			"node-pty": { spawn: () => makeFakePty() },
+			// 原生模块的加载边界是 ./nodePtyRuntime（TerminalSessionManager 不再静态 import node-pty）
+			"./nodePtyRuntime": { loadNodePty: () => ({ spawn: () => makeFakePty() }) },
 		},
 	});
 	return load("src/main/terminal/TerminalSessionManager.ts").TerminalSessionManager;

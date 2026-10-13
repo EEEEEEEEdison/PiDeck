@@ -1,4 +1,3 @@
-import * as pty from "node-pty";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { sep } from "node:path";
@@ -6,7 +5,11 @@ import { ipcChannels } from "../../shared/ipc";
 import type { TerminalShell, TerminalTab, TerminalTarget } from "../../shared/types";
 import { toWindowsHostPath, toWslLinuxPath } from "../wsl/WslPaths";
 import { getWslExe } from "../wsl/wslExe";
+import { loadNodePty, type NodePtyModule } from "./nodePtyRuntime";
 import { createTerminalDataBatcher, type TerminalDataBatcher } from "./terminalDataBatching";
+
+/** node-pty 的 PTY 句柄类型：类型查询不产生运行时 import（原生模块只经 ./nodePtyRuntime 惰性加载）。 */
+type Pty = import("node-pty").IPty;
 
 // 简单日志，不依赖 appLogger 以避免循环引用
 const log = (msg: string) => {
@@ -15,7 +18,7 @@ const log = (msg: string) => {
 
 type TerminalRuntime = {
 	tab: TerminalTab;
-	pty: pty.IPty;
+	pty: Pty;
 	/** 主进程回放缓冲（切回时重建 xterm 用），有 200K 字符上限 */
 	buffer: string;
 	/** PTY 输出合批器：16ms 内的小 chunk 合成一次 IPC emit，exit/close 前必须 flush 保序 */
@@ -185,12 +188,14 @@ export class TerminalSessionManager {
 	create(target: TerminalTarget, shell?: TerminalShell): TerminalTab {
 		const ownerKey = this.ownerKey(target);
 		const resolvedCwd = this.cwdFor(target);
+		// spawn 必须先于桶/序号分配：node-pty 不可用或所有 shell 都 spawn 失败时
+		// create 会抛错，不能留下空桶和已被消耗的标题序号（渲染层每次挂载都会重试）。
+		const spawned = this.spawnShell(resolvedCwd, shell);
 		const runtimes = this.ensureOwner(ownerKey);
 		// 单调递增序号：不能用 runtimes.size + 1（关闭一个 tab 后 size 回退，新建会与存活 tab 撞名）
 		const seq = (this.ownerSeq.get(ownerKey) ?? 0) + 1;
 		this.ownerSeq.set(ownerKey, seq);
 		const id = randomUUID();
-		const spawned = this.spawnShell(resolvedCwd, shell);
 		const tab: TerminalTab = {
 			id,
 			agentId: target.kind === "agent" ? target.agentId : "",
@@ -328,7 +333,16 @@ export class TerminalSessionManager {
 		}
 	}
 
-	private spawnShell(cwd: string, preferredShell?: TerminalShell): { shell: TerminalShell; pty: pty.IPty } {
+	private spawnShell(cwd: string, preferredShell?: TerminalShell): { shell: TerminalShell; pty: Pty } {
+		// node-pty 只在这里惰性加载：加载失败必须在候选循环之外抛出，否则会被下面的
+		// 逐候选 catch 覆盖成 lastError，最终报成误导性的「No supported shell found」。
+		let nodePty: NodePtyModule;
+		try {
+			nodePty = loadNodePty();
+		} catch (error) {
+			log(`node-pty unavailable: ${error instanceof Error ? error.message : String(error)}`);
+			throw error;
+		}
 		const candidates = this.shellCandidates();
 		// 如果有首选 shell，先在候选列表中查找匹配项
 		const ordered = preferredShell ? [...candidates.filter((c) => c.shell === preferredShell), ...candidates.filter((c) => c.shell !== preferredShell)] : candidates;
@@ -354,7 +368,7 @@ export class TerminalSessionManager {
 						log(`Failed to convert WSL terminal cwd: ${error instanceof Error ? error.message : String(error)}`);
 					}
 				}
-				const terminal = pty.spawn(candidate.command, args, {
+				const terminal = nodePty.spawn(candidate.command, args, {
 					name: "xterm-256color",
 					cols: 80,
 					rows: 24,

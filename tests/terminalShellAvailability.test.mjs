@@ -26,7 +26,8 @@ function withPlatform(platform, fn) {
 }
 
 function loadManager() {
-	return loadTsCommonJs("src/main/terminal/TerminalSessionManager.ts", { stubs: { "node-pty": {} } });
+	// node-pty 经 ./nodePtyRuntime 惰性加载，模块求值不触达原生层，无需替身
+	return loadTsCommonJs("src/main/terminal/TerminalSessionManager.ts");
 }
 
 test("含路径分隔符的命令：直接 existsSync，不走 PATH", () => {
