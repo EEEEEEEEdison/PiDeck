@@ -1,6 +1,6 @@
 # pi 自更新链路拆分计划（ExtensionManager 瘦身）
 
-> 状态：**Wave 1 已落地（2026-10-13）**；Wave 2 待做。基线 `src/main/extensions/ExtensionManager.ts` 1254 行 → Wave 1 后 1216 行（红线 400/600 的 3 倍）。
+> 状态：**Wave 1 / Wave 2 已落地（2026-10-13）**；Wave 3 待做。基线 `src/main/extensions/ExtensionManager.ts` 1254 行 → Wave 1 后 1216 → Wave 2 后 `985 行`（红线 600 的 1.6 倍）。
 > 触发：2026-10 修 bun/WSL 更新通道时，「检查 → 分派 → 失败提示 → 包管理器代跑」这一段已达 ~280 行，且与扩展目录/安装域同处一文件，按 AGENTS.md 的文件体量红线需要评估拆分。
 > 长期目标：自更新链路收口为 `src/main/pi/piSelfUpdateRunner.ts`（纯判定与命令构造已在 `piSelfUpdateChannel.ts`），ExtensionManager 只保留 spawn 装配、扩展管理域与薄包装，最终 ≤600 行。
 
@@ -19,7 +19,7 @@
 
 结果：ExtensionManager 1254 → 1216 行；`channelLabel` 不再单独维护第三份「通道 → 命令」映射（这是 2026-10 提示与代跑参数漂移的根因）。
 
-## Wave 2（待做）：自更新执行链路 → `src/main/pi/piSelfUpdateRunner.ts`
+## Wave 2（已落地，2026-10-13）：自更新执行链路 → `src/main/pi/piSelfUpdateRunner.ts`
 
 | 迁出内容（ExtensionManager 现行号） | 说明 |
 |---|---|
@@ -35,13 +35,18 @@ Wave 2 保留在 ExtensionManager（不迁）：
 - `toUpdateResult`(936)（`updateExtensions` 也用）→ 保留，runner 返回原始结构由薄包装转换；
 - `piVersion` / `piVersionPromise` 字段与 `PiProcess.invalidateVersionCache()` 调用 → 以回调注入（runner 的 `finally` 里调）。
 
-受影响契约测试（Wave 2 必须同步换 seam）：
+受影响契约测试（Wave 2 已迁移 seam）：
 
-- `tests/extensionManager.test.mjs`：`manager.runPi`(13 处) / `manager.runBunGlobalUpdate`(9) / `manager.runPackageInstall`(3) / `manager.runNpmPrefixUpdate`(3) / `manager.pickBunCommand`(3) / `manager.checkPiUpdateFor`(1) / `manager.locator`(1)；
-- `tests/piCliUpdates.test.mjs`：`manager.fetchPiLatestVersion`(2)；
+- `tests/extensionManager.test.mjs`（28 处）与 `tests/piCliUpdates.test.mjs`（3 处）改为 stub `manager.selfUpdate.*`：`runBunGlobalUpdate` / `runPackageInstall` / `runNpmPrefixUpdate` / `pickBunCommand` / `check`（原 `checkPiUpdateFor`）/ `fetchLatestVersion`（原 `fetchPiLatestVersion`）/ `locator`；
+- **不用改**的：`manager.runPi`（runner 的注入回调是动态委托，stub 管理器方法依旧生效）与 `manager.piVersion`（缓存重置走回调）；
+- 沙箱夹具新增 `"./PiProcess"` 桩键：runner 在 `src/main/pi/` 下，import 说明符比管理器短一层；
 - 只用公开 API 的用例不受影响：`updatePi` / `checkPiUpdate` / `updateExtensions` / `updateExtension`。
 
-门禁（Wave 2 完成判据）：ExtensionManager ≤ 1000 行、`piSelfUpdateRunner.ts` 单向依赖 `piSelfUpdateChannel.ts`、上述测试全绿且不再直接 stub 已迁出的私有方法。
+结果：`piSelfUpdateRunner.ts` 326 行（依赖按名存为独立字段：`locator`/`getSettings`/`translate`/`sanitizeCommandOutput`/`runPi`/`resetVersionProbeCache`/`homeDir`）；
+ExtensionManager 1216 → 985 行，只留 `checkPiUpdate`/`updatePi` 两个薄包装 + `runPi`/`npmViewVersion`/`toUpdateResult`；
+`updatePi` 返回值统一走 `toUpdateResult` 脱敏（行为不变：原实现里未脱敏的「无需更新」文案经过同一函数也等价）。
+
+门禁（已满足）：ExtensionManager ≤ 1000 行（现 985）、`piSelfUpdateRunner.ts` 只单向依赖 `piSelfUpdateChannel.ts`（不反向 import 管理器）、受影响测试全绿且不再 stub 已迁出的私有方法。
 
 ## Wave 3（远期）：扩展目录与安装域
 
