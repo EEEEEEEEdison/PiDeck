@@ -487,7 +487,7 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 							   模型名是名字，同色同号时两段会连成一句「2m18s global:xxx」读不断。
 							   模型名长短不一（如 global:deepseek-v4.1-flash），限宽截断 + title 给全量 provider/model，
 							   不让长名字把行末撑开或换行。 */
-							<span className="ml-1 min-w-0 max-w-[16rem] truncate rounded-sm bg-muted/60 px-1.5 py-0.5 text-caption font-medium leading-none text-muted-foreground" title={`${turnModel.provider}/${turnModel.modelId}`} data-turn-model={turnModel.modelId}>
+							<span className="ml-1 min-w-0 max-w-[16rem] truncate rounded-sm bg-muted/60 px-1.5 py-0.5 text-chat-detail font-medium leading-none text-muted-foreground" title={`${turnModel.provider}/${turnModel.modelId}`} data-turn-model={turnModel.modelId}>
 								{turnModel.modelId}
 							</span>
 						)}
