@@ -7,6 +7,7 @@ import { t } from "../../../i18n";
 import type { AcpToolConfig } from "../../../../../shared/types/acp";
 import type { AcpToolPreset } from "../../../../../shared/acpToolPresets";
 import { Switch } from "../../ui-shadcn/switch";
+import { Badge } from "../../ui-shadcn/badge";
 import { AcpPresetChips } from "./AcpPresetChips";
 import { Button } from "../../ui-shadcn/button";
 import { Input } from "../../ui-shadcn/input";
@@ -181,10 +182,17 @@ export const AcpToolsTab = forwardRef<AcpToolsTabHandle, { onDirtyChange?: (dirt
 		<div className="flex flex-col gap-4">
 			<section className="flex flex-col gap-2">
 				<div className="flex items-center justify-between gap-4">
-					<h3 className="text-sm font-semibold">{t("acp.toolsTitle")}</h3>
+					<div className="flex items-center gap-2">
+						<h3 className="text-sm font-semibold">{t("acp.toolsTitle")}</h3>
+						{/* 实验性标识：ACP 多后端尚未经过完整使用测试，徽标常驻提示，反馈入口指向侧栏「问题反馈」 */}
+						<Badge variant="outline" className="h-5 shrink-0 px-1.5 text-[10px] font-normal text-muted-foreground">
+							{t("acp.experimentalBadge")}
+						</Badge>
+					</div>
 					<Switch checked={enabled === true} disabled={enabled === undefined} onCheckedChange={(checked) => void toggleEnabled(checked)} aria-label={t("acp.toolsTitle")} />
 				</div>
 				<p className="text-muted-foreground text-xs leading-relaxed">{t("acp.toolsDescription")}</p>
+				<p className="text-muted-foreground text-xs leading-relaxed">{t("acp.experimentalHint")}</p>
 				{enabled === true ? <p className="text-muted-foreground text-[11px]">{t("acp.enabledHint")}</p> : null}
 			</section>
 			{enabled !== true ? (

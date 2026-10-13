@@ -38,7 +38,7 @@ import { runGlobalResourceMigration, runProjectResourceMigration } from "./confi
 import type { ResolvedMigrationResource } from "./config/piResourceMigration";
 import type { PiResourceScope } from "../shared/types/piResources";
 import { createWindowZoomShortcutHandler } from "./windowZoom";
-import { DEFAULT_DEV_USER_DATA_NAME, isSharedDevBranch, readDevGitBranch, resolveDevUserDataDirName, sanitizeDevBranchSegment } from "./devIsolation";
+import { DEFAULT_DEV_USER_DATA_NAME, isSharedDevBranch, readDevGitBranch, resolveDevUserDataDirName } from "./devIsolation";
 import { KEEP_DEV_HTTP_CACHE_ENV, clearDevRendererCache } from "./devRendererCache";
 import { isPortablePackagedEnv, resolveAppUserDataDir, resolvePackagedUserDataDir } from "./portableUserData";
 import { readDataEnvDecision, validateStartupDataEnv, writeDataEnvDecision } from "./dataEnv/dataEnvMarker";
@@ -58,6 +58,7 @@ import type { DataEnvMode } from "../shared/types/dataEnv";
 // 这解决了打包后 build/ 目录不在 asar 中导致托盘图标丢失的问题
 import iconPath from "../../build/icon.png?asset";
 import { applyTrayLogoStyle, applyWindowLogoStyle, resolveLogoImage } from "./appWindowLogo";
+import { registerTaskbarIdentityAumid, resolveAppUserModelId, syncTaskbarShortcutIcon } from "./appTaskbarIdentity";
 
 // 构建标记：npm run dist:*:dev 打包时由 vite define 注入 true（构建期替换，非运行时环境变量）。
 declare const __PIDECK_DEV_BUILD__: boolean;
@@ -166,8 +167,11 @@ app.commandLine.appendSwitch("js-flags", mainProcessJsFlags());
 // Windows 系统通知必须设置 AppUserModelID，否则通知不显示、点击事件不触发。
 // dev 与正式版使用不同 AppID，避免通知中心归属混淆（与 dev userData 隔离思路一致）。
 if (process.platform === "win32") {
-	const devAppId = devUserDataDirName === DEFAULT_DEV_USER_DATA_NAME ? "com.ayuayue.pi-desktop-dev" : `com.ayuayue.pi-desktop-dev.${sanitizeDevBranchSegment(devGitBranch ?? "detached")}`;
-	app.setAppUserModelId(isDevBuild ? devAppId : "com.ayuayue.pi-desktop");
+	const appUserModelId = resolveAppUserModelId({ isDevBuild, devUserDataDirName, devGitBranch });
+	app.setAppUserModelId(appUserModelId);
+	// 任务栏按钮的身份（图标）靠更新「开始菜单里目标为本程序」的快捷方式，登记 AUMID 供其匹配，
+	// 见 appTaskbarIdentity.ts（注册表 DisplayName/IconUri 只作用于通知，别往那条路上走）。
+	registerTaskbarIdentityAumid(appUserModelId);
 }
 
 // 注册 deep link 自定义协议：系统通知点击（toast activationType="protocol"）通过该协议唤起应用，
@@ -3585,6 +3589,8 @@ function registerIpc() {
 			refreshShortcutBindings(settingsStore.get());
 			// Logo 风格也可能随备份恢复：同步刷新窗口/Dock 图标
 			applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow, settingsStore.get().logoCustomImage);
+			// 任务栏按钮读的是开始菜单快捷方式的图标，恢复后同样要按磁盘设置重写一次
+			syncTaskbarShortcutIcon({ style: settingsStore.get().logoStyle, customLogoDataUrl: settingsStore.get().logoCustomImage });
 			void piModelCapabilityCache?.refresh().catch(() => undefined);
 		},
 	});
@@ -4773,6 +4779,9 @@ app
 		refreshShortcutBindings(settingsStore.get());
 		// Logo 风格：启动时按已加载设置刷新窗口/Dock 图标（此后 settings:update 路径实时刷新）
 		applyWindowLogoStyle(settingsStore.get().logoStyle, () => mainWindow, settingsStore.get().logoCustomImage);
+		// 任务栏按钮的图标取开始菜单快捷方式的图标（窗口图标只是无身份注册时的兜底）：建窗前写好，
+		// 按钮首次出现就带当前 logo（createWindow 在本行之后调用）。
+		syncTaskbarShortcutIcon({ style: settingsStore.get().logoStyle, customLogoDataUrl: settingsStore.get().logoCustomImage });
 		piModelCapabilityCache = new PiModelCapabilityCache({
 			// 模型能力水合分两档（详见 docs/pi-model-capability-plan.md）：
 			// - 快速档（默认，loadExtensions=false）：--no-extensions。实测 418 模型下

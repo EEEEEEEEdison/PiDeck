@@ -41,6 +41,7 @@ import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordi
 import { resolveConfigProxyTarget } from "../sessions/sessionProxyPolicy";
 import { setConfiguredGitPath } from "../git/gitExecutable";
 import { applyTrayLogoStyle, applyWindowLogoStyle } from "../appWindowLogo";
+import { syncTaskbarShortcutIcon } from "../appTaskbarIdentity";
 import { detectDshRunnerNode } from "../dsh/dshRunnerNode";
 import { DSH_RUNNER_NODE_ENV } from "../dsh/dshRunnerNodeSidecar";
 import { installDshRunnerNodeSidecar } from "../dsh/dshRunnerNodeInstall";
@@ -1684,9 +1685,15 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		}
 		// Logo 风格/自定义 logo 图：立即切换窗口/任务栏/Dock/托盘图标（安装包与 exe 的静态图标在构建期烘进二进制，
 		// 运行时改不了，见 appWindowLogo.ts）。两项要一起判：切图不动风格、或风格已是 custom 只换图，都得刷新。
-		if (("logoStyle" in patch && prevSettings.logoStyle !== settings.logoStyle) || ("logoCustomImage" in patch && prevSettings.logoCustomImage !== settings.logoCustomImage)) {
+		const logoChanged = ("logoStyle" in patch && prevSettings.logoStyle !== settings.logoStyle) || ("logoCustomImage" in patch && prevSettings.logoCustomImage !== settings.logoCustomImage);
+		if (logoChanged) {
 			applyWindowLogoStyle(settings.logoStyle, getMainWindow, settings.logoCustomImage);
 			if (getTray) applyTrayLogoStyle(settings.logoStyle, getTray, settings.logoCustomImage);
+		}
+		// 任务栏按钮的图标取开始菜单快捷方式的图标（窗口图标只是无身份注册时的兜底）：换 logo 时同步重写。
+		// 任务栏按钮上的**文字**不在这里：它取快捷方式/exe 名，与 appDisplayName 无关。
+		if (logoChanged) {
+			syncTaskbarShortcutIcon({ style: settings.logoStyle, customLogoDataUrl: settings.logoCustomImage });
 		}
 		// 更新源切换（预设镜像 / 自定义镜像前缀）：立即重建 feed URL，无需重启生效。
 		if ("updateSource" in patch || "customUpdateSourceUrl" in patch) {

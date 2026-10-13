@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 02e96df30a5a38e3c43c7b48f1dc4a6fba59001335db7076ff10f7bfe3a051e5（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: d20f5e4c493a1c3471217c00d1b32501a3b1fd7724344df6f6f5f7f0dc6c7bef（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -222,6 +222,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"acp.toolDuplicateName": "名稱與現有工具重複",
 	"acp.toolInvalidCharacters": "名稱或命令包含非法字元",
 	"acp.toolsTitle": "ACP 工具",
+	"acp.experimentalBadge": "實驗性",
+	"acp.experimentalHint": "該功能尚未經過完整的使用測試，可能存在問題；遇到異常歡迎通過左下角「問題反饋」反饋。",
 	"acp.toolsDescription": "登記支援 ACP 協議的 CLI（如 gemini --acp、kimi acp），新建會話時可選；會話歷史由對應工具自行儲存。",
 	"acp.toolName": "名稱",
 	"acp.toolCommand": "命令",
