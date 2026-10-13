@@ -211,6 +211,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"acp.toolDuplicateName": "Name duplicates an existing tool",
 	"acp.toolInvalidCharacters": "Name or command contains invalid characters",
 	"acp.toolsTitle": "ACP Tools",
+	"acp.experimentalBadge": "Experimental",
+	"acp.experimentalHint": "This feature has not been fully tested yet and may still have rough edges. If something goes wrong, please report it via the Feedback entry in the bottom-left dock.",
 	"acp.toolsDescription": "Register ACP-capable CLIs (e.g. gemini --acp, kimi acp); they become options when creating sessions. Session history stays with each tool.",
 	"acp.toolName": "Name",
 	"acp.toolCommand": "Command",

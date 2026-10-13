@@ -210,6 +210,8 @@ export const zhCN = {
 	"acp.toolDuplicateName": "名称与现有工具重复",
 	"acp.toolInvalidCharacters": "名称或命令包含非法字符",
 	"acp.toolsTitle": "ACP 工具",
+	"acp.experimentalBadge": "实验性",
+	"acp.experimentalHint": "该功能尚未经过完整的使用测试，可能存在问题；遇到异常欢迎通过左下角「问题反馈」反馈。",
 	"acp.toolsDescription": "登记支持 ACP 协议的 CLI（如 gemini --acp、kimi acp），新建会话时可选；会话历史由对应工具自行保存。",
 	"acp.toolName": "名称",
 	"acp.toolCommand": "命令",
