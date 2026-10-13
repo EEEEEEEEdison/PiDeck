@@ -321,7 +321,7 @@ test("a stale lightweight extension scan cannot overwrite a newer force refresh"
 
 	// Isolate cache ordering from pi/npm IO. The production method is private in TypeScript,
 	// but remains a normal method at runtime and is intentionally replaced only for this test.
-	manager.loadList = (includeVersionInfo) => (includeVersionInfo ? forced.promise : lightweight.promise);
+	manager.catalog.loadList = (includeVersionInfo) => (includeVersionInfo ? forced.promise : lightweight.promise);
 
 	const lightweightResult = manager.list(false);
 	const forceResult = manager.list(true);
@@ -361,7 +361,7 @@ test("loadList starts the pi process list and the local directory scan concurren
 		startOrder.push("pi");
 		return piDeferred.promise;
 	};
-	manager.scanLocalExtensions = () => {
+	manager.catalog.scanLocalExtensions = () => {
 		startOrder.push("scan");
 		return scanDeferred.promise;
 	};
@@ -387,7 +387,7 @@ test("loadList returns identical rows no matter which source settles first", asy
 		const piDeferred = deferred();
 		const scanDeferred = deferred();
 		manager.runPi = () => piDeferred.promise;
-		manager.scanLocalExtensions = () => scanDeferred.promise;
+		manager.catalog.scanLocalExtensions = () => scanDeferred.promise;
 		const pending = manager.list(false);
 		// deferred 显式控制结算顺序：先让一个源完全落地，再结算另一个；不靠真实计时。
 		if (firstSettled === "pi") {
@@ -427,7 +427,7 @@ test("list propagates the first rejected source and never leaks the late rejecti
 			const piDeferred = deferred();
 			const scanDeferred = deferred();
 			manager.runPi = () => piDeferred.promise;
-			manager.scanLocalExtensions = () => scanDeferred.promise;
+			manager.catalog.scanLocalExtensions = () => scanDeferred.promise;
 			const pending = manager.list(false);
 			if (firstRejection === "scan") {
 				scanDeferred.reject(new Error("scan-boom"));
@@ -475,7 +475,7 @@ test("parseListOutput strips the pi list (filtered) suffix so uninstall/update u
 
 	const raw = ["User packages:", "  npm:pi-web-access", "    C:\\Users\\demo\\.pi\\agent\\npm\\node_modules\\pi-web-access", "  npm:@adrianapan/pikit (filtered)", "    C:\\Users\\demo\\.pi\\agent\\npm\\node_modules\\@adrianapan\\pikit"].join("\n");
 
-	const parsed = manager.parseListOutput(raw);
+	const parsed = manager.catalog.parseListOutput(raw);
 	const pikit = parsed.find((ext) => ext.source.includes("pikit"));
 
 	// source 必须是干净的 npm source：卸载（pi remove）与更新（pi update / npm view）都依赖它
@@ -492,7 +492,7 @@ test("parseListOutput leaves plain package sources untouched", () => {
 
 	const raw = ["User packages:", "  npm:pi-web-access", "    C:\\Users\\demo\\.pi\\agent\\npm\\node_modules\\pi-web-access"].join("\n");
 
-	const parsed = manager.parseListOutput(raw);
+	const parsed = manager.catalog.parseListOutput(raw);
 	assert.equal(parsed.length, 1);
 	assert.equal(parsed[0].source, "npm:pi-web-access");
 	assert.equal(parsed[0].filtered, undefined);
@@ -622,7 +622,7 @@ test("npmViewVersion 复用 pi settings.json 的 npmCommand（#318/#263）", asy
 			},
 			() => ({}),
 		);
-		const version = await manager.npmViewVersion("context-mode");
+		const version = await manager.catalog.npmViewVersion("context-mode");
 		assert.equal(version, "9.9.9");
 		assert.equal(captured.command, "pnpm", "应使用配置的包装命令而非裸 npm");
 		// VM 跨 realm 数组：用 JSON 文本比较
@@ -658,7 +658,7 @@ test("npmViewVersion 未配置 npmCommand 时回落裸 npm（行为不变）", a
 			},
 			() => ({}),
 		);
-		await manager.npmViewVersion("context-mode");
+		await manager.catalog.npmViewVersion("context-mode");
 		assert.equal(captured.command, "npm");
 		assert.equal(JSON.stringify(captured.args), JSON.stringify(["view", "context-mode", "version"]));
 	} finally {
@@ -762,7 +762,7 @@ test("list(true) 的 latestVersion 来自 registry 快路解析值，请求带 c
 		const { ExtensionManager } = load("src/main/extensions/ExtensionManager.ts");
 		const manager = new ExtensionManager({ createInvocation: (command, args) => ({ command, args, shell: false }), createProcessEnv: () => ({}) }, () => ({}));
 		manager.runPi = async () => raw;
-		manager.scanLocalExtensions = async () => LOCAL_SCAN_ROWS;
+		manager.catalog.scanLocalExtensions = async () => LOCAL_SCAN_ROWS;
 
 		globalThis.fetch = async (url, init) => {
 			fetchCalls.push({ url, init });
@@ -858,7 +858,7 @@ test("registry 快路与 npm view 回退都失败时仍显示本地已装版本"
 		const { ExtensionManager } = load("src/main/extensions/ExtensionManager.ts");
 		const manager = new ExtensionManager({ createInvocation: (command, args) => ({ command, args, shell: false }), createProcessEnv: () => ({}) }, () => ({}));
 		manager.runPi = async () => raw;
-		manager.scanLocalExtensions = async () => LOCAL_SCAN_ROWS;
+		manager.catalog.scanLocalExtensions = async () => LOCAL_SCAN_ROWS;
 
 		const result = await manager.list(true);
 		const row = result.extensions.find((extension) => extension.source === "npm:context-mode");

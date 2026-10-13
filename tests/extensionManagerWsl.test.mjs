@@ -38,7 +38,7 @@ test("reads an installed WSL npm extension version through its canonical host pa
 		const manager = new ExtensionManager({}, () => ({}));
 		manager.configureWsl(wslPaths.createWslEnvironment("Ubuntu-24.04", "root", "/root"));
 
-		const version = await manager.readInstalledVersion("/root/.pi/agent/extensions/npm/fixture-extension");
+		const version = await manager.catalog.readInstalledVersion("/root/.pi/agent/extensions/npm/fixture-extension");
 
 		assert.equal(version, "1.2.3");
 		assert.equal(requestedPaths.length, 1);

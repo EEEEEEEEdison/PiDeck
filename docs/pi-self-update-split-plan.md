@@ -1,6 +1,6 @@
 # pi 自更新链路拆分计划（ExtensionManager 瘦身）
 
-> 状态：**Wave 1 / Wave 2 已落地（2026-10-13）**；Wave 3 待做。基线 `src/main/extensions/ExtensionManager.ts` 1254 行 → Wave 1 后 1216 → Wave 2 后 `985 行`（红线 600 的 1.6 倍）。
+> 状态：**Wave 1–3 全部落地（2026-10-13）**。`src/main/extensions/ExtensionManager.ts` 1254 → **564 行**（低于 600 红线）；拆出 `piSelfUpdateChannel.ts`（134 行，纯判定/命令构造）、`piSelfUpdateRunner.ts`（326 行，自更新执行）、`piExtensionCatalog.ts`（529 行，目录/版本查询）。
 > 触发：2026-10 修 bun/WSL 更新通道时，「检查 → 分派 → 失败提示 → 包管理器代跑」这一段已达 ~280 行，且与扩展目录/安装域同处一文件，按 AGENTS.md 的文件体量红线需要评估拆分。
 > 长期目标：自更新链路收口为 `src/main/pi/piSelfUpdateRunner.ts`（纯判定与命令构造已在 `piSelfUpdateChannel.ts`），ExtensionManager 只保留 spawn 装配、扩展管理域与薄包装，最终 ≤600 行。
 
@@ -48,9 +48,21 @@ ExtensionManager 1216 → 985 行，只留 `checkPiUpdate`/`updatePi` 两个薄�
 
 门禁（已满足）：ExtensionManager ≤ 1000 行（现 985）、`piSelfUpdateRunner.ts` 只单向依赖 `piSelfUpdateChannel.ts`（不反向 import 管理器）、受影响测试全绿且不再 stub 已迁出的私有方法。
 
-## Wave 3（远期）：扩展目录与安装域
+## Wave 3（已落地，2026-10-13）：扩展目录与版本查询域 → `piExtensionCatalog.ts`
 
-`loadList`(252)、`scanLocalExtensions`(350)、`install`、`uninstall`、`setEnabled`、本地文件扩展增删、`listCache*`/`listRequestSequence` 状态 → 抽 `piExtensionCatalog.ts`；届时 ExtensionManager 只剩 `runPi`/spawn 装配与薄包装，目标 ≤600 行。
+| 迁出内容 | 说明 |
+|---|---|
+| `listCache*` / `listInflight*` / `listCacheGeneration` / `listRequestSequence` 状态 + `invalidateListCache` + `list` | 缓存、并发去重与「代际丢弃」语义整块搬入，管理器只留两个同名薄包装（`main/index.ts`、`AgentManager`、IPC 调用点无感） |
+| `loadList` / `scanLocalExtensions` / `parseListOutput` / `projectCachedEnabled` / `applyEnabledProjection` | 扫描与投影；`nativeEnabledReader` 以闭包注入（装配仍留在管理器） |
+| `enrichExtensionVersion` / `settleQuery` / `readInstalledVersion` / `npmViewVersion` / `resolveNpmRegistryBase` | 版本补全与 registry 快路 |
+| `FILTERED_SUFFIX` / `ExtensionNativeState` / `BUILT_IN_CONFLICT_KEYWORDS` / `extensionNameMatches` | 随域搬入，管理器**原样再导出**保住外部契约（`tests/extensionNameMatches.test.mjs` 等无需改导入路径） |
+
+注入依赖：`runPi`、`locator`、`getSettings`、`getPiDeckSettings`、`translate`、`homeDir`、`builtInRoots`、`readNativeState`、`toHostPath`（WSL 路径映射）、`removeBuiltInFile`、`saveRemovedBuiltIn`（内置生命周期与写盘仍在管理器）。
+
+测试 seam 迁移：`manager.catalog.*`（`loadList` 1 处、`scanLocalExtensions` 6 处、`parseListOutput` 2 处、`npmViewVersion` 2 处、`readInstalledVersion` 1 处）；
+公开面未变，`manager.list()` / `invalidateListCache()` / `toggleFromUi` / 内置生命周期用例一行未改（源码契约测试 `extensionDemoPluginClassification` 仍需在管理器里看到 `toggleFromUi + isBuiltInExtensionName`，本波保持原样）。
+
+结果：ExtensionManager **985 → 564 行**（红线以下）；剩余内容是 `runPi` spawn 装配、pi 版本探测缓存、装/卸/开关/内置生命周期与薄包装——不再计划拆波。
 
 ## 验证与回滚
 

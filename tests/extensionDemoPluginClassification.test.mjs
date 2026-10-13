@@ -36,7 +36,7 @@ test("issue #321 demo 扩展按普通用户扩展分类：仅白名单成员才�
 		await writeFile(join(extensionsDir, "pi-deck-todo.ts"), "export default {};", "utf8");
 		await writeFile(join(extensionsDir, "random-tool.ts"), "export default {};", "utf8");
 		const manager = await createManager(home);
-		const rows = await manager.scanLocalExtensions();
+		const rows = await manager.catalog.scanLocalExtensions();
 		const bySource = new Map(rows.map((row) => [row.source, row]));
 		assert.equal(bySource.get(DEMO).builtIn, false, "demo 是用户复制的普通扩展，不得判为内置");
 		assert.equal(bySource.get("pi-deck-todo.ts").builtIn, true, "白名单成员的用户目录残留副本仍是内置（供启动迁移清理）");
