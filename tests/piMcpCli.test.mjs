@@ -91,3 +91,17 @@ test("PiMcpCli exposes scope-aware list/login/logout", () => {
 	assert.match(source, /async login\(scope: McpCliScope, server: string, timeoutSec: number/);
 	assert.match(source, /async logout\(scope: McpCliScope, server: string\)/);
 });
+
+test("parseMcpListOutput accepts both resource shapes (pi 1.1 counts, 1.2 boolean)", () => {
+	// pi 1.1：数量
+	const legacy = parseMcpListOutput(JSON.stringify({ servers: [{ name: "a", resources: 2, resourceTemplates: 1 }], errors: [] }));
+	assert.equal(legacy.servers[0].resources, 2);
+	assert.equal(legacy.servers[0].resourceTemplates, 1);
+	// pi 1.2：`resources: true`，且不再输出 resourceTemplates
+	const current = parseMcpListOutput(JSON.stringify({ servers: [{ name: "b", resources: true }], errors: [] }));
+	assert.equal(current.servers[0].resources, true, "pi 1.2 的布尔形态不能丢");
+	assert.equal(current.servers[0].resourceTemplates, undefined);
+	// 其它形态仍视为未提供
+	const bogus = parseMcpListOutput(JSON.stringify({ servers: [{ name: "c", resources: "yes" }], errors: [] }));
+	assert.equal(bogus.servers[0].resources, undefined);
+});

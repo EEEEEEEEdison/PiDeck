@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: f4db85198520f23693d77f54389522351deefe20bd8649d4b4404db3d2a3e366（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: d20f5e4c493a1c3471217c00d1b32501a3b1fd7724344df6f6f5f7f0dc6c7bef（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -208,6 +208,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.newAcpSession": "ACP 工具會話",
 	"app.acpNoTools": "尚未登記 ACP 工具，去設定新增",
 	"acp.processNotRunning": "{tool} 程序未在執行，請重試",
+	"acp.toolNotInstalled": "「{tool}」啟動失敗：該 CLI 未安裝或不在 PATH 中（{command}），請先安裝後在設定裡檢測",
+	"acp.toolMissing": "會話繫結的 ACP 工具已被刪除或停用，請在設定 → ACP 工具裡重新登記後重試",
+	"acp.startupTimeout": "「{tool}」啟動超時（首次下載或冷啟動可能較慢），請重試",
+	"acp.restoreHint": "歷史儲存在 {tool} 側：傳送訊息後自動恢復最近的對話內容",
+	"acp.restoreMissing": "該會話繫結的 ACP 工具已被刪除，請在設定 → ACP 工具裡重新登記後才能恢復與繼續",
 	"acp.hostInstructionsUnsupported": "ACP 後端不支援內部指令",
 	"acp.turnBusy": "{tool} 正在回覆中，請等待本輪結束或先停止當前回覆",
 	"acp.imagesNotSupported": "{tool} 不支援圖片輸入，請移除圖片後重試",
@@ -552,6 +557,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.collapseList": "摺疊列表",
 	"app.composerAttach": "加入指令",
 	"app.composerEnterPlaceholder": "輸入訊息，@ 引用檔案，/ 執行命令，& 引用會話…",
+	"app.composerAcpPlaceholder": "傳送給 {tool}，@ 引用檔案，/ 執行命令，& 引用會話…",
 	"app.composerFilesStatus": "右側面板可檢視檔案",
 	"app.composerNoAgentPlaceholder": "請選擇一個 Agent 後輸入訊息",
 	"app.composerSessionStatus": "右側面板正在顯示 {name} 的歷史會話",

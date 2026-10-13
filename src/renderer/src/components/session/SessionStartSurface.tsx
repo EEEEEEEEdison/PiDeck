@@ -3,6 +3,7 @@ import { useAtomValue } from "jotai";
 import { useSessionPaneServices } from "./SessionPaneServices";
 import { ComposerArea } from "./ComposerArea";
 import { QueuedPromptPanel } from "./ComposerPanels";
+import { SessionAcpRestoreStrip } from "./SessionAcpRestoreStrip";
 import { SessionFilesStrip } from "./SessionFilesStrip";
 import { SessionGoalStrip } from "./SessionGoalStrip";
 import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
@@ -59,6 +60,7 @@ export function SessionStartSurface(props: {
 					bootstrapProjectId={props.bootstrapProjectId}
 					widgets={
 						<>
+							{/* 未激活 ACP 会话：历史存 agent CLI 侧，时间线暂空（非新会话）。 */ <SessionAcpRestoreStrip sessionId={props.sessionId} />}
 							{!statusInSidebar && <SessionTodoStrip sessionId={props.sessionId} />}
 							{!statusInSidebar && <SessionFilesStrip sessionId={props.sessionId} />}
 							{!statusInSidebar && <SessionSubagentsStrip sessionId={props.sessionId} />}

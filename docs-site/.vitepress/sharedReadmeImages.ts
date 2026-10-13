@@ -25,7 +25,7 @@ import type { Plugin } from "vitepress";
  * 白名单显式列名（而不是整目录透传）：docs/images 下还有赞助商 logo 等只服务于仓库文档的图，
  * 不该被顺手发布到公网站点。
  */
-export const SHARED_README_IMAGES = ["wechat-qrcode.png"] as const;
+export const SHARED_README_IMAGES = ["wechat-qrcode.png", "gpt-recharge-price.png"] as const;
 
 // 本文件位于 docs-site/.vitepress/，上溯两级为 docs-site/，再上溯一级是仓库根。
 // 不用相对 cwd 的路径：docs:dev / docs:build 的 cwd 虽然是仓库根，但构建脚本可能改。

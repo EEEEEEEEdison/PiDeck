@@ -2218,6 +2218,14 @@ export function useSessionComposerController(options: UseSessionComposerControll
 					isGuideBootstrapSession && guideBackendOverride === "acp"
 					? { toolId: guideAcpToolOverride, onChange: backendLocked ? undefined : changeAcpTool }
 					: undefined,
+		// ACP 会话的 composer 占位符展示工具名（「发送给 Codex CLI…」）：激活后取 runtime 的
+		// modelName（即工具名），草稿期用 record.acpToolId 在已登记工具表里查；非 ACP 为空。
+		acpToolName:
+			record?.backend === "acp" && record.acpToolId
+				? (store.get(acpToolsAtom).find((candidate) => candidate.id === record.acpToolId)?.name ?? runtime?.state?.modelName)
+				: isGuideBootstrapSession && guideBackendOverride === "acp" && guideAcpToolOverride
+					? store.get(acpToolsAtom).find((candidate) => candidate.id === guideAcpToolOverride)?.name
+					: undefined,
 		/** DSH 部署默认模型（settings.yaml agent-default-model）；仅 dsh 后端时展示，
 		 *  离开 dsh 时清空（否则残留值会随 defaultModel 泄漏到 pi 会话底栏）。 */
 		dshDefaultModel: isDshBackend && dshDefault ? { provider: dshDefault.provider, modelId: dshDefault.model, modelName: dshDefault.model } : undefined,

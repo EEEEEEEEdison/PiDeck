@@ -262,7 +262,9 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 																	? t("app.composerPlanPlaceholder")
 																	: composer.mode === "goal"
 																		? t("app.composerGoalPlaceholder")
-																		: t("app.composerEnterPlaceholder")
+																		: composer.acpToolName
+																			? t("app.composerAcpPlaceholder", { tool: composer.acpToolName })
+																			: t("app.composerEnterPlaceholder")
 												}
 												onFocus={composer.editor.onFocus}
 												onChange={composer.editor.onChange}

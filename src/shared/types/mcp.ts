@@ -170,7 +170,9 @@ export type McpCliServerReport = {
 	state: string;
 	tools: string[];
 	toolExposure?: Record<string, string>;
-	resources?: number;
+	/** pi 1.1 输出资源数量（number）；pi 1.2 起只输出「是否提供资源」（`true`）。 */
+	resources?: number | boolean;
+	/** pi 1.1 的资源模板数量；pi 1.2 起不再输出该字段。 */
 	resourceTemplates?: number;
 	error?: string;
 };

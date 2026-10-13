@@ -170,7 +170,9 @@ test("the byte limit applies to each line, not to a chunk containing many valid 
 	const seen = [];
 	conn.on("notification", (frame) => seen.push(frame.params.index));
 	const batch = Array.from({ length: 9 }, (_, index) => JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: { index, text: "x".repeat(1024 * 1024) } })).join("\n");
-	const pending = conn.request("session/prompt", undefined, 100);
+	// 每行都走大帧延迟解析（setImmediate 排队）：请求超时要给足余量——断言目标是
+	// 逐行字节上限与投递顺序，1MB×9 的排队时序被压栈时 100ms 会抢跑完败。
+	const pending = conn.request("session/prompt", undefined, 5000);
 	stdout.write(`${batch}\n${JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} })}\n`);
 	await pending;
 	assert.deepEqual(seen, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
