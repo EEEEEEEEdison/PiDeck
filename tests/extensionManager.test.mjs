@@ -274,9 +274,46 @@ test("pickBunCommand：只有本地绝对路径才允许退回裸 bun（包装�
 	// WSL 召唤串之类的包装命令退回裸 `bun` = 拿宿主 bun 去装 pi、装错机器；必须原样返回让它 ENOENT。
 	const wrapped = "wsl -d Ubuntu-24.04 -u dev /home/dev/.bun/bin/bun";
 	assert.equal(manager.selfUpdate.pickBunCommand(wrapped), wrapped);
-	// 裸命令名原样交给 PATH；本地绝对路径不存在时（Homebrew/scoop 的 bun 本体在别处）才回退。
+	// 裸命令名原样交给 PATH。
 	assert.equal(manager.selfUpdate.pickBunCommand("bun"), "bun");
-	assert.equal(manager.selfUpdate.pickBunCommand("/nonexistent/.bun/bin/bun"), "bun");
+});
+
+test("bun 本体与已知候选都不存在时才回退裸 bun（候选探测看盘，用 fs 桩隔离环境）", () => {
+	// 候选列表包含 /usr/local/bin、~/.bun/bin 等真实位置，为了让断言与开发机是否装过 bun 无关，
+	// 这里把 fs 桩成「什么都不存在」。
+	const load = createTsSandbox({
+		stubs: {
+			"node:fs": { existsSync: () => false },
+			"../fs/trash": { trashPath: async () => {} },
+			"../logging/sharedLogger": { getAppLogger: () => null },
+			"../pi/PiProcess": { PiProcess: { invalidateVersionCache: () => {} } },
+			"./PiProcess": { PiProcess: { invalidateVersionCache: () => {} } },
+		},
+	});
+	const { ExtensionManager } = load("src/main/extensions/ExtensionManager.ts");
+	const manager = new ExtensionManager({}, () => ({}));
+	assert.equal(manager.selfUpdate.pickBunCommand("/tmp/nowhere/.bun/bin/bun"), "bun");
+});
+
+test("bun 本体不在 $BUN_INSTALL/bin 时按已知位置探测（linuxbrew/nix 不再 ENOENT）", async () => {
+	// 回归：Homebrew/nix 装的 bun 本体不在 `~/.bun/bin`（那里只有 shim），Linux 的 linuxbrew/nix
+	// 不在 PiLocator 硬编码目录里，只有裸 `bun` 回退时会 ENOENT。真实目录 fixture：只造 nix profile 里的 bun。
+	const home = await mkdtemp(join(tmpdir(), "pideck-bun-home-"));
+	const { ExtensionManager } = loadExtensionManagerModule();
+	const manager = new ExtensionManager({}, () => ({}));
+	try {
+		const binDir = join(home, ".nix-profile", "bin");
+		await mkdir(binDir, { recursive: true });
+		const bunName = process.platform === "win32" ? "bun.exe" : "bun";
+		const bunPath = join(binDir, bunName);
+		await writeFile(bunPath, "", "utf8");
+		// configureWsl 只是把 home（windowsHome）指到 fixture：home 下候选排在系统目录之前，
+		// 探测结果与开发机装了什么无关。
+		manager.configureWsl({ windowsHome: home });
+		assert.equal(manager.selfUpdate.pickBunCommand(join(home, ".bun", "bin", bunName)), bunPath);
+	} finally {
+		await rm(home, { recursive: true, force: true });
+	}
 });
 
 test("推导出的 bun 存在时用绝对路径（不依赖 GUI 进程的 PATH）", async () => {
@@ -296,21 +333,35 @@ test("推导出的 bun 存在时用绝对路径（不依赖 GUI 进程的 PATH�
 	}
 });
 
-test("推导出的 bun 不存在时回退裸 bun（Homebrew/scoop 装的 bun 本体不在 ~/.bun/bin）", async () => {
-	const layout = await createBunLayout({ withBun: false });
-	try {
-		const manager = createUpdatePiManager(layout.piPath, (key) => key);
-		const calls = [];
-		manager.selfUpdate.runBunGlobalUpdate = async (command) => {
-			calls.push(command);
-			throw new Error("stop after capture");
-		};
+test("推导出的 bun 与已知候选都不存在时才回退裸 bun（Homebrew/scoop 装的 bun 本体在别处）", async () => {
+	// 候选探测会真查盘（~/.bun、/usr/local/bin、nix …）：用 fs 桩固定成「什么都不存在」，
+	// 断言才与开发机是否装过 bun 无关（否则本机装了 bun 的开发/CI 会假红）。
+	const load = createTsSandbox({
+		stubs: {
+			"node:fs": { existsSync: () => false },
+			"../fs/trash": { trashPath: async () => {} },
+			"../logging/sharedLogger": { getAppLogger: () => null },
+			"../pi/PiProcess": { PiProcess: { invalidateVersionCache: () => {} } },
+			"./PiProcess": { PiProcess: { invalidateVersionCache: () => {} } },
+		},
+	});
+	const { ExtensionManager } = load("src/main/extensions/ExtensionManager.ts");
+	const manager = new ExtensionManager(
+		{},
+		() => ({}),
+		undefined,
+		undefined,
+		(key) => key,
+	);
+	manager.selfUpdate.check = async () => ({ hasUpdate: true, currentVersion: "1.1.0", latestVersion: "1.2.0", command: "/tmp/nowhere/.bun/bin/pi" });
+	const calls = [];
+	manager.selfUpdate.runBunGlobalUpdate = async (command) => {
+		calls.push(command);
+		throw new Error("stop after capture");
+	};
 
-		await assert.rejects(manager.updatePi(), /stop after capture/);
-		assert.deepEqual(calls, ["bun"]);
-	} finally {
-		await layout.cleanup();
-	}
+	await assert.rejects(manager.updatePi(), /stop after capture/);
+	assert.deepEqual(calls, ["bun"]);
 });
 
 test("a stale lightweight extension scan cannot overwrite a newer force refresh", async () => {

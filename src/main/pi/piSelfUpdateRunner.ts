@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { clearTimeout, setTimeout } from "node:timers";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { AppSettings, PiUpdateCheckResult } from "../../shared/types";
 import type { MainProcessTranslationKey } from "../../shared/i18n/mainProcessCopy";
 import type { PiLocator } from "./PiLocator";
@@ -10,7 +10,7 @@ import { getAppLogger } from "../logging/sharedLogger";
 import { compareVersions } from "../utils/versionCompare";
 import { parsePiVersion } from "../extensions/extensionVersionGate";
 import { readConfiguredNpmCommand } from "../resourceWhitelist";
-import { BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG, bunGlobalInstallArgs, isLocalAbsolutePath, npmGlobalInstallArgs, parseBunVersion, PI_OFFICIAL_REGISTRY, resolvePiSelfUpdateChannel, type PiSelfUpdateChannel } from "./piSelfUpdateChannel";
+import { BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG, bunCommandCandidates, bunGlobalInstallArgs, isLocalAbsolutePath, npmGlobalInstallArgs, parseBunVersion, PI_OFFICIAL_REGISTRY, resolvePiSelfUpdateChannel, type PiSelfUpdateChannel } from "./piSelfUpdateChannel";
 
 /**
  * pi 自更新的**执行**链路：检查（pi.dev 版本接口）→ 通道分派 → 包管理器代跑 → 结果核验 → 失败提示。
@@ -278,7 +278,14 @@ export class PiSelfUpdateRunner {
 	 */
 	private pickBunCommand(derived: string): string {
 		if (!isLocalAbsolutePath(derived)) return derived;
-		return existsSync(derived) ? derived : "bun";
+		if (existsSync(derived)) return derived;
+		// Homebrew/nix 装的 bun 本体不在 `$BUN_INSTALL/bin`（那里只有 shim）：按已知位置逐个探一次，
+		// 命中就用绝对路径；都不命中才回退裸 `bun` 赌 PATH（Linux 的 linuxbrew/nix 目录不在 PiLocator
+		// 的硬编码目录里，那时裸 `bun` 会 ENOENT——用户报的「bun 更新不了」的剩余形态）。
+		for (const candidate of bunCommandCandidates(this.homeDir(), basename(derived))) {
+			if (existsSync(candidate)) return candidate;
+		}
+		return "bun";
 	}
 
 	/**

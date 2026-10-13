@@ -15,7 +15,7 @@ import { test } from "node:test";
 import { join, win32 } from "node:path";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG, bunGlobalInstallArgs, isLocalAbsolutePath, npmGlobalInstallArgs, parseBunVersion, PI_OFFICIAL_REGISTRY, resolvePiSelfUpdateChannel } = loadTsCommonJs("src/main/pi/piSelfUpdateChannel.ts");
+const { BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG, bunCommandCandidates, bunGlobalInstallArgs, isLocalAbsolutePath, npmGlobalInstallArgs, parseBunVersion, PI_OFFICIAL_REGISTRY, resolvePiSelfUpdateChannel } = loadTsCommonJs("src/main/pi/piSelfUpdateChannel.ts");
 
 test("bun 全局 bin（POSIX 形态）→ bun-global，bunCommand 取同目录的 bun 本体", () => {
 	const channel = resolvePiSelfUpdateChannel("/home/tester/.bun/bin/pi", "linux");
@@ -119,4 +119,15 @@ test("本地绝对路径判定（bun 回退的第二道防线：包装命令串�
 	assert.equal(isLocalAbsolutePath(String.raw`\\server\share\bun`), true);
 	assert.equal(isLocalAbsolutePath("bun"), false);
 	assert.equal(isLocalAbsolutePath("wsl -d Ubuntu-24.04 -u dev /home/u/.bun/bin/bun"), false);
+});
+
+test("bun 本体候选列表：home 下优先，再补 Linux 的 linuxbrew/nix 位置（纯列表，不碰磁盘）", () => {
+	// 回归：Homebrew/nix 装的 bun 本体不在 `~/.bun/bin`（那里只有 shim），Linux 的 linuxbrew/nix
+	// 不在 PiLocator 硬编码目录里，只有裸 `bun` 回退时会 ENOENT。
+	assert.equal(
+		bunCommandCandidates("/home/u", "bun", "linux").join("|"),
+		["/home/u/.bun/bin/bun", "/home/u/.linuxbrew/bin/bun", "/home/u/.nix-profile/bin/bun", "/home/linuxbrew/.linuxbrew/bin/bun", "/opt/homebrew/bin/bun", "/usr/local/bin/bun", "/nix/var/nix/profiles/default/bin/bun", "/run/current-system/sw/bin/bun"].join("|"),
+	);
+	// Windows 只探 home 下（无固定盘符约定）；文件名由调用方按平台传入。
+	assert.equal(bunCommandCandidates(String.raw`C:\Users\u`, "bun.exe", "win32").join("|"), [win32.join(String.raw`C:\Users\u`, ".bun", "bin", "bun.exe"), win32.join(String.raw`C:\Users\u`, ".linuxbrew", "bin", "bun.exe"), win32.join(String.raw`C:\Users\u`, ".nix-profile", "bin", "bun.exe")].join("|"));
 });

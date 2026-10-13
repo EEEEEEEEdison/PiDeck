@@ -98,6 +98,25 @@ export function bunGlobalInstallArgs(spec: string, options: { releaseAgeFlag?: b
 /** 年龄门开关在 bun 1.3 引入（1.3 之前无此开关，发了也不会有集合）。 */
 export const BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG = "1.3.0";
 
+/** POSIX 上 bun 本体可能所在、但 PiLocator 硬编码目录没覆盖的位置（按探测顺序）。 */
+const POSIX_BUN_DIRS = ["/home/linuxbrew/.linuxbrew/bin", "/opt/homebrew/bin", "/usr/local/bin", "/nix/var/nix/profiles/default/bin", "/run/current-system/sw/bin"];
+/** 相对用户 home 的 bun 本体候选目录（linuxbrew 与 nix 默认都在 home 下）。 */
+const HOME_BUN_DIRS = [".bun/bin", ".linuxbrew/bin", ".nix-profile/bin"];
+
+/**
+ * bun 本体的候选位置（有序，**纯列表构造**，存在性判断在调用方）。
+ *
+ * 为什么需要：从 pi 入口只能推出 `$BUN_INSTALL/bin`（默认 `~/.bun/bin`），而 Homebrew/nix 装的 bun 本体
+ * 在别处、shim 仍在 `~/.bun/bin`——这时推出来的路径不存在，若不补候选就只能回退裸 `bun` 赌 PATH。
+ * macOS 的 brew 目录已在 PiLocator 的硬编码目录里，Linux 的 linuxbrew 与 nix 不在。
+ */
+export function bunCommandCandidates(homeDir: string, bunName: string, platform: NodeJS.Platform = process.platform): string[] {
+	const api = platform === "win32" ? win32 : posix;
+	const fromHome = HOME_BUN_DIRS.map((rel) => api.join(homeDir, ...rel.split("/"), bunName));
+	// Windows 上没有 linuxbrew/nix 的固定盘符约定；home 下的候选（含 `%USERPROFILE%\.bun\bin`）足够。
+	return platform === "win32" ? fromHome : [...fromHome, ...POSIX_BUN_DIRS.map((dir) => api.join(dir, bunName))];
+}
+
 /**
  * `bun --version` 输出的版本（如 `1.4.3`，实测单行裸版本号）。只认「整行就是一个版本」的行：直接抓版本号
  * 子串会在包装命令（mise/asdf 等）的摸幅里抽到无关版本，把老 bun 误判成 ≥ 1.3 后塞进它不认识的
