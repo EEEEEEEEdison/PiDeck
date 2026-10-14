@@ -26,18 +26,9 @@ import { buildAskCard, normalizeAskOption, parseAskActionValue, parseAskInputVal
 import { feishuLanguage, feishuT, normalizeFeishuLocale, type FeishuLocale } from "./FeishuI18n";
 import type { AgentManager } from "../pi/AgentManager";
 
-export interface SessionRuntimeBindingGateway {
-	ensureSession(input: { projectId: string; title: string; existingSessionId?: string; sessionPath?: string }): Promise<{ sessionId: string }>;
-	activateRuntime(sessionId: string): Promise<AgentTab>;
-	bindRuntime(input: { projectId: string; agent: AgentTab; existingSessionId?: string }): Promise<{ sessionId: string }>;
-	sendPrompt(input: { sessionId: string; message: string; agentMessage?: string; images?: ImageContent[] }): Promise<void>;
-	abortRuntime(sessionId: string): Promise<void>;
-	listRuntimeModels(sessionId: string): Promise<AvailableModel[]>;
-	getRuntimeState(sessionId: string): Promise<AgentRuntimeState | undefined>;
-	setRuntimeModel(sessionId: string, provider: string, modelId: string): Promise<void>;
-	/** 把 ask/confirm 等扩展 UI 的答案写回 pi（与桌面端弹窗回答同一条链路）。 */
-	sendUIResponse(agentId: string, requestId: string, response: { value?: string | boolean; confirmed?: boolean; cancelled?: boolean }): void;
-}
+import type { SessionRuntimeBindingGateway } from "../sessions/sessionRuntimeBinding";
+
+export type { SessionRuntimeBindingGateway };
 
 // ===== 常量 =====
 const DEDUP_MAX = 200;

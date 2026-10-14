@@ -825,6 +825,27 @@ export const ipcChannels = {
 	/** 飞书 /whoami 结果推回前端 */
 	feishuWhoamiResult: "feishu:whoami-result",
 
+	// ===== 微信 iLink 桥接 =====
+	wechatGetSettings: "wechat:get-settings",
+	wechatSetEnabled: "wechat:set-enabled",
+	wechatUpdateSettings: "wechat:update-settings",
+	wechatRenameAccount: "wechat:rename-account",
+	wechatLogout: "wechat:logout",
+	/** 取二维码并开始轮询；返回的状态已带 qrcodeContent */
+	wechatBeginLogin: "wechat:begin-login",
+	wechatCancelLogin: "wechat:cancel-login",
+	wechatSubmitVerifyCode: "wechat:submit-verify-code",
+	wechatGetLoginState: "wechat:get-login-state",
+	wechatGetStatus: "wechat:get-status",
+	wechatGetBindings: "wechat:get-bindings",
+	wechatUnbindChat: "wechat:unbind-chat",
+	/** 主进程 → 渲染层：桥接连接状态变化 */
+	wechatStatus: "wechat:status",
+	/** 主进程 → 渲染层：扫码登录阶段变化（含二维码内容） */
+	wechatLoginState: "wechat:login-state",
+	/** 主进程 → 渲染层：聊天绑定变化 */
+	wechatBindingsChanged: "wechat:bindings-changed",
+
 	// ===== 桌面宠物（全局聚合单宠） =====
 	/** 主进程 → 宠物窗：推送聚合状态 */
 	petState: "pet:state",

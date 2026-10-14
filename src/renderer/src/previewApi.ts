@@ -1823,6 +1823,23 @@ export function createPreviewApi(): PiDesktopApi {
 		browser: {
 			openExternal: async () => {},
 		},
+		wechat: {
+			snapshot: async () => ({ ok: false, message: "预览模式不支持" }),
+			setEnabled: async () => ({ ok: false, message: "预览模式不支持" }),
+			updateSettings: async () => ({ ok: false, message: "预览模式不支持" }),
+			renameAccount: async () => ({ ok: false, message: "预览模式不支持" }),
+			logout: async () => ({ ok: false, message: "预览模式不支持" }),
+			beginLogin: async () => ({ ok: false, message: "预览模式不支持" }),
+			cancelLogin: async () => ({ ok: false, message: "预览模式不支持" }),
+			submitVerifyCode: async () => ({ ok: false, message: "预览模式不支持" }),
+			getLoginState: async () => ({ phase: "idle" as const }),
+			getStatus: async () => ({ status: "disconnected" as const, account: null, activeBindings: 0 }),
+			getBindings: async () => [],
+			unbindChat: async () => ({ ok: false, message: "预览模式不支持" }),
+			onStatus: () => () => {},
+			onLoginState: () => () => {},
+			onBindingsChanged: () => () => {},
+		},
 		scratchPad: {
 			list: async () => [],
 			create: async () => ({ id: "", name: "", path: "", createdAt: 0, updatedAt: 0 }),

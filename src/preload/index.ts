@@ -205,6 +205,13 @@ import type {
 	HealthReport,
 	HealthReportContext,
 	HealthReportFormat,
+	WeChatAccountInfo,
+	WeChatBridgeStatus,
+	WeChatChatBinding,
+	WeChatIpcResult,
+	WeChatLoginState,
+	WeChatSettings,
+	WeChatSettingsSnapshot,
 } from "../shared/types";
 import type { ProviderUsageResult, UsageProbeSaveInput, UsageProbeSaveResult, UsageProbeSettingsResult, UsageProbeStatesResult, UsageProbeTestInput } from "../shared/types/providerUsage";
 
@@ -1552,6 +1559,27 @@ const api = {
 		onBotsChanged: (callback: (bots: FeishuBotConfig[]) => void) => subscribe(ipcChannels.feishuBotsChanged, callback),
 		sessionBotGet: (sessionId: string) => ipcRenderer.invoke(ipcChannels.feishuSessionBotGet, sessionId) as Promise<string | null>,
 		sessionBotSet: (sessionId: string, botId: string | null) => ipcRenderer.invoke(ipcChannels.feishuSessionBotSet, sessionId, botId) as Promise<FeishuSessionBotResult>,
+	},
+
+	// ===== 微信 iLink 桥接 =====
+	wechat: {
+		/** 设置页一次拉齐：设置 + 状态 + 绑定 + 可选工作区。 */
+		snapshot: () => ipcRenderer.invoke(ipcChannels.wechatGetSettings) as Promise<WeChatIpcResult<WeChatSettingsSnapshot>>,
+		setEnabled: (enabled: boolean) => ipcRenderer.invoke(ipcChannels.wechatSetEnabled, enabled) as Promise<WeChatIpcResult<{ settings: WeChatSettings }>>,
+		updateSettings: (patch: { defaultWorkspaceId?: string; defaultModelId?: string }) => ipcRenderer.invoke(ipcChannels.wechatUpdateSettings, patch) as Promise<WeChatIpcResult<{ settings: WeChatSettings }>>,
+		renameAccount: (displayName: string) => ipcRenderer.invoke(ipcChannels.wechatRenameAccount, displayName) as Promise<WeChatIpcResult<{ settings: WeChatSettings }>>,
+		logout: () => ipcRenderer.invoke(ipcChannels.wechatLogout) as Promise<WeChatIpcResult<{ settings: WeChatSettings }>>,
+		/** 取二维码并开始轮询；返回的状态已带 qrcodeContent，界面可直接渲染。 */
+		beginLogin: () => ipcRenderer.invoke(ipcChannels.wechatBeginLogin) as Promise<WeChatIpcResult<{ state: WeChatLoginState }>>,
+		cancelLogin: () => ipcRenderer.invoke(ipcChannels.wechatCancelLogin) as Promise<WeChatIpcResult<{ state: WeChatLoginState }>>,
+		submitVerifyCode: (code: string) => ipcRenderer.invoke(ipcChannels.wechatSubmitVerifyCode, code) as Promise<WeChatIpcResult<{ state: WeChatLoginState }>>,
+		getLoginState: () => ipcRenderer.invoke(ipcChannels.wechatGetLoginState) as Promise<WeChatLoginState>,
+		getStatus: () => ipcRenderer.invoke(ipcChannels.wechatGetStatus) as Promise<WeChatBridgeStatus>,
+		getBindings: () => ipcRenderer.invoke(ipcChannels.wechatGetBindings) as Promise<WeChatChatBinding[]>,
+		unbindChat: (chatId: string) => ipcRenderer.invoke(ipcChannels.wechatUnbindChat, chatId) as Promise<WeChatIpcResult<{ removed: boolean; bindings: WeChatChatBinding[] }>>,
+		onStatus: (callback: (status: WeChatBridgeStatus) => void) => subscribe(ipcChannels.wechatStatus, callback),
+		onLoginState: (callback: (state: WeChatLoginState) => void) => subscribe(ipcChannels.wechatLoginState, callback),
+		onBindingsChanged: (callback: (bindings: WeChatChatBinding[]) => void) => subscribe(ipcChannels.wechatBindingsChanged, callback),
 	},
 
 	// ===== 内置浏览器 =====

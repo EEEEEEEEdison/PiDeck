@@ -19,6 +19,7 @@ import { AutomationScheduler } from "./automation/AutomationScheduler";
 import { AutomationRunCoordinator } from "./automation/AutomationRunCoordinator";
 import { registerAutomationIpc } from "./ipc/automationIpc";
 import { registerFeishuIpc } from "./ipc/feishuIpc";
+import { registerWeChatIpc } from "./ipc/wechatIpc";
 import { applyLinuxDisplayBackendWorkaround, isUsingLinuxXWaylandWorkaround } from "./linuxDisplayBackend";
 import { readBootPreferences } from "./settings/SettingsStore";
 import { acquireVersionSingleInstance, type FocusPayload } from "./singleInstance";
@@ -443,6 +444,7 @@ import { feishuT, normalizeFeishuLocale, type FeishuLocale } from "./feishu/Feis
 import { wantsFeishuDoc } from "./feishu/docActions";
 import { resolveFeishuFileSendIntent } from "./feishu/fileIntent";
 import { listBots, getBot, addBot as addFeishuBot, removeBot as removeFeishuBot, updateBot as updateFeishuBot, getDecryptedBotAppSecret, getSessionBotId, setSessionBotId, setFeishuConfigDefaultBotName } from "./feishu/FeishuConfig";
+import { WeChatService } from "./wechat/WeChatService";
 import { startMemoryProfile, isMemoryProfileEnabled, type MemoryProfileHandle } from "./memory/MemoryMonitor";
 import { DiagnosticsMonitor } from "./diagnostics/DiagnosticsMonitor";
 import { EnvironmentDoctor } from "./health/EnvironmentDoctor";
@@ -567,6 +569,8 @@ let logBundleExporter: LogBundleExporter | null = null;
 // feishuBridge 是跨域共享可变单例：飞书 IPC（连接/重连/删除）、退出清理、setLocale、
 // 会话绑定查询都读写它；用 ref 对象而非裸 let，便于把飞书 IPC 域迁出本文件后共享同一槽位。
 const feishuBridgeRef: { current: FeishuBridge | null } = { current: null };
+// 微信桥接同样需要跨域共享（IPC 域 + 退出清理），用同一套 ref 槽位约定。
+const wechatServiceRef: { current: WeChatService | null } = { current: null };
 // 退出清理路径与 IPC 域共用同一槽位（见 ipc/feishuIpc.ts）。
 let usageStatsService: UsageStatsService | null = null;
 /**
@@ -586,6 +590,10 @@ const quitCleanup = new QuitCleanupRegistry();
 quitCleanup.register("feishu-bridge", () => {
 	feishuBridgeRef.current?.stop();
 	feishuBridgeRef.current = null;
+});
+quitCleanup.register("wechat-bridge", () => {
+	void wechatServiceRef.current?.stop();
+	wechatServiceRef.current = null;
 });
 
 // 窗口整体缩放快捷键（Ctrl/Cmd+= 放大、Ctrl/Cmd+- 缩小）：按 shared/zoom 档位应用并持久化。
@@ -1254,7 +1262,7 @@ function cancelUnboundUiRequest(payload: unknown): void {
 	void agentManager.sendUIResponse(request.agentId, request.requestId, { cancelled: true });
 }
 
-const feishuSessionRuntimeBindings: SessionRuntimeBindingGateway = {
+const imSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 	async ensureSession(input) {
 		if (input.existingSessionId) {
 			const existing = sessionCatalog.get(input.existingSessionId);
@@ -4596,6 +4604,10 @@ app
 				if (!entry) return false;
 				// Web 删除与桌面 IPC 同一策略：先解绑再删 catalog，agent 后台停。
 				await sessionRuntimeCoordinator.releaseRuntimeForDelete(sessionId);
+				// 微信桥的绑定指向已删会话时必须一起清掉：留着它下次收信会拿旧 sessionPath
+				// 去恢复一个刚被删掉的文件，聊天就永久卡在「会话创建失败」。
+				// （飞书侧同样存在这个悬挂，但那是既存行为，不在微信通道的改动范围内。）
+				wechatServiceRef.current?.removeBindingsForSession(sessionId);
 				if (entry.filePath) await sessionScanner.delete(entry.filePath);
 				// DSH 没有 session.delete：与 pi 端同语义删除——把 host 会话目录移入系统回收站
 				// （可恢复；trashPath 失败时抛错由 IPC 呈现，拒绝静默硬删；目录已不在=幂等成功）。
@@ -5262,8 +5274,32 @@ app
 			agentManager,
 			projectStore,
 			sessionRuntimeCoordinator,
-			feishuSessionRuntimeBindings,
+			feishuSessionRuntimeBindings: imSessionRuntimeBindings,
 			getCurrentLocale: currentFeishuLocale,
+		});
+		// 微信 iLink 桥接：与飞书同构，但登录方式是扫码，且必须等界面就绪才能展示二维码。
+		// 服务在这里建好并登记退出清理；启用状态下的实际连接由 start() 发起（fire-and-forget，
+		// 失败只进日志/状态，不得阻断启动）。
+		const wechatService = new WeChatService({
+			agentManager,
+			getProjects: () => projectStore.list().map((project) => ({ id: project.id, name: project.name })),
+			runtimeBindings: imSessionRuntimeBindings,
+			getLocale: currentMainProcessLocale,
+			getWindow: () => mainWindow,
+			botAgent: `PiDeck/${app.getVersion()}`,
+			logger: (level, message, detail) => {
+				if (level === "warn" || level === "error") void appLogger?.warn("wechat", message, detail);
+				else void appLogger?.info("wechat", message, detail);
+			},
+		});
+		wechatServiceRef.current = wechatService;
+		registerWeChatIpc({
+			getMainWindow: () => mainWindow,
+			wechatService,
+			getProjects: () => projectStore.list().map((project) => ({ id: project.id, name: project.name })),
+		});
+		void wechatService.start().catch((error: unknown) => {
+			void appLogger?.warn("wechat", "WeChat bridge autostart failed", error);
 		});
 		// 配置备份（手动模式）：仅在备份目录为空（首次使用）时自动建一份 first-run，
 		// 之后不再自动备份。同步快，不挡首帧；失败仅记录，不阻断启动。

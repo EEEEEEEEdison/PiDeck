@@ -13,6 +13,7 @@ import { ConfirmDialog } from "../../app/AppParts";
 import { writeClipboard } from "../../../utils/clipboard";
 import type { FeishuBotConfig, FeishuBridgeStatus, FeishuChatBinding, FeishuTestResult } from "../../../../../shared/types";
 import { formatI18nDateTime, t } from "../../../i18n";
+import { WeChatSection } from "./WeChatSection";
 import { Label } from "../../ui-shadcn/label";
 
 type Props = {
@@ -99,7 +100,10 @@ type FeishuApiRaw = {
 	onWhoamiResult?: (cb: (openId: string) => void) => () => void;
 };
 
-export function ImTab(_props: Props) {
+/**
+ * 飞书接入面板。原 ImTab 本体（2027-02 加微信时改名）：只负责飞书，平台切换由下面的 ImTab 承担。
+ */
+function FeishuPane(_props: Props) {
 	const [bots, setBots] = useState<FeishuBotConfig[]>([]);
 	const [status, setStatus] = useState<FeishuBridgeStatus>({ status: "disconnected", activeBindings: 0 });
 	const [bindings, setBindings] = useState<FeishuChatBinding[]>([]);
@@ -830,6 +834,33 @@ export function ImTab(_props: Props) {
 						</div>
 					</div>
 				</div>
+			)}
+		</div>
+	);
+}
+
+/**
+ * IM 接入设置页：飞书与微信是两套完全不同的登录流程（App ID/Secret vs 扫码），
+ * 共用一个表单会把两边的状态混在一起，所以这里只做平台切换，各自的面板内部自理。
+ */
+export function ImTab() {
+	const [platform, setPlatform] = useState<"feishu" | "wechat">("feishu");
+	return (
+		<div className="flex flex-col gap-4">
+			<div className="flex gap-1.5" role="tablist" aria-label={t("config.im.platformLabel")}>
+				<Button variant={platform === "feishu" ? "secondary" : "ghost"} size="sm" role="tab" aria-selected={platform === "feishu"} onClick={() => setPlatform("feishu")}>
+					{t("config.im.platformFeishu")}
+				</Button>
+				<Button variant={platform === "wechat" ? "secondary" : "ghost"} size="sm" role="tab" aria-selected={platform === "wechat"} onClick={() => setPlatform("wechat")}>
+					{t("config.im.platformWechat")}
+				</Button>
+			</div>
+			{platform === "wechat" ? (
+				<div className="config-im-tab">
+					<WeChatSection />
+				</div>
+			) : (
+				<FeishuPane />
 			)}
 		</div>
 	);
