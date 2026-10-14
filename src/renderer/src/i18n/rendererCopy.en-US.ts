@@ -211,6 +211,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"acp.turnBusy": "{tool} is still responding; wait for this turn to finish or stop it first",
 	"acp.abortForceStopped": "{tool} did not respond to the stop request in time, so the turn was force-stopped; send again to continue",
 	"acp.stallForceStopped": "{tool} produced no output for a long time, so the turn was stopped automatically; check the CLI's model/network configuration and retry",
+	"acp.emptyTurn": "{tool} finished the turn without returning any output (the CLI may have a known defect such as a lost event stream); upgrade it to the latest version and retry",
 	"acp.imagesNotSupported": "{tool} does not accept image input; remove the images and try again",
 	"acp.authRequired": "{tool} is not signed in or its credentials expired: run the CLI in a terminal to log in, then come back and retry",
 	"acp.toolNameRequired": "Name is required",

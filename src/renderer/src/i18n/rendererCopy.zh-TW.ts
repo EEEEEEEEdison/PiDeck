@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 87bbcd7684eda0503585ea386e9c8bbb1d5ba7b1094bcd8be3dbc0b4a9051e06（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: a13a654f3a6e2902d6800aa385c790d2cf5790d239c0cf70bde2a344c1328bff（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -217,6 +217,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"acp.turnBusy": "{tool} 正在回覆中，請等待本輪結束或先停止當前回覆",
 	"acp.abortForceStopped": "「{tool}」長時間未響應停止請求，已強制結束本輪；重新發送即可繼續",
 	"acp.stallForceStopped": "「{tool}」長時間無任何輸出，已自動停止本輪；請檢查該 CLI 的模型/網路配置後重試",
+	"acp.emptyTurn": "「{tool}」本輪結束但沒有返回任何輸出（該 CLI 可能存在已知缺陷，如事件流丟失），請升級到最新版本後重試",
 	"acp.imagesNotSupported": "{tool} 不支援圖片輸入，請移除圖片後重試",
 	"acp.authRequired": "「{tool}」未登入或憑據失效：請先在終端執行該 CLI 完成登入，再回到這裡重試",
 	"acp.toolNameRequired": "名稱必填",

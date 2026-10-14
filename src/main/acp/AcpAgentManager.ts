@@ -18,7 +18,7 @@ import type { ChatMessage, SendPromptInput, SendPromptResult, SessionUiResponseI
 import type { PiCommand } from "../../shared/types/app";
 import type { SessionAgentGateway } from "../sessions/SessionRuntimeCoordinator";
 import type { PiLocator } from "../pi/PiLocator";
-import { ACP_ERROR_CODE, type AcpAgentCapabilities, type AcpConfigOption, type AcpContentBlock, type AcpRpcNotification, type AcpSessionLoadResult, type AcpSessionPromptResult, type AcpSessionSetupResult, type AcpSessionUpdate } from "./acpProtocol";
+import { ACP_ERROR_CODE, type AcpAgentCapabilities, type AcpConfigOption, type AcpContentBlock, type AcpRpcNotification, type AcpSessionLoadResult, type AcpSessionPromptResult, type AcpSessionSetupResult, type AcpSessionUpdate, type AcpStopReason } from "./acpProtocol";
 import { AcpConnection, AcpRpcError, AcpTimeoutError } from "./AcpConnection";
 import { AcpPermissionRequests } from "./AcpPermissionRequests";
 import { acpPromptBlocks, appendAcpUserPrompt, initialAcpProjection, projectAcpSessionUpdate, rollbackAcpUserPrompt, settleAcpTurn, type AcpProjectionState } from "./AcpEventProjector";
@@ -94,6 +94,9 @@ type AcpAgentRuntime = {
 	permissions: AcpPermissionRequests;
 	/** cancel 后到 prompt 结算前仍允许尾部 update，但不再接受新审批。 */
 	cancelling: boolean;
+	/** 本次 cancel 的发起方:user_stop=用户主动停止(空白收口属正常);stall=看门狗
+	 *  代发(用户没叫停,空白回合是 CLI 异常,必须按失败收口而非谎报成功)。 */
+	cancelReason: "user_stop" | "stall" | null;
 	/** load 尚未成功时不发布半段历史、标题或配置，失败可完整丢弃。 */
 	reloading: boolean;
 	flushTimer: NodeJS.Timeout | null;
@@ -339,6 +342,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 			turnActive: false,
 			permissions: new AcpPermissionRequests(conn, (event) => this.emit(ipcChannels.agentsUiRequest, { agentId, ...event }), this.deps.permissionTimeoutMs),
 			cancelling: false,
+			cancelReason: null,
 			reloading: false,
 			flushTimer: null,
 			flushPending: false,
@@ -592,6 +596,8 @@ export class AcpAgentManager implements SessionAgentGateway {
 			return { accepted: false, error: "ACP agent is still responding; stop or wait for the current turn", delivery: "rejected", i18nKey: "acp.turnBusy", i18nParams: { tool: runtime.tool.name } };
 		}
 		const prompt = acpPromptBlocks(input.message, input.images);
+		// 本回合结算 stopReason 的快照:成功路径的空白回合守卫在 try 外使用,需提前记录。
+		let settledStopReason: AcpStopReason = "end_turn";
 		// 用户消息先落投影:ACP 规范不保证 agent 回显 user_message_chunk(OpenCode 等根本不发),
 		// 而 agents:message 是全量替换语义,主进程不落条目的话渲染层乐观气泡会被第一次 flush 抹掉。
 		const messagesBeforeSeed = runtime.projection.messages.length;
@@ -600,6 +606,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 		this.applyProjectionTitle(runtime);
 		runtime.turnActive = true;
 		runtime.cancelling = false;
+		runtime.cancelReason = null;
 		runtime.escalatedStop = null;
 		runtime.status = "running";
 		runtime.tab.status = "running";
@@ -627,7 +634,8 @@ export class AcpAgentManager implements SessionAgentGateway {
 			// 结算前先排空 update 链:result 帧与末批 update 同为 stdout 行序分发,
 			// 但链上每步含异步物化,settle 提前会把在途流式块拆成新回合。
 			await runtime.updateChain;
-			runtime.projection = settleAcpTurn(runtime.projection, result?.stopReason ?? "end_turn");
+			settledStopReason = result?.stopReason ?? "end_turn";
+			runtime.projection = settleAcpTurn(runtime.projection, settledStopReason);
 		} catch (error) {
 			await runtime.updateChain;
 			this.clearTurnTimers(runtime);
@@ -686,6 +694,20 @@ export class AcpAgentManager implements SessionAgentGateway {
 		this.flushMessages(runtime, true);
 		this.emit(ipcChannels.agentsState, this.list());
 		this.emitRuntimeState(input.agentId);
+		// 成功结算 ≠ 有可见输出：部分 CLI 因自身事件流竞态会正常回 end_turn 却漏掉全部
+		// session/update（OpenCode 1.15.4 /event 订阅竞态实测：消息已被处理但 client 一无所获，
+		// UI 只剩本地用户气泡、草稿已清空、还谎报成功）。回合已确定结束且无任何产出，
+		// 按 rejected 收口并回滚本地用户条目：渲染层回填草稿，用户升级 CLI 后可安全重发。
+		// 用户主动停止(cancelling 且来源 user_stop,CLI 回 cancelled)不在此列:语义同 pi 后端
+		// abort,正常收口;看门狗 stall 代发的 cancel 不豁免——那就是本守卫要抓的异常形态。
+		const hasOutput = runtime.projection.messages.slice(seededIndex + 1).some((entry) => entry.role === "assistant" || entry.role === "tool");
+		if (!hasOutput && runtime.cancelReason !== "user_stop") {
+			runtime.projection = rollbackAcpUserPrompt(runtime.projection, seededIndex);
+			this.flushMessages(runtime, true);
+			const error = `ACP agent ${runtime.tool.name} completed the turn without any output`;
+			this.deps.logger?.warn("acp", error, { tool: runtime.tool.name, sessionId: runtime.acpSessionId, stopReason: settledStopReason });
+			return { accepted: false, error, delivery: "rejected", i18nKey: "acp.emptyTurn", i18nParams: { tool: runtime.tool.name } };
+		}
 		return { accepted: true };
 	}
 
@@ -700,6 +722,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 		}
 		// session/cancel 后仍接收尾部 update，原 prompt 返回才收口；审批则立即全部结算。
 		runtime.cancelling = true;
+		runtime.cancelReason = "user_stop";
 		runtime.permissions.cancelAll();
 		runtime.conn.notify("session/cancel", { sessionId: runtime.acpSessionId, reason: "user_stop" });
 		// cancel 只是通知:CLI 可能既不处理也不回包(opencode 流错误后实测 wedged)。
@@ -919,6 +942,7 @@ export class AcpAgentManager implements SessionAgentGateway {
 			if (Date.now() - runtime.lastUpdateAt < timeoutMs) return;
 			this.clearStallWatchdog(runtime);
 			runtime.cancelling = true;
+			runtime.cancelReason = "stall";
 			runtime.permissions.cancelAll();
 			try {
 				runtime.conn?.notify("session/cancel", { sessionId: runtime.acpSessionId, reason: "stall" });
