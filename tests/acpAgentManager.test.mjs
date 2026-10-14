@@ -814,6 +814,46 @@ test("stop 后 readMessagesByAcpSessionId 回退内存快照:重入会话时间�
 	assert.equal(manager.readMessagesByAcpSessionId("sess-unknown").length, 0, "未见过的会话仍为空(跨 Realm 数组不能 deepEqual)");
 });
 
+test("恢复:load 失败回退 session/new 时投影播种快照,空投影不得抹掉已显示历史", async (t) => {
+	// 焦点预热(2026-10-14)让「选中历史会话即激活」成为常态:load 失败的 CLI 回退
+	// session/new 后,create() 末尾的全量 flush 若带空投影,渲染层已显示的快照历史
+	// 会被整段抹掉。回退分支必须用 messageSnapshots 播种投影。
+	let failLoad = false;
+	let promptCount = 0;
+	const { manager, events } = harness(t, {
+		handler: (frame, { writeFromCli }) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+			if (frame.method === "session/load") {
+				if (failLoad) return { __error: true, code: -32000, message: "session not found" };
+				return { sessionId: "sess-seed" };
+			}
+			if (frame.method === "session/new") return { sessionId: "sess-seed-fresh" };
+			if (frame.method === "session/prompt") {
+				promptCount += 1;
+				writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-seed", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `answer-${promptCount}` } } } });
+				return { stopReason: "end_turn" };
+			}
+			return {};
+		},
+	});
+	// 第一段:真实回合落两条消息(user seed + assistant),stop 后进快照。
+	const first = await manager.create({ projectId: "p1", title: "t", deckSessionId: "deck-seed", backend: "acp", agentPreset: "gemini", acpSessionId: "sess-seed" });
+	await manager.sendPrompt({ agentId: first.id, message: "keep" });
+	await waitFor(() => (events.messages.at(-1)?.messages ?? []).some((entry) => entry.role === "assistant"), "assistant flushed");
+	await manager.stop(first.id);
+	// 第二段:同一 acpSessionId 但 load 失败(CLI 侧会话已丢)回退 session/new。
+	failLoad = true;
+	const second = await manager.create({ projectId: "p1", title: "t", deckSessionId: "deck-seed", backend: "acp", agentPreset: "gemini", acpSessionId: "sess-seed" });
+	assert.equal(second.status, "idle");
+	// create() 末尾 flushMessages(runtime, true) 必须带出播种消息,而不是空数组。
+	await waitFor(() => {
+		const last = events.messages.at(-1);
+		return last?.agentId === second.id && (last.messages ?? []).some((entry) => entry.role === "assistant");
+	}, "seeded history flushed after session/new fallback");
+	const restored = manager.readMessagesByAcpSessionId("sess-seed");
+	assert.ok(restored.some((entry) => entry.role === "user") && restored.some((entry) => entry.role === "assistant"), "回退后可读消息含 user+assistant");
+});
+
 test("快照上限不截断正常长会话:60 条消息 stop 后仍完整可读(2026-10-14 丢史回归)", async (t) => {
 	// 一个带工具调用的回合 assistant/tool 条目就能上双位数;旧上限 16 会把关闭
 	// 重开后的历史截到只剩最后一小段(ACP CLI 不支持 loadSession 重放时无第二数据源)。

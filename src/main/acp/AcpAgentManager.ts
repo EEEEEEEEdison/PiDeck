@@ -451,7 +451,11 @@ export class AcpAgentManager implements SessionAgentGateway {
 				// 排空已经开始的物化再丢弃；否则在途旧快照能污染 session/new。
 				runtime.acpSessionId = "";
 				await runtime.updateChain;
-				runtime.projection = initialAcpProjection();
+				// 回退 session/new 的空投影会经 create() 末尾的全量 flush 把渲染层已显示的
+				// 历史整段抹掉（焦点预热让这个路径不再只在首发时出现）：先用本进程内快照
+				// 播种投影保住显示连续性。播种消息 agent 侧并不存在，仅显示层连续；
+				// 无快照（应用重启后）保持空，与重启后本就为空的显示一致。
+				runtime.projection = { ...initialAcpProjection(), messages: [...(this.messageSnapshots.get(resumeSessionId) ?? [])] };
 				runtime.title = undefined;
 				runtime.configOptions = undefined;
 				this.deps.logger?.warn("acp", `session/load failed, falling back to session/new: ${error instanceof Error ? error.message : String(error)}`);

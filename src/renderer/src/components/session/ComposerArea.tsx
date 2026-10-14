@@ -149,6 +149,27 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 		// 必然报「会话不存在」：预热只能跳过——真正的 standby 预热由首次发送时的
 		// createDraft IPC 触发（sessionIpc createDraft → ensureStandbyAgent）。
 		if (props.sessionId === GUIDE_BOOTSTRAP_SESSION_ID) return;
+		// ACP 没有 standby 池：模型/模式等 configOptions 枚举要 runtime 握手
+		// （session/new/load 响应）才有。选中会话（含应用启动时恢复焦点的会话）
+		// 即后台激活，让用户在首条消息发送前就能看到/修改模型与模式，首发直接
+		// 命中热 runtime。键含工具 id：换工具（changeBackend 链会停旧 runtime）
+		// 与「切走再切回」都能重新预热。load 失败回退 session/new 的抹屏风险由
+		// 主进程快照播种兑住（AcpAgentManager handshake 回退分支）。
+		if (composer.backend === "acp") {
+			const acpPrewarmToolId = composer.acpTool?.toolId;
+			if (!acpPrewarmToolId) return;
+			const acpPrewarmKey = `acp:${props.sessionId}:${acpPrewarmToolId}`;
+			if (prewarmStartedForSessionRef.current === acpPrewarmKey) return;
+			prewarmStartedForSessionRef.current = acpPrewarmKey;
+			void desktopApi.sessions.activateRuntime(props.sessionId).catch(() => undefined);
+			return;
+		}
+		if (prewarmStartedForSessionRef.current?.startsWith("acp:")) {
+			// 切离 acp 后清掉 ACP 预热键：changeBackend 已把 runtime 停掉，
+			// 切回来（即使同一工具）要能重新预热，否则 configControls 到首发前都是空的。
+			// 到达这里时 backend 必非 acp（ACP 分支已全部早退），startsWith 判定即充分。
+			prewarmStartedForSessionRef.current = undefined;
+		}
 		// 空白草稿（status=draft，从未发送）不做激活预热：standby 池进程已由 createDraft
 		// 预热握手完毕，输入时 activateRuntime 只会把池进程认领给一个可能永不发送的草稿、
 		// 并立刻补一个替补进程——悬浮窗「反复新建→输入→放弃」会堆积一串空闲进程
@@ -163,7 +184,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 		// 输入是比“打开会话”更可靠的发送意图信号；只在首次输入后预热一次，
 		// 避免用户仅浏览历史时创建进程，也避免每个按键重复触发 IPC。
 		void desktopApi.sessions.activateRuntime(props.sessionId).catch(() => undefined);
-	}, [composer.attachments.length, composer.draft, composer.pasteFiles.files.length, props.sessionId, sessionRecords]);
+	}, [composer.acpTool?.toolId, composer.attachments.length, composer.backend, composer.draft, composer.pasteFiles.files.length, props.sessionId, sessionRecords]);
 
 	return (
 		<ComposerPickerHost
