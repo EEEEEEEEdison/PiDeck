@@ -37,9 +37,46 @@ test("agent_message_chunk aggregates into one streaming assistant message per tu
 	assert.equal(state.messages[0].text, "Hello world");
 	assert.equal(state.activeAssistantIndex, 0);
 	state = settleAcpTurn(state, "end_turn");
+	// 新回合由本地 seed 的用户消息开启,助手正文另起一条
+	state = appendAcpUserPrompt(state, "next prompt", null, AGENT);
 	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "second turn" } });
+	assert.equal(state.messages.length, 3);
+	assert.equal(state.messages[2].text, "second turn");
+});
+
+test("late chunk after turn settle merges back into the same assistant bubble", () => {
+	// 实测(opencode):session/prompt 响应先返回,末尾几个 chunk 随后才到。
+	// 收口时若按「新回合」另起气泡,一条回复会被拆成两处渲染(用户截图:词中间断开)。
+	let state = appendAcpUserPrompt(initialAcpProjection(), "你好", null, AGENT);
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "我是 opencode,底层模型是 zui/deep" } });
+	state = settleAcpTurn(state, "end_turn");
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "seek-v4.1-flash)。" } });
+	assert.equal(state.messages.length, 2, "用户消息 + 一条完整助手消息");
+	assert.equal(state.messages[1].text, "我是 opencode,底层模型是 zui/deepseek-v4.1-flash)。");
+	assert.equal(state.messages[1].stopReason, "pending", "仍在续写:恢复流式态,等真正结束时再 settle");
+});
+
+test("late chunk does not merge when a new turn has already seeded its user message", () => {
+	let state = appendAcpUserPrompt(initialAcpProjection(), "第一问", null, AGENT);
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "第一答" } });
+	state = settleAcpTurn(state, "end_turn");
+	state = appendAcpUserPrompt(state, "第二问", null, AGENT);
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "第二答" } });
+	assert.equal(state.messages.length, 4);
+	assert.equal(state.messages[1].text, "第一答");
+	assert.equal(state.messages[3].text, "第二答");
+});
+
+test("deduped prompt echo does not break the streaming bubble", () => {
+	// 回显不是轮次边界:去重命中若清空流式指针,后续 chunk 会另起气泡
+	let state = appendAcpUserPrompt(initialAcpProjection(), "你好", null, AGENT);
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "前半" } });
+	assert.equal(state.activeAssistantIndex, 1);
+	state = step(state, { sessionUpdate: "user_message_chunk", content: { type: "text", text: "你好" } });
+	assert.equal(state.activeAssistantIndex, 1, "去重命中的回显不得清空流式指针");
+	state = step(state, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "后半" } });
 	assert.equal(state.messages.length, 2);
-	assert.equal(state.messages[1].text, "second turn");
+	assert.equal(state.messages[1].text, "前半后半");
 });
 
 test("thought chunks stream into thinking field, not message text", () => {

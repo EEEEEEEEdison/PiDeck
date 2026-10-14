@@ -19,6 +19,7 @@ import { AcpBackendMark, SessionBackendMark, SessionSourceBadge } from "../sessi
 import { SessionActivityIndicator } from "../session/SessionActivityIndicator";
 import { SessionHoverCard } from "./SessionHoverCard";
 import { TitleScrollText } from "./TitleScrollText";
+import { resolveBoundSession } from "./activitySessionsModel";
 import { cn } from "../../lib/utils";
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
 
@@ -101,7 +102,7 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 		sortMode: props.controller.sessionSortMode,
 	});
 	const displayedSessionIds = collectDisplayedSessionIds(display.visibleChildren, (agent) => {
-		const linked = props.sessions.find((session) => props.controller.catalog.runtimeBySessionId[session.id]?.agentId === agent.id) ?? summaries.find((session) => session.filePath === agent.sessionPath);
+		const linked = resolveBoundSession(agent, props.sessions, props.controller.catalog.runtimeBySessionId) ?? (agent.sessionPath ? summaries.find((session) => session.filePath === agent.sessionPath) : undefined);
 		return linked?.id;
 	});
 	const draftSessions = props.sessions
@@ -243,7 +244,7 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 		const groupKey = `${props.project.id}:${child.key}`;
 		const childCount = child.codexSubagents.length + child.piSubagents.length;
 		if (child.type === "agent") {
-			const agentSession = props.sessions.find((session) => props.controller.catalog.runtimeBySessionId[session.id]?.agentId === child.agent.id) ?? summaries.find((session) => session.filePath === child.agent.sessionPath);
+			const agentSession = resolveBoundSession(child.agent, props.sessions, props.controller.catalog.runtimeBySessionId) ?? (child.agent.sessionPath ? summaries.find((session) => session.filePath === child.agent.sessionPath) : undefined);
 			// Catalog owns the display title. AgentTab.title may reflect a transient pi/TUI
 			// session_info event, so only use it for an unbound runtime with no record.
 			const displayTitle = (agentSession ? ("title" in agentSession ? agentSession.title : agentSession.name || child.agent.title) : child.agent.title) || t("common.untitled");

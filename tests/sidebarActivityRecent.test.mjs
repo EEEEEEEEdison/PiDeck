@@ -24,7 +24,7 @@ const appSource = readFileSync("src/renderer/src/App.tsx", "utf8");
 const zhCopy = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 const enCopy = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
 
-const { RECENT_SESSIONS_INITIAL_VISIBLE, RECENT_SESSIONS_PAGE_SIZE, collectActiveSessionRows, collectRecentActivityRows, growRecentVisible, canCollapseRecent } = loadTsCommonJs("src/renderer/src/components/sidebar/activitySessionsModel.ts");
+const { RECENT_SESSIONS_INITIAL_VISIBLE, RECENT_SESSIONS_PAGE_SIZE, collectActiveSessionRows, collectRecentActivityRows, growRecentVisible, canCollapseRecent, resolveBoundSession } = loadTsCommonJs("src/renderer/src/components/sidebar/activitySessionsModel.ts");
 
 /** 按 `const name = "..."` 抽取类名常量：不做正则转义，避免格式改动让断言整组失效。 */
 function extractStringConst(source, name) {
@@ -363,5 +363,51 @@ describe("最近会话区渲染契约", () => {
 		// 收起文案与项目页「收起」同字面，两处入口名字一致
 		assert.match(zhCopy, /"app\.sidebarRecentCollapse": "收起"/);
 		assert.match(enCopy, /"app\.sidebarRecentCollapse": "Collapse"/);
+	});
+});
+
+describe("Agent 行会话绑定（resolveBoundSession）", () => {
+	test("ACP Agent 即使没有 sessionPath，也按 deckSessionId 绑回自己的会话", () => {
+		// ACP/草稿记录都没有 filePath：旧实现用 undefined === undefined 会绑到别的无 filePath 记录，
+		// 真正的会话因此留在「最近」，同一会话出现两行（2026-10 ACP 实测）。
+		const acpSession = makeSession({ id: "deck-acp", filePath: undefined, acpSessionId: "ses_x", title: "你好", updatedAt: 7 });
+		const otherDraft = makeSession({ id: "deck-dsh", filePath: undefined, title: "你好", updatedAt: 99 });
+		const agent = makeAgent({ id: "acp:1", backend: "acp", title: "你好", sessionPath: undefined, deckSessionId: "deck-acp" });
+		const rows = collectActiveSessionRows(makeCatalog({ agents: [agent], sessionsByProject: { p1: [otherDraft, acpSession] }, runtimeBySessionId: {} }));
+		assert.equal(rows[0]?.record?.id, "deck-acp");
+		assert.equal(rows[0]?.sortAt, 7, "排序时间用会话自身的 updatedAt，不再是 agent.createdAt");
+	});
+
+	test("没有 deckSessionId 的无 sessionPath Agent 不会误绑 filePath 为空的记录", () => {
+		const draft = makeSession({ id: "deck-draft", filePath: undefined, updatedAt: 5 });
+		const agent = makeAgent({ id: "a-unbound", sessionPath: undefined, createdAt: 1000 });
+		assert.equal(resolveBoundSession(agent, [draft], {}), undefined);
+		const rows = collectActiveSessionRows(makeCatalog({ agents: [agent], sessionsByProject: { p1: [draft] }, runtimeBySessionId: {} }));
+		assert.equal(rows[0]?.record, undefined);
+		assert.equal(rows[0]?.sortAt, 1000);
+	});
+
+	test("deckSessionId 指向的记录不在本页时仍回退 runtime 反查", () => {
+		const session = makeSession({ id: "deck-bound", filePath: undefined, updatedAt: 3 });
+		const agent = makeAgent({ id: "a1", deckSessionId: "deck-missing", sessionPath: undefined });
+		assert.equal(resolveBoundSession(agent, [session], { "deck-bound": { agentId: "a1" } })?.id, "deck-bound");
+	});
+
+	test("pi Agent 的历史会话仍按 sessionPath 绑定（旧行为不变）", () => {
+		const session = makeSession({ id: "s-path", filePath: "/sessions/path.jsonl" });
+		const agent = makeAgent({ id: "a-pi", sessionPath: "/sessions/path.jsonl" });
+		assert.equal(resolveBoundSession(agent, [session], {})?.id, "s-path");
+	});
+});
+
+describe("侧栏 Agent 行绑定契约（源码扫描）", () => {
+	test("SessionTree 的活动行与会话抑制都用 resolveBoundSession，退回 summaries 前先判 sessionPath", () => {
+		const matches = sessionTree.match(/resolveBoundSession\(/g) ?? [];
+		assert.equal(matches.length, 2, "两处绑定（displayedSessionIds 与 renderChild）都要走统一解析");
+		// 裸兜底（未判 sessionPath 直接比较）必须消失：三元守卫后收尾是 `: undefined);`，不会是 `sessionPath);`
+		assert.doesNotMatch(sessionTree, /=== agent\.sessionPath\);/);
+		assert.doesNotMatch(sessionTree, /=== child\.agent\.sessionPath\);/);
+		assert.match(sessionTree, /agent\.sessionPath \? summaries\.find/);
+		assert.match(sessionTree, /child\.agent\.sessionPath \? summaries\.find/);
 	});
 });

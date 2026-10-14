@@ -318,7 +318,8 @@ test("sidebar uses the dev-style source filter overlay and anonymous Session ent
 	assert.match(content, /SessionSourceFilterMenu/);
 	assert.match(controller, /toggleSourceFilter/);
 	assert.match(sessionTree, /anonymous-indicator/);
-	assert.match(sessionTree, /runtimeBySessionId\[session\.id\]\?\.agentId === child\.agent\.id/);
+	// Agent 行与会话的绑定统一走 resolveBoundSession（deckSessionId 优先，判 sessionPath 真值）
+	assert.match(sessionTree, /resolveBoundSession\(child\.agent, props\.sessions, props\.controller\.catalog\.runtimeBySessionId\)/);
 	assert.match(header, /anonymous-badge/);
 });
 

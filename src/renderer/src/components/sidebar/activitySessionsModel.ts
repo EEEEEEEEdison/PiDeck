@@ -44,6 +44,31 @@ export type ActivityCatalog = {
 	runtimeBySessionId: Readonly<Record<string, { agentId?: string } | undefined>>;
 };
 
+/**
+ * 解析 Agent 行要绑定的会话记录。
+ *
+ * 顺序（每一步都要真对上才返回）：
+ * 1. `agent.deckSessionId`：AgentTab 创建时就带着的权威 PiDeck 会话身份——ACP/DSH 这类
+ *    没有 sessionPath 的后端只有它能把活动行绑回会话；
+ * 2. runtime 反查（`runtimeBySessionId[session.id].agentId === agent.id`）；
+ * 3. 仅当 `agent.sessionPath` 是真路径时，才按它匹配历史记录。
+ *
+ * 旧写法只有 2、3，且第 3 步不判空：无 sessionPath 的 Agent 会与同样没有 filePath 的
+ * 草稿/DSH/ACP 记录「undefined === undefined」误绑成别人的会话——行上显示别的会话标题，
+ * 真正的会话又因为没被活动行占用而重复出现在「最近」里（2026-10 ACP 实测：同一会话两行、
+ * 其中一行标题为空）。
+ */
+export function resolveBoundSession(agent: AgentTab, sessions: readonly SessionRecord[], runtimeBySessionId: ActivityCatalog["runtimeBySessionId"]): SessionRecord | undefined {
+	if (agent.deckSessionId) {
+		const byDeckSessionId = sessions.find((session) => session.id === agent.deckSessionId);
+		if (byDeckSessionId) return byDeckSessionId;
+	}
+	const byRuntime = sessions.find((session) => runtimeBySessionId[session.id]?.agentId === agent.id);
+	if (byRuntime) return byRuntime;
+	if (!agent.sessionPath) return undefined;
+	return sessions.find((session) => session.filePath === agent.sessionPath);
+}
+
 /** 「最近」默认显示 10 条；每次手动「加载更多」再多放 10 条。 */
 export const RECENT_SESSIONS_INITIAL_VISIBLE = 10;
 export const RECENT_SESSIONS_PAGE_SIZE = 10;
@@ -74,7 +99,7 @@ export function collectActiveSessionRows(catalog: ActivityCatalog): ActiveSessio
 	for (const agent of catalog.agents) {
 		if (!projectIds.has(agent.projectId)) continue;
 		const sessions = catalog.sessionsByProject[agent.projectId] ?? [];
-		const bound = sessions.find((session) => catalog.runtimeBySessionId[session.id]?.agentId === agent.id) ?? sessions.find((session) => session.filePath === agent.sessionPath);
+		const bound = resolveBoundSession(agent, sessions, catalog.runtimeBySessionId);
 		rows.push({
 			agent,
 			projectId: agent.projectId,

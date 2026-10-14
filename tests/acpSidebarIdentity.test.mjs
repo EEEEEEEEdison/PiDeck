@@ -59,3 +59,18 @@ test("项目树三类行（agent/历史/草稿）ACP 行均走品牌图标", () 
 test("最近会话区 ACP 行走品牌图标", () => {
 	assert.match(recentSection, /row\.session\.backend\s*===\s*"acp"\s*\?\s*<AcpBackendMark\s+acpToolId=\{row\.session\.acpToolId\}\s*\/>/);
 });
+
+test("ACP 行按 deckSessionId 绑回自己的会话，不得误绑无 filePath 记录", () => {
+	// 回归（2026-10）：无 sessionPath 的 ACP Agent 与同为 filePath=undefined 的草稿记录
+	// 「undefined === undefined」误绑，活动行显别人的标题，真正的会话又重复出现在「最近」（同一会话两行）。
+	const { resolveBoundSession } = loadTsCommonJs("src/renderer/src/components/sidebar/activitySessionsModel.ts");
+	const own = { id: "deck-acp", projectId: "p1", title: "你好", updatedAt: 7, status: "active", filePath: undefined, backend: "acp" };
+	const decoy = { id: "deck-draft", projectId: "p1", title: "你好", updatedAt: 99, status: "draft", filePath: undefined };
+	const agent = { id: "acp:1", projectId: "p1", title: "你好", status: "running", backend: "acp", createdAt: 1, sessionPath: undefined, deckSessionId: "deck-acp" };
+	assert.equal(resolveBoundSession(agent, [decoy, own], {})?.id, "deck-acp");
+	assert.equal(resolveBoundSession({ ...agent, deckSessionId: undefined }, [decoy, own], {}), undefined);
+	// 两处 Agent 行绑定（项目树 ×2）都必须走同一个解析器；模型内部（活动页）也用同一份判定
+	assert.equal((sessionTree.match(/resolveBoundSession\(/g) ?? []).length, 2);
+	const model = read("src/renderer/src/components/sidebar/activitySessionsModel.ts");
+	assert.match(model, /const bound = resolveBoundSession\(agent, sessions, catalog\.runtimeBySessionId\)/);
+});
