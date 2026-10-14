@@ -350,7 +350,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			: isVideoGenBackend
 				? "videogen"
 				: deriveComposerAgentMode({
-						backend: isDshBackend ? "dsh" : "pi",
+						backend: isDshBackend ? "dsh" : isAcpBackend ? "acp" : "pi",
 						localMode: localMode,
 						planModeActive: runtime?.state?.planModeActive === true,
 						goalPhase: runtime?.state?.goal?.phase,
@@ -835,8 +835,10 @@ export function useSessionComposerController(options: UseSessionComposerControll
 
 	// Draft sessions have no Pi process to ask for get_commands. Discover the same local
 	// skills/prompts Pi will load; as soon as a runtime exists, its RPC list is authoritative.
+	// ACP 草稿除外：这些 /skill:*、/prompt 命令是 pi 进程的，ACP CLI 不认识，
+	// 列进建议只会发出无效文本（keep snapshot empty）。
 	useEffect(() => {
-		if (isDshBackend || runtime?.agentId) {
+		if (isDshBackend || isAcpBackend || runtime?.agentId) {
 			setDraftResourceCommandSnapshot({ projectId: effectiveProjectId, commands: [] });
 			return;
 		}
@@ -864,13 +866,14 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		return () => {
 			current = false;
 		};
-	}, [effectiveProjectId, isDshBackend, runtime?.agentId, templates]);
+	}, [effectiveProjectId, isAcpBackend, isDshBackend, runtime?.agentId, templates]);
 
 	// Issue #316：草稿会话在 standby 池里有同项目已握手进程时，只读借用其 get_commands
 	// 预览扩展注册的命令（本地技能/提示词发现覆盖不到）。拿不到预览就保持空快照，
 	// 建议列表回退上面的本地发现；runtime 建立后上面 RPC 拉取的命令表重新成为唯一来源。
+	// ACP 草稿除外：standby 池是 pi 进程，预览出的命令对 ACP CLI 无效。
 	useEffect(() => {
-		if (isDshBackend || runtime?.agentId || !effectiveProjectId) {
+		if (isDshBackend || isAcpBackend || runtime?.agentId || !effectiveProjectId) {
 			setStandbyPreviewCommandSnapshot({ projectId: effectiveProjectId, commands: [] });
 			return;
 		}
@@ -885,7 +888,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		return () => {
 			current = false;
 		};
-	}, [effectiveProjectId, isDshBackend, runtime?.agentId]);
+	}, [effectiveProjectId, isAcpBackend, isDshBackend, runtime?.agentId]);
 
 	useEffect(() => {
 		templateRequestGateRef.current.invalidate(templateKey);

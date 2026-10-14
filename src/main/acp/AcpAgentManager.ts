@@ -488,7 +488,9 @@ export class AcpAgentManager implements SessionAgentGateway {
 			deckSessionId: runtime.tab.deckSessionId,
 			backend: "acp",
 			agentPreset: runtime.tool.id,
-			acpSessionId: runtime.agentInfo.capabilities.loadSession ? runtime.acpSessionId : undefined,
+			// 无 loadSession 能力也要传 acpSessionId:握手制用本进程内快照播种投影保住显示连续性
+			// (agent 侧仍是新会话);传 undefined 会让 create 末尾的全量 flush 把可见历史抹空。
+			acpSessionId: runtime.acpSessionId || undefined,
 			noSession: runtime.tab.noSession,
 		};
 		await this.stop(agentId);

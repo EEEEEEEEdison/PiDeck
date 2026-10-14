@@ -27,6 +27,13 @@ export type AcpHandshakeDeps = {
 	onConfigOptionsChanged?: (tab: AgentTab, options: AcpConfigOption[]) => void;
 };
 
+/** load 失败回退 / 无 loadSession 能力时的播种:用本进程内快照保住显示连续性。 */
+function seedProjectionFromSnapshot(runtime: AcpAgentRuntime, deps: Pick<AcpHandshakeDeps, "seedMessages">, resumeSessionId: string): void {
+	runtime.projection = { ...initialAcpProjection(), messages: [...(deps.seedMessages(resumeSessionId) ?? [])] };
+	runtime.title = undefined;
+	runtime.configOptions = undefined;
+}
+
 /** initialize + session/new(或 load);失败由调用方清理进程。 */
 export async function performAcpHandshake(runtime: AcpAgentRuntime, resumeSessionId: string | undefined, cwd: string, spawnFailure: Promise<never>, deps: AcpHandshakeDeps): Promise<void> {
 	const conn = runtime.conn;
@@ -92,17 +99,17 @@ export async function performAcpHandshake(runtime: AcpAgentRuntime, resumeSessio
 			// 排空已经开始的物化再丢弃；否则在途旧快照能污染 session/new。
 			runtime.acpSessionId = "";
 			await runtime.updateChain;
-			// 回退 session/new 的空投影会经 create() 末尾的全量 flush 把渲染层已显示的
-			// 历史整段抹掉（焦点预热让这个路径不再只在首发时出现）：先用本进程内快照
-			// 播种投影保住显示连续性。播种消息 agent 侧并不存在，仅显示层连续；
-			// 无快照（应用重启后）保持空，与重启后本就为空的显示一致。
-			runtime.projection = { ...initialAcpProjection(), messages: [...(deps.seedMessages(resumeSessionId) ?? [])] };
-			runtime.title = undefined;
-			runtime.configOptions = undefined;
+			seedProjectionFromSnapshot(runtime, deps, resumeSessionId);
 			deps.logger?.warn("acp", `session/load failed, falling back to session/new: ${error instanceof Error ? error.message : String(error)}`);
 		} finally {
 			runtime.reloading = false;
 		}
+	} else if (resumeSessionId) {
+		// CLI 无 loadSession 能力:只能 session/new 新建(agent 侧上下文必然是空的),
+		// 但显示层不能整段抹掉——与 load 失败回退同一处理,用本进程内快照播种投影
+		// 保住连续性(重启按钮/重新激活都走这里)。播种消息 agent 侧并不存在,
+		// 仅显示层连续;无快照(应用重启后)保持空,与重启后本就为空的显示一致。
+		seedProjectionFromSnapshot(runtime, deps, resumeSessionId);
 	}
 	if (!setup?.sessionId) {
 		setup = (await conn.request("session/new", { cwd, mcpServers: [] }, timeoutMs)) as AcpSessionSetupResult;

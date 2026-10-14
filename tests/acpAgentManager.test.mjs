@@ -854,6 +854,44 @@ test("恢复:load 失败回退 session/new 时投影播种快照,空投影不得
 	assert.ok(restored.some((entry) => entry.role === "user") && restored.some((entry) => entry.role === "assistant"), "回退后可读消息含 user+assistant");
 });
 
+test("恢复:CLI 无 loadSession 能力时同样播种快照,session/new 不得抹掉已显示历史", async (t) => {
+	// 与 load 失败回退同一道理:无 loadSession 能力的 CLI 重新激活(重启按钮/焦点预热)
+	// 只能 session/new,若空投影直达 create() 末尾的全量 flush,已显示的快照历史会被
+	// 整段抹掉。restart() 传 acpSessionId + 握手播种分支必须保住显示连续性。
+	let promptCount = 0;
+	let sessionId = "sess-noload";
+	const { manager, events } = harness(t, {
+		handler: (frame, { writeFromCli }) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+			if (frame.method === "session/load") throw new Error("must not call session/load without loadSession capability");
+			if (frame.method === "session/new") {
+				// 两次 create 各新建一个 agent 侧会话:首次 sess-noload,重启后 sess-noload-2。
+				sessionId = sessionId === "sess-noload" ? "sess-noload-2" : "sess-noload";
+				return { sessionId };
+			}
+			if (frame.method === "session/prompt") {
+				promptCount += 1;
+				writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `answer-${promptCount}` } } } });
+				return { stopReason: "end_turn" };
+			}
+			return {};
+		},
+	});
+	const first = await manager.create({ projectId: "p1", title: "t", deckSessionId: "deck-noload", backend: "acp", agentPreset: "gemini", acpSessionId: "sess-noload" });
+	await manager.sendPrompt({ agentId: first.id, message: "keep" });
+	await waitFor(() => (events.messages.at(-1)?.messages ?? []).some((entry) => entry.role === "assistant"), "assistant flushed");
+	// restart():stop 旧 runtime 后重建。acpSessionId 必须透传,新会话投影播种快照。
+	const second = await manager.restart(first.id);
+	assert.equal(second.status, "idle");
+	assert.equal(manager.getAgentInfo(second.id).capabilities.loadSession, false);
+	await waitFor(() => {
+		const last = events.messages.at(-1);
+		return last?.agentId === second.id && (last.messages ?? []).some((entry) => entry.role === "assistant");
+	}, "seeded history flushed after session/new for no-load CLI");
+	const restored = manager.readMessagesByAcpSessionId("sess-noload-2");
+	assert.ok(restored.some((entry) => entry.role === "user") && restored.some((entry) => entry.role === "assistant"), "新会话可读消息含 user+assistant(播种自快照)");
+});
+
 test("快照上限不截断正常长会话:60 条消息 stop 后仍完整可读(2026-10-14 丢史回归)", async (t) => {
 	// 一个带工具调用的回合 assistant/tool 条目就能上双位数;旧上限 16 会把关闭
 	// 重开后的历史截到只剩最后一小段(ACP CLI 不支持 loadSession 重放时无第二数据源)。

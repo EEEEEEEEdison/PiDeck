@@ -237,11 +237,15 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 												composer.mode === "imagegen" ? null : (
 													<SessionContextMeter
 														state={composer.runtime?.state}
-														onCompact={composer.delivery.compact}
-														overflowRecoveryTarget={composer.delivery.overflowRecoveryTarget}
-														onOverflowRecovery={composer.delivery.onOverflowRecovery}
+														// ACP 无 compaction/溢出恢复（主进程直接抛不支持），不注入回调 → 入口隐藏；
+														// 圆环仍由 usage_update 的 contextPercent 驱动。
+														onCompact={composer.backend === "acp" ? undefined : composer.delivery.compact}
+														overflowRecoveryTarget={composer.backend === "acp" ? undefined : composer.delivery.overflowRecoveryTarget}
+														onOverflowRecovery={composer.backend === "acp" ? undefined : composer.delivery.onOverflowRecovery}
 														backend={composer.backend === "dsh" ? "dsh" : "pi"}
-														fallbackProvider={composer.dshDefaultModel?.provider ?? composer.bootstrapDefaultModel?.provider}
+														// ACP 用量来自 agent 侧 usage_update，与 pi 供应商配额无关：不传
+														// fallbackProvider，点击圆环只展示本地计算百分比，不误导查询 pi 配额。
+														fallbackProvider={composer.backend === "acp" ? undefined : (composer.dshDefaultModel?.provider ?? composer.bootstrapDefaultModel?.provider)}
 													/>
 												)
 											}
