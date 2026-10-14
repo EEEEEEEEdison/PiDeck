@@ -130,6 +130,51 @@ test("TailscaleAccessReader.startServe 旧版 CLI 不认识 --accept-risk 时去
 	assert.equal(calls2.length, 1, "非 flag 版本错误不重试");
 });
 
+test("TailscaleAccessReader 默认命令执行器给子进程补 TERM（macOS GUI 版 CLI 模式判定依赖它）", async () => {
+	const calls = [];
+	const fakeExecFile = (command, args, options, callback) => {
+		calls.push({ command, args, options });
+		callback(null, { stdout: JSON.stringify({ BackendState: "Running", Self: { TailscaleIPs: ["100.1.2.3"], DNSName: "box.tail.ts.net." } }), stderr: "" });
+	};
+	const { TailscaleAccessReader } = loadTsCommonJs("src/main/web/remoteAccess/tailscaleAccess.ts", { stubs: { "node:child_process": { execFile: fakeExecFile } } });
+	const reader = new TailscaleAccessReader({ logger: makeLogger().logger, binary: "/Applications/Tailscale.app/Contents/MacOS/Tailscale" });
+	const savedTerm = process.env.TERM;
+	try {
+		// 模拟 Dock/Finder 启动：launchd 给的环境里没有 TERM，父进程环境因此也没有
+		delete process.env.TERM;
+		assert.equal((await reader.probeStatus()).error, "");
+		// 终端启动路径已有 TERM：原样带到子进程，不被兜底值覆盖
+		process.env.TERM = "screen-256color";
+		assert.equal((await reader.probeStatus()).loggedIn, true);
+	} finally {
+		if (savedTerm === undefined) delete process.env.TERM;
+		else process.env.TERM = savedTerm;
+	}
+	assert.equal(calls.length, 2);
+	assert.equal(calls[0].command, "/Applications/Tailscale.app/Contents/MacOS/Tailscale");
+	assert.equal(calls[0].options.env.TERM, "xterm-256color", "父进程无 TERM 时必须补兜底值");
+	assert.equal(calls[1].options.env.TERM, "screen-256color", "已有 TERM 不覆盖");
+	// Windows 上 {...process.env} 展开的键名是 Path（GH runner 只有 Path、没有 PATH），普通对象读取大小写敏感：
+	// 两侧都做大小写兼容，写法与 tests/gitWslInvocation.test.mjs 的同类断言一致
+	const inheritedPath = calls[0].options.env.PATH ?? calls[0].options.env.Path;
+	assert.equal(inheritedPath, process.env.PATH ?? process.env.Path, "父进程环境其余部分完整继承");
+});
+
+test("probeStatus 把非 JSON 输出（macOS GUI 模式文本）转成带 CLI 原文的错误", async () => {
+	const { TailscaleAccessReader } = loadModule("src/main/web/remoteAccess/tailscaleAccess.ts");
+	const warns = [];
+	const logger = { info: () => {}, warn: (...args) => warns.push(args), error: () => {}, debug: () => {} };
+	const guiText = "The Tailscale GUI failed to start: The operation couldn't be completed. (Tailscale.CLIError error 3.)";
+	const reader = new TailscaleAccessReader({ logger, commandFn: async () => ({ stdout: `${guiText}\n`, stderr: "" }) });
+	const status = await reader.probeStatus();
+	assert.equal(status.loggedIn, false);
+	assert.equal(status.error, `tailscale status 未返回 JSON：${guiText}`);
+	assert.ok(
+		warns.some(([scope, message]) => scope === "web-remote" && message === "tailscale status probe failed"),
+		"仍走既有 warn 日志",
+	);
+});
+
 test("extractTryCloudflareUrl 从 cloudflared 日志文本提取 trycloudflare 地址", () => {
 	const { extractTryCloudflareUrl } = loadModule("src/main/web/remoteAccess/cloudflaredTunnel.ts");
 	const logLines = [
@@ -179,6 +224,33 @@ test("buildTailscaleServeUrl 由 dnsName 拼固定 https 地址", () => {
 	const { buildTailscaleServeUrl } = loadModule("src/main/web/remoteAccess/tailscaleAccess.ts");
 	assert.equal(buildTailscaleServeUrl("box.tail1234.ts.net"), "https://box.tail1234.ts.net");
 	assert.equal(buildTailscaleServeUrl(""), "");
+});
+
+test("parseTailscaleStatusStdout 解析 JSON；非 JSON 时只带 CLI 首行原文（截断到 200 字符）", () => {
+	const { parseTailscaleStatusStdout } = loadModule("src/main/web/remoteAccess/tailscaleAccess.ts");
+	// vm 沙箱返回值的原型在另一 realm，经 JSON 往返迁回宿主再比较
+	const parsed = JSON.parse(JSON.stringify(parseTailscaleStatusStdout('{"BackendState":"Running"}')));
+	assert.deepEqual(parsed, { BackendState: "Running" });
+	const gui = "The Tailscale GUI failed to start: The operation couldn't be completed. (Tailscale.CLIError error 3.)";
+	// 多行：只取首行，界面与日志不被后续噪声撑爆
+	assert.throws(
+		() => parseTailscaleStatusStdout(`${gui}\nsecond line\n`),
+		(error) => error.message === `tailscale status 未返回 JSON：${gui}`,
+	);
+	// 超长单行：截断到 200 字符
+	assert.throws(
+		() => parseTailscaleStatusStdout("y".repeat(500)),
+		(error) => error.message === `tailscale status 未返回 JSON：${"y".repeat(200)}`,
+	);
+	assert.throws(() => parseTailscaleStatusStdout("   \n"), /没有输出/, "纯空白视为没有输出");
+});
+
+test("buildTailscaleChildEnv 补缺失 TERM、保留已有值与环境其余部分", () => {
+	const { buildTailscaleChildEnv } = loadModule("src/main/web/remoteAccess/tailscaleAccess.ts");
+	const injected = JSON.parse(JSON.stringify(buildTailscaleChildEnv({ PATH: "/usr/bin", HOME: "/Users/me" })));
+	assert.deepEqual(injected, { PATH: "/usr/bin", HOME: "/Users/me", TERM: "xterm-256color" });
+	assert.equal(buildTailscaleChildEnv({ TERM: "screen-256color" }).TERM, "screen-256color", "已有 TERM 不覆盖");
+	assert.equal(buildTailscaleChildEnv({ TERM: "" }).TERM, "xterm-256color", "空 TERM 视为未设置");
 });
 
 // ── RemoteAccessManager 状态机（注入 stub，不碰 PATH 与子进程） ──
