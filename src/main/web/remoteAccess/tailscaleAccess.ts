@@ -70,6 +70,20 @@ export function parseTailscaleStatus(json: TailscaleStatusJson): { loggedIn: boo
 }
 
 /**
+ * status --json 的唯一成功形态是 JSON：非 JSON 说明 CLI 没按 CLI 模式运行（macOS GUI 版在非终端上下文
+ * 会打印 "The Tailscale GUI failed to start: ..." 且退出码为 0）。V8 的 "Unexpected token 'T', \"The Tailsc\"..."
+ * 无法定位原因，这里换成带 CLI 原文首行的错误，日志与设置页都能直接看到真实原因。
+ */
+export function parseTailscaleStatusStdout(stdout: string): TailscaleStatusJson {
+	try {
+		return JSON.parse(stdout) as TailscaleStatusJson;
+	} catch {
+		const firstLine = (stdout.trim().split("\n")[0] ?? "").slice(0, 200);
+		throw new Error(firstLine ? `tailscale status 未返回 JSON：${firstLine}` : "tailscale status 没有输出");
+	}
+}
+
+/**
  * 判断 serve 状态 JSON 是否已把 443 入口指向本应用端口。
  * serve status 的形状随版本有差异（TLS/HTTPS 树、嵌套 mount），用「全文包含目标回源地址」
  * 做宽松判定，避免绑定某一版本的内部结构。
@@ -89,6 +103,20 @@ export function buildTailscaleServeUrl(dnsName: string): string {
 	return dnsName ? `https://${dnsName}` : "";
 }
 
+/**
+ * tailscale 子进程环境：父进程环境 + TERM 兜底。
+ *
+ * 观测（issue #351）：从 Dock/Finder 启动时 `status --json` 的 stdout 是 "The Tailscale GUI failed to start: ..."
+ * 且退出码 0，从终端启动时正常。已核实：macOS GUI 版把 CLI 与 GUI 打进同一个二进制、官方文档称 CLI 模式
+ * 「run from a terminal」（tailscale.com/docs/reference/tailscaled），launchd 给 GUI 应用的环境没有 TERM。
+ * 推断（判定逻辑在闭源二进制里，仓内无法验证）：判定输入包含 TERM，依据是报告者的受控实验（只补 TERM 即恢复）。
+ * 所以这里是「对齐终端启动的既有环境」，不是可自证的事实；若实测无效，下一步应转向「非 JSON 输出即显式失败
+ * + 引导用户改用独立 CLI」，而不是继续往 env 里加变量。已有 TERM 不覆盖；非 macOS 平台补上无副作用。
+ */
+export function buildTailscaleChildEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	return { ...baseEnv, TERM: baseEnv.TERM || "xterm-256color" };
+}
+
 /** 默认命令执行器：execFile 走数组参数；Windows 下 tailscale CLI 需要接收 UAC 提权标记的变体不存在，普通 exec 即可。 */
 function defaultCommandFn(binary: string): TailscaleCommandFn {
 	return (args, options) =>
@@ -96,6 +124,8 @@ function defaultCommandFn(binary: string): TailscaleCommandFn {
 			windowsHide: true,
 			timeout: options?.timeoutMs ?? 15_000,
 			maxBuffer: 1024 * 1024,
+			// 必须显式传 env：需要「继承父进程环境 + 补 TERM」，否则 macOS GUI 版 CLI 不进入 CLI 模式
+			env: buildTailscaleChildEnv(process.env),
 		});
 }
 
@@ -119,7 +149,7 @@ export class TailscaleAccessReader {
 	async probeStatus(): Promise<{ loggedIn: boolean; backendState: string; ip: string; dnsName: string; error: string }> {
 		try {
 			const { stdout } = await this.command(["status", "--json"], { timeoutMs: 10_000 });
-			const parsed = parseTailscaleStatus(JSON.parse(stdout) as TailscaleStatusJson);
+			const parsed = parseTailscaleStatus(parseTailscaleStatusStdout(stdout));
 			return { ...parsed, error: "" };
 		} catch (error) {
 			// 未登录/守护进程未启动时 CLI 以非零码退出，消息本身可读，直接透传
