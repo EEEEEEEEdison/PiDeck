@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAtomValue, useSetAtom, useStore } from "jotai";
-import { currentSessionIdAtom, sessionRecordByIdAtomFamily, sessionRecordsAtom, sessionTabIdsAtom } from "../atoms";
+import { currentSessionIdAtom, projectInventoryByIdAtom, sessionRecordByIdAtomFamily, sessionRecordsAtom, sessionTabIdsAtom } from "../atoms";
 import { cycleSessionTab, openPermanentSessionTab, openPreviewSessionTab, reorderSessionTabs, togglePinSessionTab, type SessionTabOpenMode } from "../utils/sessionTabs";
+import { buildSessionTabBarEntries, flattenSessionTabBarEntries } from "../utils/sessionTabGroups";
 import { buildSplitLayoutFromDrop, edgeToOrientation, insertRootPaneFromDrop, nestSplitPaneFromDrop, replaceSplitPaneFromDrop, resolveSplitAfterClose, resolveSplitHostSessionId, splitLayoutSessionIds, type SessionSplitDropTarget, type SessionSplitLayout } from "../utils/sessionSplitEdge";
 import { desktopApi } from "../desktopApi";
 import type { FocusTargetPayload } from "../../../shared/types";
@@ -342,13 +343,25 @@ export function useSessionWorkspaceChrome(options: { currentSessionId: string | 
 	);
 
 	// Ctrl(+Shift)+Tab 循环切换会话标签页：主进程 before-input-event 命中后广播
-	// appShortcutTriggered，这里按 Tab 顺序算目标并复用 selectTab 只切焦点（不改
-	// 预览/Pin 状态）。从 store 取实时快照，避免订阅闭包拿到过期的 Tab 列表。
+	// appShortcutTriggered，这里按「标签栏显示顺序」算目标并复用 selectTab 只切焦点（不改
+	// 预览/Pin 状态）。循环顺序必须来自共享 selector：底层 tabs 数组是「打开顺序」，多项目
+	// 混排 + 分屏折叠后与显示顺序不同（issue #346），直接喂 tabs 会跳到屏幕上不相邻的 Tab。
+	// 快照取 ref（每次 render 同步），避免 useCallback 闭包拿到过期的 Tab/Pin/分屏列表。
 	// 声明在 selectTab 之后：useCallback 的 deps 同步求值，先引用会撞 TDZ。
 	const cycleTabsOnShortcut = useCallback(
 		(id: string) => {
 			if (id !== "cycleSessionTabs" && id !== "cycleSessionTabsReverse") return;
-			const target = cycleSessionTab(store.get(sessionTabIdsAtom), store.get(currentSessionIdAtom), id === "cycleSessionTabs" ? 1 : -1);
+			const { tabs, pinned, split } = tabsSnapshotRef.current;
+			const records = store.get(sessionRecordsAtom);
+			const projects = store.get(projectInventoryByIdAtom);
+			const displayOrder = flattenSessionTabBarEntries(
+				buildSessionTabBarEntries(tabs, pinned, split ? splitLayoutSessionIds(split) : [], (sessionId) => {
+					const projectId = records[sessionId]?.projectId;
+					if (!projectId) return undefined;
+					return { projectId, name: projects[projectId]?.name };
+				}),
+			);
+			const target = cycleSessionTab(displayOrder, store.get(currentSessionIdAtom), id === "cycleSessionTabs" ? 1 : -1);
 			if (target) selectTab(target);
 		},
 		[store, selectTab],
