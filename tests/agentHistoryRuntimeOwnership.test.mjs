@@ -93,6 +93,45 @@ for (const binding of ["process", "deckSessionId", "runtimeGeneration", "session
 	});
 }
 
+test("history load started before the first bind publishes after the runtime is bound", async () => {
+	const h = harness({ waitAt: "messages" });
+	// create() 的后台历史加载先于协调器 bind 启动：捕获到的 runtimeGeneration 是 undefined。
+	h.runtime.tab.runtimeGeneration = undefined;
+	const pending = outcome(h.manager.loadMessages(AGENT_ID));
+	await h.entered.promise;
+	// 首次 bind 写入具体代际：这是同一运行时的绑定动作，不是「换了运行时」。
+	h.runtime.tab.runtimeGeneration = 1;
+	h.release.resolve();
+	const result = await pending;
+	assert.equal(result.error, undefined);
+	assert.equal(result.value.at(-1)?.text, "snapshot history");
+	assert.equal(h.manager.messages.get(AGENT_ID), result.value);
+});
+
+test("history load started before the first bind cancels when the binding changes again", async () => {
+	const h = harness({ waitAt: "messages" });
+	h.runtime.tab.runtimeGeneration = undefined;
+	// 第二个暂停点：首个 assert 已经观察到首次绑定，之后的换绑必须取消。
+	const entryIdsEntered = deferred();
+	const entryIdsRelease = deferred();
+	h.manager.sessionHistoryReader.getRecentActiveEntryIds = async () => {
+		entryIdsEntered.resolve();
+		await entryIdsRelease.promise;
+		return ["u1"];
+	};
+	const pending = outcome(h.manager.loadMessages(AGENT_ID));
+	await h.entered.promise;
+	h.runtime.tab.runtimeGeneration = 1;
+	h.release.resolve();
+	// 修复前首个 assert 会先抛取消：与 pending 竞争，避免测试挂死而不是变红。
+	await Promise.race([entryIdsEntered.promise, pending]);
+	h.runtime.tab.runtimeGeneration = 2;
+	entryIdsRelease.resolve();
+	const result = await pending;
+	assert.match(result.error?.message ?? "", /runtime changed/);
+	assert.equal(h.manager.messages.get(AGENT_ID), h.cachedMessages);
+});
+
 test("replacing the runtime object during history loading leaves the new runtime unchanged", async () => {
 	const h = harness({ waitAt: "archives" });
 	const pending = outcome(h.manager.loadMessages(AGENT_ID));

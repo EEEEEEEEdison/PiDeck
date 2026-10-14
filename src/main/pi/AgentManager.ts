@@ -1343,10 +1343,18 @@ export class AgentManager {
 		const t0 = Date.now();
 		const runtime = this.requireRuntime(agentId);
 		const process = runtime.process;
-		const { deckSessionId, runtimeGeneration, sessionPath } = runtime.tab;
+		const { deckSessionId, sessionPath } = runtime.tab;
+		// create() 起步的后台历史加载先于协调器 bind 启动：捕获到的 runtimeGeneration 是
+		// undefined，随后首次 bind 才写入具体代际。「未绑定 → 首次绑定」是同一运行时的绑定
+		// 动作，不是「换了运行时」——按值比较会把新 runtime 的首次历史加载全部误取消，
+		// 窗口永远为空（Issue #350：重启后历史加载被取消 → 渲染层只拿到未初始化的空窗口）。
+		// 因此首次观察到具体代际时记下它，之后仍严格比较：重新绑定后的迟到结果照常取消。
+		let expectedGeneration = runtime.tab.runtimeGeneration;
 		const assertCurrentRuntime = () => {
 			// 历史读取跨多个 await；发布消息、分页游标和压缩计数前必须仍属于原运行时。
-			if (this.agents.get(agentId) !== runtime || runtime.process !== process || runtime.tab.deckSessionId !== deckSessionId || runtime.tab.runtimeGeneration !== runtimeGeneration || runtime.tab.sessionPath !== sessionPath) throw new Error("History load cancelled: runtime changed");
+			if (this.agents.get(agentId) !== runtime || runtime.process !== process || runtime.tab.deckSessionId !== deckSessionId || runtime.tab.sessionPath !== sessionPath) throw new Error("History load cancelled: runtime changed");
+			if (expectedGeneration === undefined) expectedGeneration = runtime.tab.runtimeGeneration;
+			else if (runtime.tab.runtimeGeneration !== expectedGeneration) throw new Error("History load cancelled: runtime changed");
 		};
 
 		// 有会话文件时禁止再发 get_messages：pi 会把整段历史打成单行 JSON，
