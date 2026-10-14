@@ -405,9 +405,13 @@ export function WeChatSection() {
 					) : (
 						modelChain.map((entry, index) => (
 							<div key={`${entry.provider}/${entry.modelId}`} className="border-border flex items-center justify-between gap-2 rounded-md border px-3 py-1.5">
-								<span className="text-foreground flex items-center gap-2 text-xs">
+								<span className="text-foreground flex min-w-0 flex-1 items-center gap-2 text-xs">
 									<span className="text-muted-foreground">{index + 1}</span>
-									{entry.modelName ?? `${entry.provider}/${entry.modelId}`}
+									{/* 同名模型可能来自不同供应商：名称后面始终跟供应商，避免只看到模型名分不出条目 */}
+									<span className="truncate" title={`${entry.provider}/${entry.modelId}`}>
+										{entry.modelName ?? entry.modelId}
+									</span>
+									<span className="text-muted-foreground shrink-0 text-[11px]">{entry.provider}</span>
 								</span>
 								<span className="flex items-center gap-1">
 									<Button size="sm" variant="ghost" disabled={busy || index === 0} aria-label={t("config.wechat.modelChainUp")} onClick={() => void handleModelChainChange(moveChainEntry(modelChain, index, index - 1))}>
