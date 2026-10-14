@@ -116,6 +116,7 @@
     "probe:dsh": "node scripts/dsh-embed-probe.mjs"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
     "@electron-toolkit/utils": "^4.0.0",
     "@larksuiteoapi/node-sdk": "^1.67.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
