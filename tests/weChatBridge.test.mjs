@@ -612,7 +612,7 @@ test("an existing chat keeps its own workspace over the configured default", asy
 
 // ===== 出站请求形状：client_id / run_id / 正在输入 =====
 
-test("outbound replies carry a stable client_id and a fresh run_id per run", async () => {
+test("outbound replies use a unique client_id per message (dedupe key) and a fresh run_id per run", async () => {
 	const harness = createHarness({ batches: [{ msgs: [userMessage({})] }] });
 	await harness.start();
 
@@ -622,19 +622,34 @@ test("outbound replies carry a stable client_id and a fresh run_id per run", asy
 	await waitFor(() => harness.client.calls.sent.length === 1, "the first reply");
 
 	const first = harness.client.calls.sent[0];
-	assert.match(first.clientId, /^pideck-[0-9a-f]{16}$/, "client_id 按 Bot 账号稳定派生（官方插件每条出站消息都带）");
+	// client_id 是服务端幂等去重键（常量 client_id 会让第二条回复起被静默丢弃）：
+	// 前缀标识客户端（pideck-<账号哈希>），后缀必须每条唯一。
+	assert.match(first.clientId, /^pideck-[0-9a-f]{16}-[0-9a-f-]+-\d+$/, "client_id = 客户端前缀 + 唯一后缀");
 	assert.equal(typeof first.runId, "string");
 	assert.equal(first.runId.length, 36, "run_id 是每次 run 生成的 UUID");
 
-	// 第二条消息＝新 run：client_id 必须不变（同一个客户端），run_id 必须换新（另一次生成）。
+	// 第二条消息＝新 run：client_id 必须换新（旧值会被服务端当重复丢弃），run_id 同样换新。
 	harness.client.push({ msgs: [userMessage({ id: 2, text: "再来一句" })] });
 	await waitFor(() => harness.prompts.length === 2, "the second prompt");
 	harness.messages.set("a1", [...harness.messages.get("a1"), { role: "assistant", text: "第二句" }]);
 	endRun(harness);
 	await waitFor(() => harness.client.calls.sent.length === 2, "the second reply");
 
-	assert.equal(harness.client.calls.sent[1].clientId, first.clientId);
+	assert.notEqual(harness.client.calls.sent[1].clientId, first.clientId, "第二条回复的 client_id 必须不同");
 	assert.notEqual(harness.client.calls.sent[1].runId, first.runId);
+
+	// 多分片回复：同一 run 内共享 scope、序号递增，仍然条条唯一（分片间有 400ms 间隔）。
+	const longText = Array.from({ length: 12 }, (_, i) => `第${i}段——${"很长的内容".repeat(60)}`).join("\n");
+	harness.client.push({ msgs: [userMessage({ id: 3, text: "长回复" })] });
+	await waitFor(() => harness.prompts.length === 3, "the third prompt");
+	harness.messages.set("a1", [...harness.messages.get("a1"), { role: "assistant", text: longText }]);
+	endRun(harness);
+	await waitFor(() => harness.client.calls.sent.length >= 5, "the chunked reply");
+
+	const chunkIds = harness.client.calls.sent.slice(2).map((call) => call.clientId);
+	assert.ok(chunkIds.length >= 3, `长回复被切成多片（实际 ${chunkIds.length} 片）`);
+	assert.equal(new Set(chunkIds).size, chunkIds.length, "每个分片的 client_id 都唯一");
+	for (const [i, id] of chunkIds.entries()) assert.match(id, new RegExp(`-${i}$`), `分片 ${i} 的序号后缀`);
 	await harness.bridge.stop();
 });
 

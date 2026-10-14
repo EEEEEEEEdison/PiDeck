@@ -737,8 +737,13 @@ export class WeChatBridge {
 		}
 		const chunks = splitForWeChat(prepareOutgoingText(text));
 		if (chunks.length === 0) return;
-		const clientId = this.clientId();
+		// client_id 是服务端的幂等去重键，必须每条消息唯一：常量 client_id 会让换绑后的
+		// 第二条回复起被静默丢弃（仍回 200+message_id，日志全绿）。前缀标识客户端，
+		// runId/随机数 + 分片序号保证唯一；同一次回复的分片共享 scope，排障时可聚合。
+		const base = this.clientId();
+		const scope = runId ?? randomUUID();
 		for (let index = 0; index < chunks.length; index += 1) {
+			const clientId = base ? `${base}-${scope}-${index}` : undefined;
 			try {
 				await client.sendText(session, { toUserId: chatId, contextToken, text: chunks[index], clientId, runId });
 			} catch (error) {
@@ -779,8 +784,10 @@ export class WeChatBridge {
 	}
 
 	/**
-	 * 出站 client_id：官方插件每条都带（实例级 ID），缺失是社区 issue 里「静默发送失败」
-	 * 的常见成因。按 Bot 账号派生并缓存 —— 重启后保持同一个值，这才是「同一个客户端」。
+	 * 出站 client_id 前缀：标识「这条消息是 PiDeck 发的」。官方入站 client_id 每条都
+	 * 内嵌时间戳+递增计数，社区协议文档（epiral / Chrysochrome ilink-bot-server）一致
+	 * 写明它是幂等去重键、必须全局唯一——所以本值只当前缀，真正保证每条唯一的
+	 * 是 sendSafe 拼上的 scope+分片序号，别把它当「实例级稳定 ID」整条发送。
 	 */
 	private clientId(): string | undefined {
 		const account = getAccount();
