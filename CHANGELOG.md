@@ -121,7 +121,7 @@ Thanks to **ct-jaryn** for the Baizhi service-catalog preset (#339) 🎉
 
 Thanks to **fengxinzi1814** for making ask cards submit on click (#344) 🎉
 
-Special thanks to **罪** for providing the model service used in our software development 🎉
+Special thanks to **罪**, **橙子** and **微时** for providing the model service used in our software development 🎉
 
 ## v0.8.0 (2026-10-07)
 
