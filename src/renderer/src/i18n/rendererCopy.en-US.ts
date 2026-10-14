@@ -1501,6 +1501,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"sessionBackend.imagegen": "ImageGen",
 	"sessionBackend.videogen": "Video",
 	"sessionBackend.acp": "Agent CLI",
+	"sessionChannel.wechat": "WeChat",
+	"sessionChannel.feishu": "Feishu",
 	"session.acpToolHint": "Pick an Agent CLI tool (draft only)",
 	"sidebar.dshSearchResults": "DSH session search results",
 	"session.backendPickerHint": "Choose backend (Pi / DSH / image / video / Agent CLI)",

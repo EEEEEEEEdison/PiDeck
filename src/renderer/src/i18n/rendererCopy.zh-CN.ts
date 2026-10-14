@@ -1496,6 +1496,8 @@ export const zhCN = {
 	"sessionBackend.imagegen": "生图",
 	"sessionBackend.videogen": "生视频",
 	"sessionBackend.acp": "Agent CLI",
+	"sessionChannel.wechat": "微信",
+	"sessionChannel.feishu": "飞书",
 	"session.acpToolHint": "选择 Agent CLI 工具（仅草稿期可改）",
 	"sidebar.dshSearchResults": "DSH 会话搜索结果",
 	"session.backendPickerHint": "选择后端（Pi / DSH / 生图 / 生视频 / Agent CLI）",

@@ -1140,6 +1140,7 @@ export class FeishuBridge {
 			const session = await this.runtimeBindings.ensureSession({
 				projectId,
 				title: _title?.trim() || ctx.groupName || feishuT(this.locale, "group.defaultSession"),
+				channel: "feishu",
 			});
 			const binding: FeishuChatBinding = {
 				chatId,
@@ -1190,6 +1191,7 @@ export class FeishuBridge {
 				title,
 				existingSessionId: binding.sessionId,
 				sessionPath: binding.sessionPath,
+				channel: "feishu",
 			});
 			let tab: AgentTab;
 			try {
@@ -1197,7 +1199,7 @@ export class FeishuBridge {
 			} catch (error) {
 				if (!binding.sessionPath) throw error;
 				log(`[飞书 Bridge] sessionPath 恢复失败，创建新 Session: ${error instanceof Error ? error.message : String(error)}`);
-				session = await this.runtimeBindings.ensureSession({ projectId, title });
+				session = await this.runtimeBindings.ensureSession({ projectId, title, channel: "feishu" });
 				tab = await this.runtimeBindings.activateRuntime(session.sessionId);
 			}
 			log(`[飞书 Bridge] 已为 Session ${session.sessionId} 激活 runtime ${tab.id}`);

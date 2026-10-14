@@ -15,7 +15,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { cn } from "../../lib/utils";
-import { AcpBackendMark, SessionBackendBadge } from "./SessionSourceBadge";
+import { AcpBackendMark, SessionBackendBadge, SessionChannelMark } from "./SessionSourceBadge";
 import { TitleScrollText } from "../sidebar/TitleScrollText";
 import { SessionHeader } from "./SessionHeader";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
@@ -1013,6 +1013,8 @@ function SessionTab(props: {
 								) : (
 									(record?.backend === "dsh" || record?.backend === "imagegen") && <SessionBackendBadge backend={record?.backend} className="h-4 shrink-0" />
 								)}
+								{/* 外部连接渠道（微信/飞书）：tab 上带渠道标志，与侧栏同一套徽标 */}
+								{record?.channel && <SessionChannelMark channel={record.channel} className="size-3.5 shrink-0" />}
 								{/* G12：DSH plan 模式 / danger 权限预设全局可见（数据来自 runtime state，tab 级常显） */}
 								{runtime?.state?.planModeActive && (
 									<span className="shrink-0 rounded bg-primary/15 px-1 text-[10px] font-medium leading-4 text-primary" title={t("app.composerModePlan")}>

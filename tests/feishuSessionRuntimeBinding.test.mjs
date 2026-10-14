@@ -10,6 +10,7 @@ const bridgeSource = readFileSync("src/main/feishu/FeishuBridge.ts", "utf8");
 const mainSource = readFileSync("src/main/index.ts", "utf8");
 // 飞书 IPC 处理器已随主进程拆分迁入 ipc/feishuIpc.ts（2027-02），契约同步改读新模块。
 const feishuIpcSource = readFileSync("src/main/ipc/feishuIpc.ts", "utf8");
+const contractSource = readFileSync("src/main/sessions/sessionRuntimeBinding.ts", "utf8");
 
 /**
  * 真实加载 FeishuI18n：它现在依赖繁体词典与简繁判定，手写沙箱会因缺 require 桥失败，
@@ -36,14 +37,16 @@ function compileAskCard(feishuI18n) {
 }
 
 test("FeishuBridge receives a narrow Session runtime binding gateway", () => {
-	assert.match(bridgeSource, /export interface SessionRuntimeBindingGateway/);
+	// 契约类型已抽到共享模块（微信接入时两桥合并到 imSessionRuntimeBindings），桥只负责复用
+	assert.match(contractSource, /export interface SessionRuntimeBindingGateway/);
+	assert.match(bridgeSource, /import type \{ SessionRuntimeBindingGateway \} from "\.\.\/sessions\/sessionRuntimeBinding"/);
 	assert.match(bridgeSource, /private runtimeBindings: SessionRuntimeBindingGateway/);
 	assert.doesNotMatch(bridgeSource, /sessionRuntimeByIdAtom|bindSessionRuntimeAtom/);
 	assert.doesNotMatch(bridgeSource, /this\.agentManager\.(sendPrompt|abort|getRuntimeState|getAvailableModels|setModel)\(/);
 });
 
 test("Feishu commands resolve a fresh Session target instead of persisting a generation", () => {
-	const gateway = mainSource.match(/const feishuSessionRuntimeBindings:[\s\S]*?\n\};/)?.[0] ?? "";
+	const gateway = mainSource.match(/const imSessionRuntimeBindings:[\s\S]*?\n\};/)?.[0] ?? "";
 	assert.match(gateway, /sessionRuntimeCoordinator\.getTarget\(sessionId\)/);
 	assert.match(gateway, /sessionRuntimeCoordinator\.send\(/);
 	assert.match(gateway, /sessionRuntimeCoordinator\.abortRuntime\(target\)/);
@@ -79,7 +82,7 @@ test("Feishu creation is Catalog-first and never owns Agent lifecycle", () => {
 });
 
 test("main injects an origin-safe catalog gateway into every Feishu bridge", () => {
-	assert.match(mainSource, /const feishuSessionRuntimeBindings/);
+	assert.match(mainSource, /const imSessionRuntimeBindings: SessionRuntimeBindingGateway/);
 	assert.match(mainSource, /const existing = sessionCatalog\.get\(input\.existingSessionId\)/);
 	assert.match(mainSource, /input\.agent\.sessionPath && !canAttachRuntimeMetadata\(existing, input\.agent\)/);
 	assert.match(mainSource, /Existing Session origin does not match runtime/);
@@ -91,13 +94,14 @@ test("main injects an origin-safe catalog gateway into every Feishu bridge", () 
 	// 注入面统计需跨两文件合计，防止新增构造点漏接 gateway。
 	const combined = `${mainSource}\n${feishuIpcSource}`;
 	const constructors = [...combined.matchAll(/new FeishuBridge\(/g)].length;
-	const injections = [...combined.matchAll(/feishuSessionRuntimeBindings/g)].length - 1;
+	// 声明已合并为 imSessionRuntimeBindings，feishuSessionRuntimeBindings 只剩注入点
+	const injections = [...combined.matchAll(/feishuSessionRuntimeBindings/g)].length;
 	assert.ok(constructors >= 4);
 	assert.ok(injections >= constructors);
 });
 
 test("main gateway rejects terminal or differently coordinated runtimes before binding", () => {
-	const gateway = mainSource.match(/const feishuSessionRuntimeBindings:[\s\S]*?\n\};/)?.[0] ?? "";
+	const gateway = mainSource.match(/const imSessionRuntimeBindings:[\s\S]*?\n\};/)?.[0] ?? "";
 	assert.match(gateway, /input\.agent\.status === "error" \|\| input\.agent\.status === "closed"/);
 	assert.match(gateway, /sessionRuntimeCoordinator\.getRuntimeBinding\(input\.agent\.id\)/);
 	assert.match(gateway, /currentBinding\.sessionId !== existing\.id/);
@@ -106,7 +110,7 @@ test("main gateway rejects terminal or differently coordinated runtimes before b
 });
 
 test("main gateway keeps a pathless existing Session and attaches metadata without file origin", () => {
-	const gateway = mainSource.match(/const feishuSessionRuntimeBindings:[\s\S]*?\n\};/)?.[0] ?? "";
+	const gateway = mainSource.match(/const imSessionRuntimeBindings:[\s\S]*?\n\};/)?.[0] ?? "";
 	assert.match(gateway, /if \(input\.agent\.sessionPath && !canAttachRuntimeMetadata/);
 	assert.match(gateway, /sessionId = existing\.id/);
 	// 块结构可能被 formatter 重排：用缩进无关的锚点在整段里定位 pathless 分支。

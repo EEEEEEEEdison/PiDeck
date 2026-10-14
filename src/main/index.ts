@@ -1279,6 +1279,8 @@ const imSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 				source: "pi",
 				environment,
 				filePath: input.sessionPath,
+				// 已存在的会话文件：标题按权威名落库（有历史就不会再有自动命名），只透传渠道标志。
+				channel: input.channel,
 				wslDistro: environment === "wsl" ? settingsStore.get().wslDistro : undefined,
 				wslUser: environment === "wsl" ? settingsStore.get().wslUser : undefined,
 			});
@@ -1289,7 +1291,10 @@ const imSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 			title: input.title,
 			environment,
 			source: "pi",
-			titleOrigin: "manual",
+			channel: input.channel,
+			// 外部连接（微信等）要的是「像桌面会话一样自动命名」：不写 titleOrigin 即留一次
+			// 自动命名机会（见 createDraft 的 titleOrigin 说明），pi 侧命名扩展的模型标题随后领取。
+			...(input.autoTitle ? {} : { titleOrigin: "manual" as const }),
 		});
 		return { sessionId: draft.id };
 	},

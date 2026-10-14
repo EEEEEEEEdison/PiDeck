@@ -170,9 +170,10 @@ function createHarness({ account = { ilinkBotId: "bot@im.bot", ilinkUserId: "wxi
 	let runtimeState;
 
 	const runtimeBindings = {
-		ensureSession: async ({ projectId, title }) => {
-			sessionCreations.push({ projectId, title });
-			return { sessionId: "s1", projectId, title, sessionPath: "/tmp/s1.jsonl" };
+		ensureSession: async (input) => {
+			// 整个入参都记下来：渠道标志与 autoTitle 是外部连接会话的对外契约，被吞掉就没人发现
+			sessionCreations.push({ ...input });
+			return { sessionId: "s1", projectId: input.projectId, title: input.title, sessionPath: "/tmp/s1.jsonl" };
 		},
 		activateRuntime: async (sessionId) => {
 			const tab = { id: "a1", projectId: "p1", sessionId, sessionPath: "/tmp/s1.jsonl", status: "idle", title: "微信对话" };
@@ -723,5 +724,21 @@ test("只有思考、没有正文的消息不会被当成回信", async () => {
 	endRun(harness);
 	await waitFor(() => harness.client.calls.sent.length === 1, "the reply");
 	assert.equal(harness.client.calls.sent[0].text, "真正的回答", "不能把思考发成回信");
+	await harness.bridge.stop();
+});
+
+test("微信会话登记时带渠道标志并保持可自动命名", async () => {
+	// 侧栏要显示微信标志，且标题沿用 pi 侧自动命名：桥给的「微信 xxxx」只是首条消息前的占位。
+	const harness = createHarness({ batches: [{ msgs: [userMessage({ text: "你好" })] }] });
+	await harness.start();
+
+	await waitFor(() => harness.sessionCreations.length === 1, "the session creation");
+	assert.equal(harness.sessionCreations[0].channel, "wechat");
+	assert.equal(harness.sessionCreations[0].autoTitle, true);
+
+	await waitFor(() => harness.prompts.length === 1, "the prompt");
+	harness.messages.set("a1", [{ role: "assistant", text: "你好" }]);
+	endRun(harness);
+	await waitFor(() => harness.client.calls.sent.length === 1, "the reply");
 	await harness.bridge.stop();
 });

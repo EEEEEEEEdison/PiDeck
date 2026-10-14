@@ -1547,3 +1547,77 @@ test("removeWithDescendants drops nested subagent catalog entries with the paren
 		await rm(dir, { recursive: true, force: true });
 	}
 });
+
+test("external connection channel sticks to the session and unknown channel values are dropped on load", async () => {
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-channel-"));
+	const filePath = join(dir, "sessions.json");
+	try {
+		const catalog = new SessionCatalog(filePath);
+		await catalog.load();
+		const wechat = await catalog.createDraft({ projectId: "project-1", title: "微信 1234", environment: "native", source: "pi", channel: "wechat" });
+		const desktop = await catalog.createDraft({ projectId: "project-1", title: "Desktop", environment: "native", source: "pi" });
+		// 未提交草稿在下次 load 会被清理（另有用例守着）：先转 active 才能验证跨重启的落盘字段
+		await catalog.promoteToActive(wechat.id);
+		await catalog.promoteToActive(desktop.id);
+		assert.equal(catalog.getRecord(wechat.id)?.channel, "wechat");
+		assert.equal(catalog.getRecord(desktop.id)?.channel, undefined);
+
+		// 渠道标志随快照落盘，重启后侧栏标志不能丢
+		const persisted = JSON.parse(await readFile(filePath, "utf8"));
+		assert.equal(persisted.sessions.find((entry) => entry.id === wechat.id)?.channel, "wechat");
+		const reloaded = new SessionCatalog(filePath);
+		await reloaded.load();
+		assert.equal(reloaded.getRecord(wechat.id)?.channel, "wechat");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("unknown channel values in the catalog file are dropped without breaking the load", async () => {
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-channel-raw-"));
+	const filePath = join(dir, "sessions.json");
+	try {
+		const first = await realSessionFile(dir, "sessions/first.jsonl");
+		const second = await realSessionFile(dir, "sessions/second.jsonl");
+		await writeFile(
+			filePath,
+			JSON.stringify({
+				version: 1,
+				sessions: [
+					{ id: "unknown-channel", projectId: "project-1", title: "Telegram", source: "pi", environment: "native", filePath: first, status: "active", createdAt: 1, updatedAt: 1, channel: "telegram" },
+					{ id: "wechat-channel", projectId: "project-1", title: "WeChat", source: "pi", environment: "native", filePath: second, status: "active", createdAt: 1, updatedAt: 1, channel: "wechat" },
+				],
+			}),
+			"utf8",
+		);
+		const catalog = new SessionCatalog(filePath);
+		await catalog.load();
+		assert.equal(catalog.get("unknown-channel")?.channel, undefined);
+		assert.equal(catalog.get("wechat-channel")?.channel, "wechat");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("a session created without a locked title can still be auto-named by the model extension", async () => {
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-auto-title-"));
+	const filePath = join(dir, "sessions.json");
+	try {
+		const catalog = new SessionCatalog(filePath);
+		await catalog.load();
+		// 外部连接（ensureSession 的 autoTitle）不写 titleOrigin：留一次自动命名机会
+		const wechat = await catalog.createDraft({ projectId: "project-1", title: "微信 1234", environment: "native", source: "pi", channel: "wechat" });
+		const named = await catalog.applyAutomaticTitle(wechat.id, "微信纯文本通道问候", "auto");
+		assert.equal(named.title, "微信纯文本通道问候");
+
+		// 桌面端草稿的标题是权威名：迟到的自动命名不得覆盖
+		const desktop = await catalog.createDraft({ projectId: "project-1", title: "Desktop", environment: "native", source: "pi", titleOrigin: "manual" });
+		const kept = await catalog.applyAutomaticTitle(desktop.id, "不该生效", "auto");
+		assert.equal(kept.title, "Desktop");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});

@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: f058a18ab233394e88026e34ecc6d479f5fe697640fcb9db1fb2cf4ed1a3f85d（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: c96c3b17ef68411e5185c922b46bdf36aa0e16ab76f57284c1e9a3c318628c83（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -1503,6 +1503,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"sessionBackend.imagegen": "生圖",
 	"sessionBackend.videogen": "生影片",
 	"sessionBackend.acp": "Agent CLI",
+	"sessionChannel.wechat": "微信",
+	"sessionChannel.feishu": "飛書",
 	"session.acpToolHint": "選擇 Agent CLI 工具（僅草稿期可改）",
 	"sidebar.dshSearchResults": "DSH 會話搜尋結果",
 	"session.backendPickerHint": "選擇後端（Pi / DSH / 生圖 / 生影片 / Agent CLI）",
