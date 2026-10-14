@@ -427,6 +427,18 @@ export function WeChatSection() {
 				</div>
 			) : null}
 
+			{/* 操作指志：微信侧只有纯文本命令，桌面上没有入口提示，不写在这里用户就不知道 /new 能开新会话。 */}
+			{account ? (
+				<div className="border-border bg-muted/30 flex flex-col gap-1.5 rounded-md border px-3 py-2">
+					<span className="text-foreground text-xs font-medium">{t("config.wechat.guideTitle")}</span>
+					<ul className="text-muted-foreground flex list-disc flex-col gap-1 pl-4 text-xs">
+						<li>{t("config.wechat.guideNewSession")}</li>
+						<li>{t("config.wechat.guideCommands")}</li>
+						<li>{t("config.wechat.guideModelChain")}</li>
+					</ul>
+				</div>
+			) : null}
+
 			<div className="flex flex-col gap-2">
 				<span className="text-foreground text-xs font-medium">{t("config.wechat.bindings", { count: bindings.length })}</span>
 				{bindings.length === 0 ? (
@@ -451,6 +463,7 @@ export function WeChatSection() {
 			{confirmLogout ? <ConfirmDialog title={t("config.wechat.logout")} message={t("config.wechat.logoutMessage")} onCancel={() => setConfirmLogout(false)} onConfirm={() => void handleLogout()} /> : null}
 
 			{pickerOpen ? (
+				// 这里是「从全部模型里挑一条加入优先级链」：默认展开所有供应商，避免逐个手动展开找模型。
 				<ModelPicker
 					models={models}
 					loading={models.length === 0 && !modelsRefreshing}
@@ -458,6 +471,7 @@ export function WeChatSection() {
 					onRefresh={() => void loadModels(true)}
 					favoriteModels={[]}
 					onToggleFavorite={() => undefined}
+					expandAllProviders
 					onPick={(model) => {
 						setPickerOpen(false);
 						const next = appendChainEntry(modelChain, { provider: model.provider, modelId: model.id, modelName: model.name });

@@ -44,6 +44,7 @@ import type { BridgeEventInput, BridgeResyncInput } from "../../shared/types/bri
 import { parseSessionProcessEventsFromFile } from "../sessions/sessionProcessEventsFile";
 import type { SessionForkCommands } from "../sessions/sessionForkCommands";
 import { dshUnavailablePageFor } from "../dsh/dshManualStop";
+import { missingSessionFilePage } from "../sessions/sessionFileMissingPage";
 import { validateNpmSpec } from "../dsh/dshPluginNpmRunner";
 import { validateSearchKeyword } from "../dsh/dshPluginMarket";
 import { downgradeRunningStartedBefore, downgradeStaleRunning } from "../pi/derivedSubagents";
@@ -1079,6 +1080,14 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			await backfillHistoricalSessionMetadata(sessionId, page);
 			return page;
 		} catch (error) {
+			// 文件还不存在（新建会话在发出第一条消息前不落盘，微信/飞书桥建的会话尤其常见）：
+			// 这是「还没有内容」而不是读取故障，返回带原因的友好空页，
+			// 避免把 ENOENT 报成「会话历史加载失败/文件已删除」（2026-10 微信 /new 反馈）。
+			const missingFile = missingSessionFilePage(error);
+			if (missingFile) {
+				appLogger.info("session", "Read message page: session file not written yet", { sessionId, filePath: entry.filePath });
+				return missingFile;
+			}
 			// 文件读取失败（被删/路径失效）先查 ImageSession 兜底，命中则直接恢复历史；
 			// 都无记录才按失败处理（渲染层显示明确错误态 + 日志）。
 			const imageSessionMessages = (await readImageSessionMessages?.(sessionId)) ?? [];

@@ -45,11 +45,12 @@ export type ChatMessage = {
 };
 
 /**
- * 历史暂时不可读的结构化原因（渲染层据此出专态 UI，而不是让 IPC 抛裸错误）。
- * 目前只有一种：DSH host 被用户手动停止——此时 host 不会自动拉起，历史读取
- * 必然失败且不会自愈，「启动 host」是唯一恢复路径。
+ * 历史不可读的结构化原因（渲染层据此出专态 UI，而不是让 IPC 抛裸错误）。
+ * - dsh-host-stopped：DSH host 被用户手动停止，host 不会自动拉起，「启动 host」是唯一恢复路径。
+ * - file-missing：pi 会话文件还不存在——新建会话（含微信/飞书桥建的会话）在收到第一条
+ *   消息前不落盘，此前打开会读到 ENOENT；这是「还没内容」而不是读取故障。
  */
-export type SessionHistoryUnavailableReason = "dsh-host-stopped";
+export type SessionHistoryUnavailableReason = "dsh-host-stopped" | "file-missing";
 
 /** A bounded historical timeline slice. `nextBefore` is the exclusive index for an older page. */
 export type SessionMessagePage = {

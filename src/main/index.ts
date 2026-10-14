@@ -305,6 +305,7 @@ import { IdleAgentReleaser } from "./sessions/IdleAgentReleaser";
 import { StaleDraftReaper } from "./sessions/StaleDraftReaper";
 import { SessionCommandIpcError } from "./sessions/SessionCommandIpcError";
 import { appendSessionForkSuffix } from "./sessions/sessionForkTitle";
+import { sanitizeAutomaticTitle } from "./sessions/sessionTitleSanitize";
 import { createSessionForkCommands } from "./sessions/sessionForkCommands";
 import { CodexSessionImporter } from "./sessions/CodexSessionImporter";
 import { ClaudeSessionImporter } from "./sessions/ClaudeSessionImporter";
@@ -5181,9 +5182,13 @@ app
 		// 始终是侧栏和 Tab 的显示标题权威。
 		// source 决定所有权（#266）：扩展模型标题 "auto" 可升级首条消息的 "fallback"；
 		// 反向不可（迟到的首条消息不得压住已生成的模型标题）。
-		agentManager.setAutomaticTitleChangedHandler((agentId, title, source) => {
+		agentManager.setAutomaticTitleChangedHandler((agentId, rawTitle, source) => {
 			const sessionId = sessionRuntimeCoordinator?.getSessionId(agentId);
 			if (!sessionId) return;
+			// 外部连接的通道指令随首条消息写进会话文件，pi 侧命名扩展读到的是带指令的原文：
+			// 标题是另一个出口，这里再剥一次，避免侧栏变成整段指令（2026-10 微信现场）。
+			const title = sanitizeAutomaticTitle(rawTitle);
+			if (!title) return;
 			const entry = sessionCatalog.get(sessionId);
 			// 文本相同仍可能是「fallback → auto」的所有权升级（扩展标题与首条消息恰好一致）：
 			// 只有来源已确认且非 fallback 时才是真正的 no-op。

@@ -901,6 +901,8 @@ export function ModelPicker(props: {
 	hiddenModels?: string[];
 	/** 切换模型隐藏状态（可直接在模型选择器中隐藏模型，也可在折叠区恢复显示）。 */
 	onToggleHideModel?: (provider: string, modelId: string) => void;
+	/** 打开时展开所有供应商分组：用于「从全部模型里挑一个」的场景（如外部连接的模型优先级）。 */
+	expandAllProviders?: boolean;
 }) {
 	const currentModelKey = props.current?.provider && props.current?.modelId ? `${props.current.provider}/${props.current.modelId}` : undefined;
 	const favoritesSet = new Set(props.favoriteModels ?? []);
@@ -944,6 +946,7 @@ export function ModelPicker(props: {
 			favorites,
 			current: props.current,
 			providers: sortedProviders,
+			expandAll: props.expandAllProviders,
 		}),
 	);
 	// 主体状态：加载中 / 失败或空态引导 / 模型列表（纯函数，见 sessionPickerOptions）。
