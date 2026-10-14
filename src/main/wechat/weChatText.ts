@@ -25,6 +25,19 @@ export function stripActionMarkers(text: string): string {
 }
 
 /**
+ * 去掉推理块（thinking），只留可回给用户的正文。
+ * pi 把 thinking 内容块并进消息正文（`<thinking>…</thinking>`，见 src/main/pi/messageContent.ts
+ * 的 extractMessageText）：桌面端据此渲染可折叠思考区，微信是纯文本通道，原样发出去只能刷屏。
+ * 未闭合的 <thinking>（流式截断／模型没按格式收尾）无法区分推理与正文，整段丢弃。
+ */
+export function stripThinkingBlocks(text: string): string {
+	const closed = text.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "");
+	const unclosed = closed.search(/<thinking>/i);
+	if (unclosed >= 0) return closed.slice(0, unclosed);
+	return closed.replace(/<\/?thinking>/gi, "");
+}
+
+/**
  * Markdown → 纯文本。
  *
  * 刻意不做的：不解析嵌套结构、不重排表格列宽、不处理 HTML。目标是「看得懂」，
@@ -78,9 +91,9 @@ export function stripMarkdown(text: string): string {
 	return out.trim();
 }
 
-/** 完整的出站准备：去标记 → Markdown 降级 → 收敛空白。 */
+/** 完整的出站准备：去标记 → 去思考块 → Markdown 降级 → 收敛空白。 */
 export function prepareOutgoingText(text: string): string {
-	return stripMarkdown(stripActionMarkers(text)).trim();
+	return stripMarkdown(stripActionMarkers(stripThinkingBlocks(text))).trim();
 }
 
 /**
@@ -123,9 +136,10 @@ export function splitForWeChat(text: string, limit = WECHAT_TEXT_CHUNK_MAX): str
 export function pickLatestAssistantText(messages: ReadonlyArray<{ role: string; text?: string }>): string {
 	for (let i = messages.length - 1; i >= 0; i -= 1) {
 		const message = messages[i];
-		if (message?.role === "assistant" && message.text && message.text.trim()) {
-			return message.text;
-		}
+		if (message?.role !== "assistant" || !message.text) continue;
+		// 只有思考、没有正文的消息不算回复：继续往前找，别把思考内容当答案发出去。
+		const text = stripThinkingBlocks(message.text).trim();
+		if (text) return text;
 	}
 	return "";
 }

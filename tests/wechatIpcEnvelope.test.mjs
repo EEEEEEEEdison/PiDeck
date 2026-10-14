@@ -15,6 +15,10 @@ const handlers = new Map();
 const load = createTsSandbox({ stubs: { electron: { ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) } } } });
 const { registerWeChatIpc } = load("src/main/ipc/wechatIpc.ts");
 const { ipcChannels } = load("src/shared/ipc.ts");
+const { MODEL_CHAIN_MAX } = load("src/main/wechat/WeChatConfig.ts");
+
+/** 沙箱产物的原型属于另一个 realm，结构相同也会被判不等；比较前先降级成纯数据。 */
+const plain = (value) => JSON.parse(JSON.stringify(value));
 
 const ACCOUNT = { ilinkBotId: "bot-1", ilinkUserId: "user-1", displayName: "微信 ClawBot", baseUrl: "https://ilinkai.weixin.qq.com", loggedInAt: 1 };
 
@@ -89,4 +93,40 @@ test("失败折成 {ok:false,message}；原始值通道保持原样", async () =
 	assert.deepEqual(await handlers.get(ipcChannels.wechatGetStatus)(), { status: "connected", account: ACCOUNT, activeBindings: 0 });
 	assert.deepEqual(await handlers.get(ipcChannels.wechatGetBindings)(), []);
 	assert.deepEqual(await handlers.get(ipcChannels.wechatGetLoginState)(), { phase: "idle" });
+});
+
+test("wechat:update-settings 在边界拦下非法模型链，不落到 service 上", async () => {
+	// 渲染层数据一律不可信：超长/缺字段/类型不对必须在 IPC 边界就拒，
+	// 否则非法链会被写进设置文件，桥接下一轮会在顺延时直接报错。
+	const patches = [];
+	register(
+		makeService({
+			updateSettings: (patch) => {
+				patches.push(patch);
+				return { enabled: true, account: ACCOUNT, ...patch };
+			},
+		}),
+	);
+	const handler = handlers.get(ipcChannels.wechatUpdateSettings);
+	const tooLong = Array.from({ length: MODEL_CHAIN_MAX + 1 }, (_, index) => ({ provider: "p1", modelId: `m${index}` }));
+	const invalid = [{ modelChain: "not-an-array" }, { modelChain: tooLong }, { modelChain: ["字符串"] }, { modelChain: [{ provider: "p1" }] }, { modelChain: [{ provider: "p1", modelId: "   " }] }, { modelChain: [{ provider: "p1", modelId: 42 }] }];
+	for (const patch of invalid) {
+		const result = await handler({}, patch);
+		assert.equal(result.ok, false, `必须拒绝：${JSON.stringify(patch)}`);
+	}
+	assert.deepEqual(patches, [], "非法输入不得落到 service 上");
+
+	// 合法输入照旧通过，并且在边界再洗一次（重复项不进设置）。
+	const accepted = await handler(
+		{},
+		{
+			modelChain: [
+				{ provider: "p1", modelId: "fast", modelName: "Fast" },
+				{ provider: "p1", modelId: "fast" },
+			],
+		},
+	);
+	assert.equal(accepted.ok, true);
+	assert.deepEqual(plain(patches[0].modelChain), [{ provider: "p1", modelId: "fast", modelName: "Fast" }], "边界上再洗一次：重复项不会进设置");
+	assert.equal((await handler({}, { modelChain: [] })).ok, true, "空数组 = 清空模型链，是合法输入");
 });

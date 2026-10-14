@@ -8,8 +8,9 @@
 
 import { ipcMain, type BrowserWindow } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import type { WeChatSettingsSnapshot } from "../../shared/types";
+import type { WeChatModelChainEntry, WeChatSettingsSnapshot } from "../../shared/types";
 import { getAppLogger } from "../logging/sharedLogger";
+import { MODEL_CHAIN_MAX, normalizeModelChain } from "../wechat/WeChatConfig";
 import type { WeChatService } from "../wechat/WeChatService";
 
 export type WeChatIpcDeps = {
@@ -79,13 +80,31 @@ export function registerWeChatIpc(deps: WeChatIpcDeps): void {
 	ipcMain.handle(ipcChannels.wechatUpdateSettings, (_event, patch: unknown) => {
 		if (typeof patch !== "object" || patch === null) return { ok: false, message: "patch must be an object" };
 		const source = patch as Record<string, unknown>;
-		const next: { defaultWorkspaceId?: string; defaultModelId?: string } = {};
+		const next: { defaultWorkspaceId?: string; defaultModelId?: string; modelChain?: WeChatModelChainEntry[] } = {};
 		// 空串表示「清空该设置」，是合法输入；只有类型不对才拒绝。
 		for (const key of ["defaultWorkspaceId", "defaultModelId"] as const) {
 			const value = source[key];
 			if (value === undefined) continue;
 			if (typeof value !== "string" || value.length > MAX_TEXT_LENGTH) return { ok: false, message: `${key} is invalid` };
 			next[key] = value.trim();
+		}
+		const chain = source.modelChain;
+		if (chain !== undefined) {
+			// 空数组 = 清空模型链，是合法输入；每条必须是 provider+modelId 字符串。
+			if (!Array.isArray(chain) || chain.length > MODEL_CHAIN_MAX) return { ok: false, message: "modelChain is invalid" };
+			for (const item of chain) {
+				if (typeof item !== "object" || item === null) return { ok: false, message: "modelChain entry must be an object" };
+				const entry = item as Record<string, unknown>;
+				for (const key of ["provider", "modelId", "modelName"] as const) {
+					const value = entry[key];
+					if (value === undefined || value === null) continue;
+					if (typeof value !== "string" || value.length > MAX_TEXT_LENGTH) return { ok: false, message: `modelChain.${key} is invalid` };
+				}
+				if (typeof entry.provider !== "string" || !entry.provider.trim() || typeof entry.modelId !== "string" || !entry.modelId.trim()) {
+					return { ok: false, message: "modelChain entry needs provider and modelId" };
+				}
+			}
+			next.modelChain = normalizeModelChain(chain);
 		}
 		return guard("update-settings", () => ({ ok: true, settings: wechatService.updateSettings(next) }));
 	});

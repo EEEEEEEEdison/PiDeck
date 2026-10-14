@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: a0fd482168d8b262e68a3508732d68fc73e1bed7eed0e888cf3ac58ed064a857（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: b807b00c08ba5e12a6a820ac78feffe2a2439f97d584f5e78942d4c993165ec4（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -3648,7 +3648,15 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.wechat.loginError.noCredentials": "掃碼已確認，但服務端未返回憑據，請重試。",
 	"config.wechat.workspace": "預設工作區",
 	"config.wechat.workspacePlaceholder": "選擇工作區",
-	"config.wechat.workspaceHint": "微信訊息會在該工作區下建立/恢復 pi 會話。",
+	"config.wechat.workspaceAuto": "自動（最近使用）",
+	"config.wechat.workspaceHint": "微信訊息會在該工作區下建立/恢復 pi 會話；選「自動」時用專案列表第一項（約等於最近使用）。",
+	"config.wechat.modelChain": "模型優先順序",
+	"config.wechat.modelChainAdd": "新增模型",
+	"config.wechat.modelChainEmpty": "未指定模型：使用會話當前模型（不干預）。",
+	"config.wechat.modelChainHint": "微信回覆從第一條開始嘗試，執行失敗（供應商報錯）自動順延到下一條；全部失敗才回錯誤提示。鏈首也是新會話的預設模型。",
+	"config.wechat.modelChainUp": "上移",
+	"config.wechat.modelChainDown": "下移",
+	"config.wechat.modelChainRemove": "移除",
 	"config.wechat.bindings": "會話繫結（{count}）",
 	"config.wechat.noBindings": "暫無繫結，收到微信訊息後會自動建立。",
 	"config.wechat.unbind": "解綁",

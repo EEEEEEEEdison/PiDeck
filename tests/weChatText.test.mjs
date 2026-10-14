@@ -12,7 +12,7 @@ import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
  */
 
 const load = createTsSandbox({});
-const { stripActionMarkers, stripMarkdown, prepareOutgoingText, splitForWeChat, pickLatestAssistantText, WECHAT_TEXT_CHUNK_MAX } = load("src/main/wechat/weChatText.ts");
+const { stripActionMarkers, stripThinkingBlocks, stripMarkdown, prepareOutgoingText, splitForWeChat, pickLatestAssistantText, WECHAT_TEXT_CHUNK_MAX } = load("src/main/wechat/weChatText.ts");
 
 test("host action markers are removed because WeChat has no attachments", () => {
 	const out = stripActionMarkers("[SEND_FILE:report.pdf]\n这是结论\n[CREATE_DOC:notes.md]");
@@ -109,4 +109,26 @@ test("no assistant message means no reply text rather than an empty bubble", () 
 	assert.equal(pickLatestAssistantText([{ role: "user", text: "hi" }]), "");
 	assert.equal(pickLatestAssistantText([]), "");
 	assert.equal(pickLatestAssistantText([{ role: "assistant" }]), "");
+});
+
+test("thinking blocks are stripped from the outgoing reply", () => {
+	assert.equal(stripThinkingBlocks("<thinking>先想</thinking>答案"), "答案");
+	assert.equal(stripThinkingBlocks("答案<thinking>后想</thinking>"), "答案");
+	assert.equal(stripThinkingBlocks("<thinking>没闭合的思考"), "", "未闭合的思考整段丢弃（无法区分推理与正文）");
+	assert.equal(stripThinkingBlocks("只多了个闭合标签</thinking>"), "只多了个闭合标签", "散落的闭合标签只清标签");
+});
+
+test("prepareOutgoingText drops thinking before markdown degradation", () => {
+	const out = prepareOutgoingText("<thinking>用户问的是排序</thinking>\n\n## 答案\n\n用快排。");
+	assert.equal(out, "答案\n\n用快排。");
+});
+
+test("a thinking-only assistant message is not used as the reply", () => {
+	// 微信看不到推理过程：只有思考的最后一条必须跳过，往前找真正的回答。
+	const messages = [
+		{ role: "assistant", text: "先给答案" },
+		{ role: "assistant", text: "<thinking>继续琢磨</thinking>" },
+	];
+	assert.equal(pickLatestAssistantText(messages), "先给答案");
+	assert.equal(pickLatestAssistantText([{ role: "assistant", text: "<thinking>只有思考</thinking>" }]), "");
 });

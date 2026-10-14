@@ -39,6 +39,12 @@ async function readStoredSettings(tempDir) {
 	return JSON.parse(await readFile(join(tempDir, "wechat", "wechat.json"), "utf8"));
 }
 
+/**
+ * 沙箱里造出来的对象原型属于另一个 realm，深度比较会连原型一起比，
+ * 结构完全一样也会报 "same structure but are not reference-equal"；比较前先降级成纯数据。
+ */
+const plain = (value) => JSON.parse(JSON.stringify(value));
+
 const LOGIN = { ilinkBotId: "78d85fe69881@im.bot", ilinkUserId: "o9cq80x1@im.wechat", botToken: "78d85fe69881@im.bot:06000072642df0" };
 
 test("新登录：token 加密入库带 v2 前缀，且不以明文出现在任何落盘文件中", async () => {
@@ -178,7 +184,7 @@ test("配置损坏时按未登录处理而不抛错（桥接起不来不该让�
 		},
 	});
 	try {
-		assert.deepEqual(JSON.parse(JSON.stringify(mod.getSettings())), { enabled: false, account: null });
+		assert.deepEqual(plain(mod.getSettings()), { enabled: false, account: null, modelChain: [] });
 		assert.equal(mod.getDecryptedBotToken(), "");
 		assert.deepEqual(JSON.parse(JSON.stringify(mod.loadBindings())), []);
 	} finally {
@@ -287,6 +293,55 @@ test("工作区/模型设置可更新与清空", async () => {
 		mod.updateSettings({ defaultModelId: "" });
 		assert.equal(mod.getSettings().defaultModelId, undefined, "空串等于清空，不留空字符串设置项");
 		assert.equal(mod.getSettings().defaultWorkspaceId, "ws-1", "未提到的字段不动");
+	} finally {
+		await rm(tempDir, { recursive: true, force: true });
+	}
+});
+
+// ===== 模型链 =====
+
+test("模型链落盘前归一化：丢空项、去重、截断", async () => {
+	// 链是「兜底顺序」，重复项会让同一模型跑两次、空项会在顺延时直接报错。
+	const { mod, tempDir } = await loadConfigModule();
+	try {
+		mod.updateSettings({
+			modelChain: [{ provider: " p1 ", modelId: "fast", modelName: " Fast " }, { provider: "p1", modelId: "fast" }, { provider: "", modelId: "不完整的条目" }, { provider: "p2", modelId: "   " }, ...Array.from({ length: 12 }, (_, index) => ({ provider: "px", modelId: `m${index}` }))],
+		});
+
+		const chain = mod.getSettings().modelChain;
+		assert.equal(chain.length, mod.MODEL_CHAIN_MAX, "超长链必须截到上限");
+		assert.deepEqual(plain(chain[0]), { provider: "p1", modelId: "fast", modelName: "Fast" }, "首项要去空白并保留显示名");
+		assert.deepEqual(plain(chain[1]), { provider: "px", modelId: "m0" }, "重复项与残缺项被丢掉");
+		assert.deepEqual(plain(chain[chain.length - 1]), { provider: "px", modelId: "m6" });
+		assert.deepEqual((await readStoredSettings(tempDir)).modelChain, plain(chain), "落盘的必须已经是洗过的链");
+	} finally {
+		await rm(tempDir, { recursive: true, force: true });
+	}
+});
+
+test("手改文件里的非法模型链在读取时被洗掉，不影响其他设置", async () => {
+	// 设置文件是明文可手改的：读取边界必须再洗一次，不能把垃圾传给桥接。
+	const { mod, tempDir } = await loadConfigModule({
+		prepare: async (dir) => {
+			await mkdir(join(dir, "wechat"), { recursive: true });
+			await writeFile(join(dir, "wechat", "wechat.json"), JSON.stringify({ version: 1, enabled: true, defaultWorkspaceId: "ws-9", modelChain: [{ provider: "p1" }, { modelId: "fast" }, "字符串", null, { provider: "p2", modelId: "smart" }, { provider: "p2", modelId: "smart" }] }));
+		},
+	});
+	try {
+		assert.deepEqual(plain(mod.getSettings().modelChain), [{ provider: "p2", modelId: "smart" }], "残缺项被丢掉、重复项去重后只剩合法条目");
+		assert.equal(mod.getSettings().defaultWorkspaceId, "ws-9", "洗模型链不得弄丢同一文件里的其它设置");
+		assert.equal(mod.getSettings().enabled, true);
+	} finally {
+		await rm(tempDir, { recursive: true, force: true });
+	}
+});
+
+test("模型链可用空数组清空", async () => {
+	const { mod, tempDir } = await loadConfigModule();
+	try {
+		mod.updateSettings({ modelChain: [{ provider: "p1", modelId: "fast" }] });
+		mod.updateSettings({ modelChain: [] });
+		assert.deepEqual(plain(mod.getSettings().modelChain), [], "清空后必须是空链（回到不干预会话模型）");
 	} finally {
 		await rm(tempDir, { recursive: true, force: true });
 	}

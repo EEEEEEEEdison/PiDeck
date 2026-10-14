@@ -10,15 +10,17 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { ArrowDown, ArrowUp, Loader2, Plus, RefreshCw, X } from "lucide-react";
 import { Button } from "../../ui-shadcn/button";
 import { Input } from "../../ui-shadcn/input";
 import { Label } from "../../ui-shadcn/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui-shadcn/select";
 import { Switch } from "../../ui-shadcn/switch";
 import { ConfirmDialog } from "../../app/AppParts";
-import type { WeChatBridgeStatus, WeChatChatBinding, WeChatIpcResult, WeChatLoginState, WeChatSettings, WeChatSettingsSnapshot } from "../../../../../shared/types";
+import { ModelPicker } from "../../session/ComposerComponents";
+import type { AvailableModel, WeChatBridgeStatus, WeChatChatBinding, WeChatIpcResult, WeChatLoginState, WeChatModelChainEntry, WeChatSettings, WeChatSettingsSnapshot } from "../../../../../shared/types";
 import { formatI18nDateTime, t, type TranslationKey } from "../../../i18n";
+import { desktopApi } from "../../../desktopApi";
 import { useQrDataUrl } from "./useQrDataUrl";
 
 /**
@@ -28,7 +30,7 @@ import { useQrDataUrl } from "./useQrDataUrl";
 type WeChatApiRaw = {
 	snapshot?: () => Promise<WeChatIpcResult<WeChatSettingsSnapshot>>;
 	setEnabled?: (enabled: boolean) => Promise<WeChatIpcResult<{ settings: WeChatSettings }>>;
-	updateSettings?: (patch: { defaultWorkspaceId?: string; defaultModelId?: string }) => Promise<WeChatIpcResult<{ settings: WeChatSettings }>>;
+	updateSettings?: (patch: { defaultWorkspaceId?: string; defaultModelId?: string; modelChain?: WeChatModelChainEntry[] }) => Promise<WeChatIpcResult<{ settings: WeChatSettings }>>;
 	renameAccount?: (displayName: string) => Promise<WeChatIpcResult<{ settings: WeChatSettings }>>;
 	logout?: () => Promise<WeChatIpcResult<{ settings: WeChatSettings }>>;
 	beginLogin?: () => Promise<WeChatIpcResult<{ state: WeChatLoginState }>>;
@@ -61,6 +63,24 @@ const LOGIN_ERROR_LABEL: Record<string, TranslationKey> = {
 	"confirmed without credentials": "config.wechat.loginError.noCredentials",
 };
 
+/** 工作区选择器的「自动」哨兵值：写设置时转成空串（主进程用项目列表第一项兜底）。 */
+const AUTO_WORKSPACE = "__auto__";
+
+/** 上/下移一条链项；越界返回原数组。纯函数，便于单测。 */
+function moveChainEntry(chain: WeChatModelChainEntry[], from: number, to: number): WeChatModelChainEntry[] {
+	if (to < 0 || to >= chain.length || from === to) return chain;
+	const next = [...chain];
+	const [entry] = next.splice(from, 1);
+	next.splice(to, 0, entry);
+	return next;
+}
+
+/** 追加一条链项（已存在则原样返回，避免重复点同一个模型把它插两次）。 */
+function appendChainEntry(chain: WeChatModelChainEntry[], entry: WeChatModelChainEntry): WeChatModelChainEntry[] {
+	if (chain.some((item) => item.provider === entry.provider && item.modelId === entry.modelId)) return chain;
+	return [...chain, entry];
+}
+
 export function WeChatSection() {
 	const [snapshot, setSnapshot] = useState<WeChatSettingsSnapshot | null>(null);
 	const [loginState, setLoginState] = useState<WeChatLoginState>({ phase: "idle" });
@@ -71,6 +91,10 @@ export function WeChatSection() {
 	const [confirmLogout, setConfirmLogout] = useState(false);
 	const [renaming, setRenaming] = useState(false);
 	const [nameDraft, setNameDraft] = useState("");
+	// 模型链编辑器：模型目录懒拉（打开本页才拉），选择器单独一个开关控制挂载。
+	const [models, setModels] = useState<AvailableModel[]>([]);
+	const [modelsRefreshing, setModelsRefreshing] = useState(false);
+	const [pickerOpen, setPickerOpen] = useState(false);
 
 	const api = (window as unknown as { piDesktop?: { wechat?: WeChatApiRaw } }).piDesktop?.wechat;
 	const qrDataUrl = useQrDataUrl(loginState.qrcodeContent ?? "");
@@ -90,6 +114,21 @@ export function WeChatSection() {
 			setLoading(false);
 		}
 	}, [api]);
+
+	const loadModels = useCallback(async (force = false) => {
+		if (force) setModelsRefreshing(true);
+		try {
+			setModels(await desktopApi.projects.listModelsReport(undefined, force).then((r) => r.models));
+		} catch {
+			setModels([]);
+		} finally {
+			setModelsRefreshing(false);
+		}
+	}, []);
+
+	useEffect(() => {
+		void loadModels();
+	}, [loadModels]);
 
 	useEffect(() => {
 		void loadSnapshot();
@@ -202,7 +241,18 @@ export function WeChatSection() {
 	const handleWorkspaceChange = useCallback(
 		async (workspaceId: string) => {
 			if (!api?.updateSettings) return;
-			const result = await runAction(() => api.updateSettings?.({ defaultWorkspaceId: workspaceId }) as Promise<WeChatIpcResult<Record<string, unknown>>>);
+			// 哨兵值转空串：主进程对空串的解释是「自动」，不会把哨兵写进设置文件。
+			const value = workspaceId === AUTO_WORKSPACE ? "" : workspaceId;
+			const result = await runAction(() => api.updateSettings?.({ defaultWorkspaceId: value }) as Promise<WeChatIpcResult<Record<string, unknown>>>);
+			if (result.ok) await loadSnapshot();
+		},
+		[api, runAction, loadSnapshot],
+	);
+
+	const handleModelChainChange = useCallback(
+		async (modelChain: WeChatModelChainEntry[]) => {
+			if (!api?.updateSettings) return;
+			const result = await runAction(() => api.updateSettings?.({ modelChain }) as Promise<WeChatIpcResult<Record<string, unknown>>>);
 			if (result.ok) await loadSnapshot();
 		},
 		[api, runAction, loadSnapshot],
@@ -226,6 +276,7 @@ export function WeChatSection() {
 	const account = settings?.account ?? null;
 	const bindings = snapshot?.bindings ?? [];
 	const projects = snapshot?.projects ?? [];
+	const modelChain = settings?.modelChain ?? [];
 	const loginInProgress = loginState.phase !== "idle" && loginState.phase !== "confirmed";
 
 	return (
@@ -323,11 +374,12 @@ export function WeChatSection() {
 			{account && projects.length > 0 ? (
 				<div className="flex flex-col gap-1">
 					<Label className="text-xs">{t("config.wechat.workspace")}</Label>
-					<Select value={settings?.defaultWorkspaceId ?? ""} onValueChange={(value) => void handleWorkspaceChange(value)}>
+					<Select value={settings?.defaultWorkspaceId || AUTO_WORKSPACE} onValueChange={(value) => void handleWorkspaceChange(value)}>
 						<SelectTrigger className="w-60">
 							<SelectValue placeholder={t("config.wechat.workspacePlaceholder")} />
 						</SelectTrigger>
 						<SelectContent>
+							<SelectItem value={AUTO_WORKSPACE}>{t("config.wechat.workspaceAuto")}</SelectItem>
 							{projects.map((project) => (
 								<SelectItem key={project.id} value={project.id}>
 									{project.name}
@@ -336,6 +388,42 @@ export function WeChatSection() {
 						</SelectContent>
 					</Select>
 					<span className="text-muted-foreground text-xs">{t("config.wechat.workspaceHint")}</span>
+				</div>
+			) : null}
+
+			{account ? (
+				<div className="flex flex-col gap-2">
+					<div className="flex items-center justify-between gap-2">
+						<span className="text-foreground text-xs font-medium">{t("config.wechat.modelChain")}</span>
+						<Button size="sm" variant="secondary" disabled={busy} onClick={() => setPickerOpen(true)}>
+							<Plus className="mr-1 h-3.5 w-3.5" />
+							{t("config.wechat.modelChainAdd")}
+						</Button>
+					</div>
+					{modelChain.length === 0 ? (
+						<span className="text-muted-foreground text-xs">{t("config.wechat.modelChainEmpty")}</span>
+					) : (
+						modelChain.map((entry, index) => (
+							<div key={`${entry.provider}/${entry.modelId}`} className="border-border flex items-center justify-between gap-2 rounded-md border px-3 py-1.5">
+								<span className="text-foreground flex items-center gap-2 text-xs">
+									<span className="text-muted-foreground">{index + 1}</span>
+									{entry.modelName ?? `${entry.provider}/${entry.modelId}`}
+								</span>
+								<span className="flex items-center gap-1">
+									<Button size="sm" variant="ghost" disabled={busy || index === 0} aria-label={t("config.wechat.modelChainUp")} onClick={() => void handleModelChainChange(moveChainEntry(modelChain, index, index - 1))}>
+										<ArrowUp className="h-3.5 w-3.5" />
+									</Button>
+									<Button size="sm" variant="ghost" disabled={busy || index === modelChain.length - 1} aria-label={t("config.wechat.modelChainDown")} onClick={() => void handleModelChainChange(moveChainEntry(modelChain, index, index + 1))}>
+										<ArrowDown className="h-3.5 w-3.5" />
+									</Button>
+									<Button size="sm" variant="ghost" disabled={busy} aria-label={t("config.wechat.modelChainRemove")} onClick={() => void handleModelChainChange(modelChain.filter((_, i) => i !== index))}>
+										<X className="h-3.5 w-3.5" />
+									</Button>
+								</span>
+							</div>
+						))
+					)}
+					<span className="text-muted-foreground text-xs">{t("config.wechat.modelChainHint")}</span>
 				</div>
 			) : null}
 
@@ -361,6 +449,24 @@ export function WeChatSection() {
 			<p className="text-muted-foreground text-xs">{t("config.wechat.p2pHint")}</p>
 
 			{confirmLogout ? <ConfirmDialog title={t("config.wechat.logout")} message={t("config.wechat.logoutMessage")} onCancel={() => setConfirmLogout(false)} onConfirm={() => void handleLogout()} /> : null}
+
+			{pickerOpen ? (
+				<ModelPicker
+					models={models}
+					loading={models.length === 0 && !modelsRefreshing}
+					refreshing={modelsRefreshing}
+					onRefresh={() => void loadModels(true)}
+					favoriteModels={[]}
+					onToggleFavorite={() => undefined}
+					onPick={(model) => {
+						setPickerOpen(false);
+						const next = appendChainEntry(modelChain, { provider: model.provider, modelId: model.id, modelName: model.name });
+						// 重复选择时不产生写入：appendChainEntry 原样返回时 setState/落盘都是空转。
+						if (next !== modelChain) void handleModelChainChange(next);
+					}}
+					onClose={() => setPickerOpen(false)}
+				/>
+			) : null}
 		</div>
 	);
 }

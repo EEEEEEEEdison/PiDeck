@@ -353,13 +353,14 @@ export class IlinkClient {
 	 * 发文本。必须先收到带 context_token 的用户消息——协议不支持主动推送，
 	 * 所以「Agent 主动通知用户」在微信侧做不到，只能等用户先开口。
 	 */
-	async sendText(session: IlinkSession, input: { toUserId: string; contextToken: string; text: string; clientId?: string }): Promise<IlinkSendMessageResponse> {
+	async sendText(session: IlinkSession, input: { toUserId: string; contextToken: string; text: string; clientId?: string; runId?: string }): Promise<IlinkSendMessageResponse> {
 		return this.request<IlinkSendMessageResponse>("POST", ILINK_EP_SEND_MESSAGE, {
 			body: {
 				msg: {
 					from_user_id: "",
 					to_user_id: input.toUserId,
 					...(input.clientId ? { client_id: input.clientId } : {}),
+					...(input.runId ? { run_id: input.runId } : {}),
 					message_type: MESSAGE_TYPE_BOT,
 					message_state: MESSAGE_STATE_DELIVERED,
 					context_token: input.contextToken,

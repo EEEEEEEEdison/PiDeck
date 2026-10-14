@@ -17,12 +17,13 @@
  * 当前 runtime 句柄，句柄失效就重新激活同一个 sessionId，而不是新建会话。
  */
 
-import type { AgentTab, WeChatBridgeStatus, WeChatChatBinding } from "../../shared/types";
+import { createHash, randomUUID } from "node:crypto";
+import type { AgentRuntimeState, AgentTab, WeChatBridgeStatus, WeChatChatBinding, WeChatModelChainEntry } from "../../shared/types";
 import { IlinkClient, IlinkError, type IlinkLogFn } from "./IlinkClient";
 import { ILINK_CHANNEL_VERSION, MESSAGE_TYPE_USER, POLL_RETRY_FAST_MS, POLL_RETRY_SLOW_AFTER, POLL_RETRY_SLOW_MS, extractMessageText, hasUnsupportedItem, type IlinkMessage, type IlinkSession } from "./ilinkProtocol";
 import type { SessionRuntimeBindingGateway } from "../sessions/sessionRuntimeBinding";
 import type { AgentManager } from "../pi/AgentManager";
-import { getAccount, getBinding, getDecryptedBotToken, getCursor, getPublicAccount, isAllowedUser, loadBindings, markNeedsRelogin, removeBinding, removeBindingsBySessionId, setCursor, upsertBinding } from "./WeChatConfig";
+import { getAccount, getBinding, getDecryptedBotToken, getCursor, getPublicAccount, getSettings, isAllowedUser, loadBindings, markNeedsRelogin, normalizeModelChain, removeBinding, removeBindingsBySessionId, setCursor, upsertBinding } from "./WeChatConfig";
 import { normalizeWeChatLocale, weChatLanguage, wechatT, type WeChatLocale, type WeChatTranslationKey } from "./WeChatI18n";
 import { pickLatestAssistantText, prepareOutgoingText, splitForWeChat } from "./weChatText";
 
@@ -55,6 +56,14 @@ const RESULT_SETTLE_MS = 800;
 const MULTI_CHUNK_GAP_MS = 400;
 /** 迟到的 agent_end 超过这个时间就不再尝试回信（context_token 大概率已失效）。 */
 const LATE_DELIVERY_MAX_MS = 60 * 60 * 1000;
+/**「正在输入」凭证的有效期：协议说它短命，但同一次 run 的开始/结束可以复用同一张。 */
+const TYPING_TICKET_TTL_MS = 30_000;
+
+/** waitForAgentEnd 的结局：超时（run 仍在跑）或已结束（可能带失败信息）。 */
+type RunWaitOutcome = { kind: "timeout" } | { kind: "ended"; failed: boolean; errorMessage?: string };
+
+/** 一次 prompt 提交的结局。只有 failed 会触发模型顺延；sendError 是提交链路本身失败。 */
+type RunAttemptOutcome = { kind: "ok"; sinceIndex: number } | { kind: "failed"; message?: string } | { kind: "sendError"; message: string } | { kind: "timeout" };
 
 export class WeChatBridge {
 	private readonly deps: WeChatBridgeDeps;
@@ -72,10 +81,17 @@ export class WeChatBridge {
 	private activeRun: { chatId: string; contextToken: string; agentId?: string; startedAt: number } | null = null;
 	/** runAgent 正在等的 agent_end 唤醒器。 */
 	private readonly runWaiters = new Map<string, () => void>();
-	/** 已收到 agent_end 的 agent（含迟到），用于消除「超时与事件同刻到达」的竞态。 */
-	private readonly endedAgents = new Map<string, number>();
+	/** 已收到 agent_end 的 agent（含迟到）→ 终态，用于消除「超时与事件同刻到达」的竞态并判定是否顺延模型。 */
+	private readonly endedAgents = new Map<string, { at: number; failed: boolean; errorMessage?: string }>();
 	/** 超时后仍挂着等待投递结果的 run：agent_end 迟到时补发。 */
-	private readonly lateRuns = new Map<string, { chatId: string; contextToken: string; startedAt: number }>();
+	private readonly lateRuns = new Map<string, { chatId: string; contextToken: string; startedAt: number; runId?: string }>();
+	/** 「正在输入」凭证缓存（按 chatId）：一次 run 发 status 1/2 两次，只取一次凭证。 */
+	private readonly typingTickets = new Map<string, { ticket: string; at: number }>();
+	/** 出站 client_id 缓存：按 Bot 账号派生，重启后保持同一个值。 */
+	private clientIdCache: { botId: string; id: string } | null = null;
+
+	/** run 代际：/stop 与桥接停止会 +1，让正在按模型链顺延重试的循环立刻退出。 */
+	private runGeneration = 0;
 
 	constructor(deps: WeChatBridgeDeps) {
 		this.deps = deps;
@@ -130,6 +146,7 @@ export class WeChatBridge {
 
 	async stop(): Promise<void> {
 		this.stopping = true;
+		this.runGeneration += 1;
 		this.pollStarted = false;
 		this.detachAgentEvents();
 		const client = this.client;
@@ -146,6 +163,7 @@ export class WeChatBridge {
 		this.runWaiters.clear();
 		this.lateRuns.clear();
 		this.endedAgents.clear();
+		this.typingTickets.clear();
 		this.setStatus({ status: "disconnected", account: getPublicAccount(), activeBindings: loadBindings().length });
 	}
 
@@ -254,6 +272,12 @@ export class WeChatBridge {
 		});
 	}
 
+	/**
+	 * 跑一轮：按模型链逐个尝试，失败自动顺延到下一条。
+	 *
+	 * 每次提交前先清掉上一次尝试的终态记录，否则顺延重试会立刻拿到旧结果，
+	 * 在同一个微任务里空转到链尾（提交后再注册唤醒器还会白等满 300s）。
+	 */
 	private async runAgent(chatId: string, contextToken: string, text: string): Promise<void> {
 		const binding = await this.ensureBinding(chatId);
 		if (!binding) {
@@ -268,10 +292,68 @@ export class WeChatBridge {
 		}
 		if (this.activeRun) this.activeRun.agentId = agentId;
 
+		const generation = this.runGeneration;
+		// run_id：官方插件每条出站消息都带（一次生成一个），缺失会被服务端静默丢弃。
+		const runId = randomUUID();
+		const plan = await this.buildModelPlan(binding);
+		// 微信回复不需要推理过程：提交前先把思考档位关了（失败只记日志，不阻断回信）。
+		await this.applyRunThinking(binding);
+		// 空计划（链条为空且没有显式选择）也要跑一次：null 表示完全不干预会话模型。
+		const attempts: Array<WeChatModelChainEntry | null> = plan.length > 0 ? plan : [null];
+		let lastFailure: string | undefined;
+		// 「正在输入」是体验增强兼下行探针，失败绝不影响回信；开始过就在收尾时关掉。
+		let typingStarted = false;
+
+		try {
+			for (const [index, entry] of attempts.entries()) {
+				// /stop 或桥接停止会推进代际：中断后的顺延必须立刻停，不能换个模型把用户已经停掉的活接着跑。
+				if (this.runGeneration !== generation || this.stopping) return;
+				if (entry && !(await this.applyRunModel(binding.sessionId, entry))) {
+					lastFailure = `${entry.provider}/${entry.modelId}`;
+					continue;
+				}
+				if (index > 0 && entry) this.deps.logger?.("warn", "微信模型失败，顺延到下一条", `${entry.provider}/${entry.modelId}`);
+
+				if (!typingStarted) typingStarted = await this.signalTyping(chatId, contextToken, 1);
+
+				const outcome = await this.submitRun(binding, agentId, text);
+				if (this.runGeneration !== generation) return;
+				if (outcome.kind === "sendError") {
+					this.activeRun = null;
+					this.sendSafe(chatId, contextToken, this.t("run.failed", { message: outcome.message }), runId);
+					return;
+				}
+				if (outcome.kind === "timeout") {
+					// 超时不等于失败：run 还在跑，结果只能等 agent_end 迟到时补发。
+					// 这里必须把等待交给 lateRuns，否则用户永远等不到回复且没有任何解释。
+					this.lateRuns.set(agentId, { chatId, contextToken, startedAt: Date.now(), runId });
+					this.activeRun = null;
+					this.sendSafe(chatId, contextToken, this.t("run.timeout"), runId);
+					return;
+				}
+				if (outcome.kind === "ok") {
+					this.activeRun = null;
+					await this.deliverResult(agentId, { chatId, contextToken, startedAt: Date.now(), runId }, outcome.sinceIndex);
+					return;
+				}
+				lastFailure = outcome.message ?? (entry ? `${entry.provider}/${entry.modelId}` : undefined);
+			}
+
+			// 链上的模型全失败（或全部已不可用）：必须回最后一条错误，不能静默。
+			this.activeRun = null;
+			this.sendSafe(chatId, contextToken, this.t("run.failed", { message: lastFailure ?? "" }), runId);
+		} finally {
+			if (typingStarted) void this.signalTyping(chatId, contextToken, 2);
+		}
+	}
+
+	/** 提交一次 prompt 并等它的 agent_end；模型顺延由调用方决定，这里只报告结局。 */
+	private async submitRun(binding: WeChatChatBinding, agentId: string, text: string): Promise<RunAttemptOutcome> {
+		this.endedAgents.delete(agentId);
 		// 先注册唤醒器再提交 prompt：快速失败的 run（模型配置错、鉴权失败）会在
 		// 提交窗口内就广播 agent_end，注册晚于事件会白等满 300s（飞书踩过同样的坑）。
 		const timedOutPromise = this.waitForAgentEnd(agentId, AGENT_END_TIMEOUT_MS);
-
+		const sinceIndex = this.deps.agentManager.getMessages(agentId).length;
 		try {
 			await this.deps.runtimeBindings.sendPrompt({
 				sessionId: binding.sessionId,
@@ -281,37 +363,112 @@ export class WeChatBridge {
 		} catch (error) {
 			this.runWaiters.delete(agentId);
 			this.endedAgents.delete(agentId);
-			this.activeRun = null;
-			const message = error instanceof Error ? error.message : String(error);
-			this.sendSafe(chatId, contextToken, this.t("run.failed", { message }));
-			return;
+			return { kind: "sendError", message: error instanceof Error ? error.message : String(error) };
 		}
 
-		const timedOut = await timedOutPromise;
-		if (timedOut) {
-			// 超时不等于失败：run 还在跑，结果只能等 agent_end 迟到时补发。
-			// 这里必须把等待交给 lateRuns，否则用户永远等不到回复且没有任何解释。
-			this.lateRuns.set(agentId, { chatId, contextToken, startedAt: Date.now() });
-			this.activeRun = null;
-			this.sendSafe(chatId, contextToken, this.t("run.timeout"));
-			return;
-		}
-
+		const outcome = await timedOutPromise;
+		if (outcome.kind === "timeout") return { kind: "timeout" };
 		await sleep(RESULT_SETTLE_MS);
-		this.activeRun = null;
 		this.endedAgents.delete(agentId);
-		await this.deliverResult(agentId, { chatId, contextToken, startedAt: Date.now() });
+		if (outcome.failed) {
+			this.deps.logger?.("warn", "微信 run 以错误结束", outcome.errorMessage ?? "unknown");
+			return { kind: "failed", message: outcome.errorMessage };
+		}
+		return { kind: "ok", sinceIndex };
+	}
+
+	/**
+	 * 本轮的模型尝试计划。模型链是「默认 + 兜底」，不是硬绑定：
+	 * - 链条为空且没有显式选择 → 空计划，完全不干预会话模型（旧行为）。
+	 * - 显式 /model 选中的模型（binding.modelProvider + modelId）最优先。
+	 * - 会话当前模型不在链条里（用户在桌面端手选过）→ 排在最前，尊重用户选择；失败后仍顺延到链条。
+	 * - 当前模型在链条里但不在首位 → 从链首重新开始（上一轮顺延后的自愈）。
+	 */
+	private async buildModelPlan(binding: WeChatChatBinding): Promise<WeChatModelChainEntry[]> {
+		const chain = normalizeModelChain(getSettings().modelChain);
+		const explicit = binding.modelProvider && binding.modelId ? { provider: binding.modelProvider, modelId: binding.modelId } : undefined;
+		if (chain.length === 0 && !explicit) return [];
+		const current = await this.readRuntimeModel(binding.sessionId);
+		const entries: WeChatModelChainEntry[] = [];
+		const push = (entry: WeChatModelChainEntry) => {
+			if (!entry.provider || !entry.modelId) return;
+			if (entries.some((candidate) => candidate.provider === entry.provider && candidate.modelId === entry.modelId)) return;
+			entries.push(entry);
+		};
+		if (explicit) push(explicit);
+		if (current?.provider && current.modelId && !chain.some((entry) => entry.provider === current.provider && entry.modelId === current.modelId)) {
+			push({ provider: current.provider, modelId: current.modelId });
+		}
+		for (const entry of chain) push(entry);
+		return entries;
+	}
+
+	/** 把会话切到指定模型；失败（模型已删/供应商下线）返回 false，让调用方顺延到下一条。 */
+	private async applyRunModel(sessionId: string, entry: WeChatModelChainEntry): Promise<boolean> {
+		const current = await this.readRuntimeModel(sessionId);
+		if (current?.provider === entry.provider && current.modelId === entry.modelId) return true;
+		try {
+			await this.deps.runtimeBindings.setRuntimeModel(sessionId, entry.provider, entry.modelId);
+			return true;
+		} catch (error) {
+			this.deps.logger?.("warn", "微信切换模型失败，尝试下一条", `${entry.provider}/${entry.modelId}: ${error instanceof Error ? error.message : String(error)}`);
+			return false;
+		}
+	}
+
+	private async readRuntimeState(sessionId: string): Promise<AgentRuntimeState | undefined> {
+		try {
+			return await this.deps.runtimeBindings.getRuntimeState(sessionId);
+		} catch {
+			// 运行时还没绑定/已失效：拿不到状态不等于失败。
+			return undefined;
+		}
+	}
+
+	private async readRuntimeModel(sessionId: string): Promise<{ provider?: string; modelId?: string } | undefined> {
+		const state = await this.readRuntimeState(sessionId);
+		return state ? { provider: state.provider, modelId: state.modelId } : undefined;
+	}
+
+	/**
+	 * 微信驱动的 run 一律关思考。
+	 *
+	 * 微信只有纯文本：推理过程对用户既不可见也没用（会被 weChatText 剔掉），推理 token 也白花，
+	 * 所以由通道钦定 off，而不是继承会话档位。已经关着就不重复切（协调器也会去重）。
+	 * 切档会写回该会话的偏好；桌面端把同一会话改成高思考后，微信再发消息会被重新拉回 off。
+	 * 切档失败不影响回信。
+	 */
+	private async applyRunThinking(binding: WeChatChatBinding): Promise<void> {
+		const state = await this.readRuntimeState(binding.sessionId);
+		if (state?.thinkingLevel === "off") return;
+		try {
+			await this.deps.runtimeBindings.setRuntimeThinking(binding.sessionId, "off");
+		} catch (error) {
+			this.deps.logger?.("debug", "微信关闭思考失败（不影响回信）", error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	/**
+	 * 新建/恢复会话后把链条首项设为默认模型。只在会话开始时设置而不在每轮 run 前强制，
+	 * 这样用户在桌面端给某个会话手选的模型不会被微信的每条消息拉回链首。
+	 */
+	private async applyChainDefault(binding: WeChatChatBinding): Promise<void> {
+		if (binding.modelProvider) return;
+		const first = normalizeModelChain(getSettings().modelChain)[0];
+		if (!first) return;
+		await this.applyRunModel(binding.sessionId, first);
 	}
 
 	/** 读最近一条助手消息并回信。超时补发与正常投递共用这一条路径。 */
-	private async deliverResult(agentId: string, target: { chatId: string; contextToken: string; startedAt: number }): Promise<void> {
-		const messages = this.deps.agentManager.getMessages(agentId);
+	private async deliverResult(agentId: string, target: { chatId: string; contextToken: string; startedAt: number; runId?: string }, sinceIndex = 0): Promise<void> {
+		// sinceIndex：顺延重试时只认本轮新产生的消息，否则会把上一次失败留下的错误文本当成结果回信。
+		const messages = this.deps.agentManager.getMessages(agentId).slice(sinceIndex);
 		const raw = pickLatestAssistantText(messages);
 		if (!raw) {
-			this.sendSafe(target.chatId, target.contextToken, this.t("run.noText"));
+			this.sendSafe(target.chatId, target.contextToken, this.t("run.noText"), target.runId);
 			return;
 		}
-		await this.sendSafe(target.chatId, target.contextToken, raw);
+		await this.sendSafe(target.chatId, target.contextToken, raw, target.runId);
 	}
 
 	// ===== 命令 =====
@@ -346,6 +503,7 @@ export class WeChatBridge {
 					return;
 				}
 				await this.deps.runtimeBindings.abortRuntime(binding.sessionId);
+				this.runGeneration += 1;
 				this.activeRun = null;
 				if (binding.agentId) this.lateRuns.delete(binding.agentId);
 				await this.sendSafe(chatId, contextToken, this.t("run.stopped"));
@@ -407,7 +565,8 @@ export class WeChatBridge {
 			return;
 		}
 		await this.deps.runtimeBindings.setRuntimeModel(binding.sessionId, match.provider, match.id);
-		upsertBinding({ ...binding, modelId: match.id });
+		// 记下 provider：只有「带 provider 的显式选择」才压过设置里的模型链。
+		upsertBinding({ ...binding, modelId: match.id, modelProvider: match.provider });
 		await this.sendSafe(chatId, contextToken, this.t("model.switched", { model: `${match.provider}/${match.id}` }));
 	}
 
@@ -453,8 +612,9 @@ export class WeChatBridge {
 			this.sendSafe(chatId, this.currentContextToken(chatId), this.t("project.required"));
 			return undefined;
 		}
-		const workspaceId = existing?.workspaceId || projects[0].id;
-		const projectId = projects.some((project) => project.id === workspaceId) ? workspaceId : projects[0].id;
+		const preferred = existing?.workspaceId || getSettings().defaultWorkspaceId || "";
+		// 工作区优先序：已有绑定 > 设置里的默认工作区 > 项目列表第一项（约等于最近使用）。
+		const projectId = projects.some((project) => project.id === preferred) ? preferred : projects[0].id;
 		const title = existing ? "微信对话" : `微信 ${chatId.slice(-4)}`;
 
 		try {
@@ -486,6 +646,8 @@ export class WeChatBridge {
 				agentId: tab.id,
 			};
 			upsertBinding(binding);
+			// 链条首项作为这个会话的默认模型；失败不阻断建会话（没有模型也能先回错误提示）。
+			await this.applyChainDefault(binding);
 			this.setStatus({ activeBindings: loadBindings().length });
 			this.notifyBindingsChanged();
 			return binding;
@@ -510,8 +672,12 @@ export class WeChatBridge {
 
 	private handleAgentEvent(agentId: string, event: unknown): void {
 		if (!event || typeof event !== "object") return;
-		if ((event as Record<string, unknown>).type !== "agent_end") return;
-		this.endedAgents.set(agentId, Date.now());
+		const typed = event as Record<string, unknown>;
+		if (typed.type !== "agent_end") return;
+		// 供应商/模型失败只体现在 agent_end 的 stopReason/error 字段上（结果文本里没有
+		// 结构化错误），这是判定「要不要顺延模型」的唯一可靠信号。
+		const errorMessage = pickAgentEndError(typed);
+		this.endedAgents.set(agentId, { at: Date.now(), failed: errorMessage !== undefined, errorMessage });
 
 		const waiter = this.runWaiters.get(agentId);
 		if (waiter) {
@@ -533,17 +699,21 @@ export class WeChatBridge {
 		}
 	}
 
-	/** 返回 true 表示等超时了（run 仍在进行），false 表示已收到 agent_end。 */
-	private waitForAgentEnd(agentId: string, timeoutMs: number): Promise<boolean> {
+	/** 等本轮 agent_end；超时只说明 run 还在跑，不代表失败。 */
+	private waitForAgentEnd(agentId: string, timeoutMs: number): Promise<RunWaitOutcome> {
+		const settled = this.endedAgents.get(agentId);
+		if (settled) return Promise.resolve({ kind: "ended", failed: settled.failed, errorMessage: settled.errorMessage });
 		return new Promise((resolve) => {
 			const timer = setTimeout(() => {
 				this.runWaiters.delete(agentId);
 				// 事件与超时同刻到达时，endedAgents 已经记下了，不能误判为超时。
-				resolve(!this.endedAgents.has(agentId));
+				const info = this.endedAgents.get(agentId);
+				resolve(info ? { kind: "ended", failed: info.failed, errorMessage: info.errorMessage } : { kind: "timeout" });
 			}, timeoutMs);
 			this.runWaiters.set(agentId, () => {
 				clearTimeout(timer);
-				resolve(false);
+				const info = this.endedAgents.get(agentId);
+				resolve({ kind: "ended", failed: info?.failed ?? false, errorMessage: info?.errorMessage });
 			});
 		});
 	}
@@ -551,7 +721,7 @@ export class WeChatBridge {
 	// ===== 发送 =====
 
 	/** 出站统一入口：Markdown 降级 → 分片 → 逐条发。失败不抛（回信失败不该打断会话）。 */
-	private async sendSafe(chatId: string, contextToken: string, text: string): Promise<void> {
+	private async sendSafe(chatId: string, contextToken: string, text: string, runId?: string): Promise<void> {
 		const client = this.client;
 		const session = this.buildSession();
 		if (!client || !session) return;
@@ -563,9 +733,10 @@ export class WeChatBridge {
 		}
 		const chunks = splitForWeChat(prepareOutgoingText(text));
 		if (chunks.length === 0) return;
+		const clientId = this.clientId();
 		for (let index = 0; index < chunks.length; index += 1) {
 			try {
-				await client.sendText(session, { toUserId: chatId, contextToken, text: chunks[index] });
+				await client.sendText(session, { toUserId: chatId, contextToken, text: chunks[index], clientId, runId });
 			} catch (error) {
 				this.deps.logger?.("warn", "微信发送失败", error instanceof Error ? error.message : String(error));
 				this.setStatus({ errorMessage: "send-failed" });
@@ -573,6 +744,48 @@ export class WeChatBridge {
 			}
 			if (index < chunks.length - 1) await sleep(MULTI_CHUNK_GAP_MS);
 		}
+	}
+
+	/**
+	 * 发「正在输入」（status 1 开始 / 2 结束）。
+	 *
+	 * 除了产品体验，它还是**下行探针**：正文收不到但「正在输入」能看到，说明通道活着、
+	 * 问题在内容渲染或风控；连 typing 都收不到，就是账号级下行限制。所以这里的失败
+	 * 只记 debug 日志，绝不写 status.errorMessage（别把探针失败说成发送失败）。
+	 */
+	private async signalTyping(chatId: string, contextToken: string, status: 1 | 2): Promise<boolean> {
+		const client = this.client;
+		const session = this.buildSession();
+		if (!client || !session || !contextToken) return false;
+		try {
+			let cached = this.typingTickets.get(chatId);
+			if (!cached || Date.now() - cached.at > TYPING_TICKET_TTL_MS) {
+				const config = await client.getConfig(session, chatId, contextToken);
+				const ticket = config.typing_ticket;
+				if (!ticket) return false;
+				cached = { ticket, at: Date.now() };
+				this.typingTickets.set(chatId, cached);
+			}
+			await client.sendTyping(session, chatId, cached.ticket, status);
+			return true;
+		} catch (error) {
+			this.deps.logger?.("debug", "微信正在输入信号失败（不影响回信）", error instanceof Error ? error.message : String(error));
+			return false;
+		}
+	}
+
+	/**
+	 * 出站 client_id：官方插件每条都带（实例级 ID），缺失是社区 issue 里「静默发送失败」
+	 * 的常见成因。按 Bot 账号派生并缓存 —— 重启后保持同一个值，这才是「同一个客户端」。
+	 */
+	private clientId(): string | undefined {
+		const account = getAccount();
+		if (!account) return undefined;
+		if (this.clientIdCache?.botId !== account.ilinkBotId) {
+			const digest = createHash("sha256").update(account.ilinkBotId).digest("hex").slice(0, 16);
+			this.clientIdCache = { botId: account.ilinkBotId, id: `pideck-${digest}` };
+		}
+		return this.clientIdCache.id;
 	}
 
 	/** 让 Agent 知道自己在微信通道上，避免它去调微信 API 或输出 Markdown 表格。 */
@@ -654,4 +867,31 @@ export class WeChatBridge {
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 从 agent_end 事件里提取失败信息；返回 undefined 表示这一轮正常结束。
+ *
+ * 字段来源与 AgentManager 写入错误气泡的口径一致（顶层 errorMessage/error、
+ * error 消息、最后一条 assistant 的 error 内容块），并排除两种「不算失败」的情况：
+ * 用户主动 abort（stopReason=aborted）与 pi 已判定会自己重试的错误（willRetry）。
+ * 前者若被当成失败，会把用户已经停掉的活换个模型接着跑。
+ */
+function pickAgentEndError(event: Record<string, unknown>): string | undefined {
+	if (event.stopReason === "aborted" || event.willRetry === true) return undefined;
+	const pickText = (value: unknown): string | undefined => {
+		if (typeof value === "string" && value.trim()) return value;
+		if (value && typeof value === "object") {
+			const message = (value as Record<string, unknown>).message;
+			if (typeof message === "string" && message.trim()) return message;
+		}
+		return undefined;
+	};
+	const messages = Array.isArray(event.messages) ? (event.messages as Array<Record<string, unknown>>) : [];
+	const errorMessages = messages.filter((message) => message?.stopReason === "error");
+	const lastAssistant = [...messages].reverse().find((message) => message?.role === "assistant");
+	const contentError = Array.isArray(lastAssistant?.content) ? (lastAssistant?.content as Array<Record<string, unknown>>).find((block) => block?.type === "error") : undefined;
+	const candidate = pickText(event.errorMessage) ?? pickText(errorMessages[errorMessages.length - 1]?.errorMessage) ?? pickText(event.error) ?? pickText(contentError?.text) ?? pickText(contentError?.message);
+	if (candidate) return candidate;
+	return event.stopReason === "error" ? "error" : undefined;
 }

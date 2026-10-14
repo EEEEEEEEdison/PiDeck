@@ -167,11 +167,14 @@ test("getupdates sends the cursor back and returns the server cursor", async () 
 test("sendText assembles the bot message envelope and always carries base_info", async () => {
 	const { calls, fetchImpl } = recorder([jsonResponse({ ret: 0, message_id: 7516024233693981064 })]);
 	const client = newClient(fetchImpl);
-	const result = await client.sendText(SESSION, { toUserId: "user@im.wechat", contextToken: "ctx-token", text: "你好" });
+	const result = await client.sendText(SESSION, { toUserId: "user@im.wechat", contextToken: "ctx-token", text: "你好", clientId: "pideck-abc", runId: "run-1" });
 	assert.equal(result.message_id, 7516024233693981064);
 	const body = calls[0].body;
 	assert.equal(body.msg.from_user_id, "");
 	assert.equal(body.msg.to_user_id, "user@im.wechat");
+	// client_id/run_id：官方插件每条出站消息都带，实测缺失会被服务端静默丢弃。
+	assert.equal(body.msg.client_id, "pideck-abc");
+	assert.equal(body.msg.run_id, "run-1");
 	assert.equal(body.msg.message_type, protocol.MESSAGE_TYPE_BOT);
 	assert.equal(body.msg.message_state, protocol.MESSAGE_STATE_DELIVERED);
 	assert.equal(body.msg.context_token, "ctx-token");
@@ -179,6 +182,13 @@ test("sendText assembles the bot message envelope and always carries base_info",
 	assert.equal(body.msg.item_list[0].text_item.text, "你好");
 	assert.equal(body.base_info.channel_version, "1.0.2");
 	assert.equal(body.base_info.bot_agent, "PiDeck/0.9.0");
+});
+
+test("sendText omits client_id/run_id when the caller has none", async () => {
+	const { calls, fetchImpl } = recorder([jsonResponse({ ret: 0, message_id: 1 })]);
+	await newClient(fetchImpl).sendText(SESSION, { toUserId: "u", contextToken: "ctx", text: "hi" });
+	assert.equal("client_id" in calls[0].body.msg, false, "没传就不该凭空造一个假 ID");
+	assert.equal("run_id" in calls[0].body.msg, false);
 });
 
 test("a session-expired code is not reported as a plain business failure anywhere", async () => {

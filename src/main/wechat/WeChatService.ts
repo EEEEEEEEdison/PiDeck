@@ -13,7 +13,7 @@
 
 import type { BrowserWindow } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import type { WeChatBridgeStatus, WeChatChatBinding, WeChatLoginState, WeChatSettings } from "../../shared/types";
+import type { WeChatBridgeStatus, WeChatChatBinding, WeChatLoginState, WeChatModelChainEntry, WeChatSettings } from "../../shared/types";
 import type { SessionRuntimeBindingGateway } from "../sessions/sessionRuntimeBinding";
 import type { AgentManager } from "../pi/AgentManager";
 import { IlinkClient, type IlinkLogFn } from "./IlinkClient";
@@ -92,7 +92,7 @@ export class WeChatService {
 		return getSettings();
 	}
 
-	updateSettings(patch: { defaultWorkspaceId?: string; defaultModelId?: string }): WeChatSettings {
+	updateSettings(patch: { defaultWorkspaceId?: string; defaultModelId?: string; modelChain?: WeChatModelChainEntry[] }): WeChatSettings {
 		const settings = updateSettings(patch);
 		this.bridge.refresh();
 		return settings;

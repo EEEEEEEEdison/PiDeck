@@ -19,12 +19,31 @@ export type WeChatAccountInfo = {
 	needsRelogin?: boolean;
 };
 
+/**
+ * 模型优先级链的一条。微信回复从链首开始尝试，运行失败自动顺延到下一条。
+ * provider + modelId 是唯一身份；modelName 只用于界面展示（可能拿不到）。
+ */
+export type WeChatModelChainEntry = {
+	provider: string;
+	modelId: string;
+	modelName?: string;
+};
+
 export type WeChatSettings = {
 	/** 是否启用桥接。关闭后不建连接、不收信，账号与绑定保留。 */
 	enabled: boolean;
 	account: WeChatAccountInfo | null;
-	/** 会话在哪个工作区打开。未设置时桥接拒绝收信并提示用户先配置。 */
+	/**
+	 * 新会话在哪个工作区打开。留空 = 自动（用 PiDeck 项目列表的第一项，约等于最近使用）。
+	 * 已存在的绑定保持自己的工作区，改这里不会迁移旧会话。
+	 */
 	defaultWorkspaceId?: string;
+	/**
+	 * 微信回复的模型优先级链。空数组 = 不干预会话模型。
+	 * 非空时链首是新会话的默认模型，运行失败（供应商报错）时自动顺延到下一条。
+	 */
+	modelChain?: WeChatModelChainEntry[];
+	/** @deprecated 历史字段，从未被桥接消费；模型选择改用 modelChain。 */
 	defaultModelId?: string;
 };
 
@@ -80,6 +99,9 @@ export type WeChatChatBinding = {
 	agentId?: string;
 	workspaceId: string;
 	modelId?: string;
+	/** 微信里 /model 显式选中的 provider。有它才说明 modelId 是一次明确选择，
+	 *  否则只表示「会话最后用过的模型」，不压过设置里的模型链。 */
+	modelProvider?: string;
 	createdAt: number;
 };
 

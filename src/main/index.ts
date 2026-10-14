@@ -1407,6 +1407,12 @@ const imSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 		const result = await sessionRuntimeCoordinator.setRuntimeModel(target, provider, modelId);
 		if (!result.ok) throw sessionCommandIpcError(result.error);
 	},
+	async setRuntimeThinking(sessionId, level) {
+		const target = sessionRuntimeCoordinator.getTarget(sessionId);
+		if (!target) throw sessionCommandIpcError({ code: "SESSION_RUNTIME_UNAVAILABLE" });
+		const result = await sessionRuntimeCoordinator.setRuntimeThinking(target, level);
+		if (!result.ok) throw sessionCommandIpcError(result.error);
+	},
 	// ask/confirm 等扩展 UI 请求的答案回写：agentId 是 runtime id，直接走 AgentManager（与桌面端弹窗同链路）。
 	sendUIResponse(agentId, requestId, response) {
 		agentManager.sendUIResponse(agentId, requestId, response);

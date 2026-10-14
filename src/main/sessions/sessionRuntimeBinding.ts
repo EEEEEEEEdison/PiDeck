@@ -18,6 +18,8 @@ export interface SessionRuntimeBindingGateway {
 	listRuntimeModels(sessionId: string): Promise<AvailableModel[]>;
 	getRuntimeState(sessionId: string): Promise<AgentRuntimeState | undefined>;
 	setRuntimeModel(sessionId: string, provider: string, modelId: string): Promise<void>;
+	/** 切会话思考档位（微信等 IM 通道的 run 一律关思考）。 */
+	setRuntimeThinking(sessionId: string, level: string): Promise<void>;
 	/** 把 ask/confirm 等扩展 UI 的答案写回 pi（与桌面端弹窗回答同一条链路）。 */
 	sendUIResponse(agentId: string, requestId: string, response: { value?: string | boolean; confirmed?: boolean; cancelled?: boolean }): void;
 }

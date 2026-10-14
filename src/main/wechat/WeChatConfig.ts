@@ -13,8 +13,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { app, safeStorage } from "electron";
-import type { WeChatAccountInfo, WeChatChatBinding, WeChatSettings } from "../../shared/types";
+import type { WeChatAccountInfo, WeChatChatBinding, WeChatModelChainEntry, WeChatSettings } from "../../shared/types";
 import { ILINK_DEFAULT_BASE_URL } from "./ilinkProtocol";
+
+/** 模型链上限。链路是「兜底」不是模型清单：太长只会让失败重试拖时间、多花钱。 */
+export const MODEL_CHAIN_MAX = 8;
 
 // ===== 路径 =====
 // 不能在模块求值时解析：主进程此时可能尚未 setPath("userData")，必须在读写边界解析。
@@ -57,6 +60,7 @@ type SettingsFile = {
 	account: PersistedAccount | null;
 	defaultWorkspaceId?: string;
 	defaultModelId?: string;
+	modelChain?: WeChatModelChainEntry[];
 };
 
 type BindingsFile = {
@@ -67,6 +71,27 @@ type BindingsFile = {
 export type WeChatBindingPersist = WeChatChatBinding;
 
 const EMPTY_SETTINGS: SettingsFile = { version: 1, enabled: false, account: null };
+
+/**
+ * 归一化模型链：丢掉空 provider/modelId、去重、截断到模型链上限。
+ * 界面与 IPC 都会校验，但文件可能被手改——落盘/读取边界必须再洗一次。
+ */
+export function normalizeModelChain(value: unknown): WeChatModelChainEntry[] {
+	if (!Array.isArray(value)) return [];
+	const entries: WeChatModelChainEntry[] = [];
+	for (const item of value) {
+		if (!item || typeof item !== "object") continue;
+		const record = item as Record<string, unknown>;
+		const provider = typeof record.provider === "string" ? record.provider.trim() : "";
+		const modelId = typeof record.modelId === "string" ? record.modelId.trim() : "";
+		if (!provider || !modelId) continue;
+		if (entries.some((entry) => entry.provider === provider && entry.modelId === modelId)) continue;
+		const modelName = typeof record.modelName === "string" && record.modelName.trim() ? record.modelName.trim() : undefined;
+		entries.push(modelName ? { provider, modelId, modelName } : { provider, modelId });
+		if (entries.length >= MODEL_CHAIN_MAX) break;
+	}
+	return entries;
+}
 
 // ===== 读写 =====
 
@@ -82,6 +107,7 @@ function readSettings(): SettingsFile {
 			account: parsed.account ?? null,
 			defaultWorkspaceId: parsed.defaultWorkspaceId,
 			defaultModelId: parsed.defaultModelId,
+			modelChain: normalizeModelChain(parsed.modelChain),
 		};
 	} catch {
 		// 配置损坏时按「未登录」处理而不是抛错：桥接起不来不该让应用起不来。
@@ -160,6 +186,7 @@ export function getSettings(): WeChatSettings {
 		account: toPublicAccount(settings.account),
 		defaultWorkspaceId: settings.defaultWorkspaceId,
 		defaultModelId: settings.defaultModelId,
+		modelChain: settings.modelChain ?? [],
 	};
 }
 
@@ -181,10 +208,11 @@ export function setEnabled(enabled: boolean): void {
 	writeSettings(settings);
 }
 
-export function updateSettings(patch: { defaultWorkspaceId?: string; defaultModelId?: string }): WeChatSettings {
+export function updateSettings(patch: { defaultWorkspaceId?: string; defaultModelId?: string; modelChain?: WeChatModelChainEntry[] }): WeChatSettings {
 	const settings = readSettings();
 	if (patch.defaultWorkspaceId !== undefined) settings.defaultWorkspaceId = patch.defaultWorkspaceId || undefined;
 	if (patch.defaultModelId !== undefined) settings.defaultModelId = patch.defaultModelId || undefined;
+	if (patch.modelChain !== undefined) settings.modelChain = normalizeModelChain(patch.modelChain);
 	writeSettings(settings);
 	return getSettings();
 }
