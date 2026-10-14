@@ -12,7 +12,7 @@ import type { SidebarController } from "../../hooks/useSidebarController";
 import type { SidebarActions } from "./SidebarContent";
 import { Button } from "../ui-shadcn/button";
 import { PendingAskBadge } from "./PendingAskBadge";
-import { SessionBackendMark } from "../session/SessionSourceBadge";
+import { AcpBackendMark, SessionBackendMark } from "../session/SessionSourceBadge";
 import { SessionHoverCard } from "./SessionHoverCard";
 import { TitleScrollText } from "./TitleScrollText";
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
@@ -122,7 +122,7 @@ export function ActiveSessionsTree(props: { controller: SidebarController; actio
 					const sessionId = record?.id;
 					const selected = sessionId === props.currentSessionId;
 					const summary = record ? sessionRecordToSummary(record) : undefined;
-					const displayTitle = summary?.name || agent.title;
+					const displayTitle = summary?.name || agent.title || t("common.untitled");
 					const project = controller.catalog.projects.find((p) => p.id === projectId);
 					const pendingAsk = hasPendingAskForSession(sessionId, sessionRuntimeUiById);
 					// 单击默认 preview；双击显式常驻（与 SessionTree 同一入口语义）。
@@ -159,7 +159,7 @@ export function ActiveSessionsTree(props: { controller: SidebarController; actio
 										<div className="conversation-title flex min-w-0 items-center gap-1.5">
 											{/* 选中背景仍保留，聚焦行也允许 hover 查看完整标题 */}
 											<TitleScrollText text={displayTitle} className="font-medium" />
-											<SessionBackendMark backend={agent.backend} />
+											{agent.backend === "acp" ? <AcpBackendMark acpToolId={record?.acpToolId} /> : <SessionBackendMark backend={agent.backend} />}
 											{/* 待确认标记：该会话正在等用户回答 ask，与项目行徽章共用同一组件 */}
 											{pendingAsk && <PendingAskBadge count={1} />}
 											{/* 相对时间常显：hover 时被右侧「⋯」浮层盖住（与历史会话行同一策略） */}

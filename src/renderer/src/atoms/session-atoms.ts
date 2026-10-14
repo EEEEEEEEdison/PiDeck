@@ -1298,7 +1298,9 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 				createdAt: typeof payload.createdAt === "number" ? payload.createdAt : nextRuntime.createdAt,
 				compactionCount: typeof payload.compactionCount === "number" ? payload.compactionCount : nextRuntime.compactionCount,
 				noSession: payload.noSession === true || nextRuntime.noSession,
-				backend: payload.backend === "dsh" ? "dsh" : (nextRuntime.backend ?? "pi"),
+				// backend 只在运行时事件里透传（dsh=DSH host 会话；acp=ACP CLI 会话，tab 侧栏徽章与配对依赖它），
+				// 其余一律回落本地状态，防止旧事件把已知后端冲掉。
+				backend: payload.backend === "dsh" || payload.backend === "acp" ? payload.backend : (nextRuntime.backend ?? "pi"),
 			};
 		}
 		// ACP 首回合：sessions:prompt IPC 要等整个回合结束才返回，而 sendState 的 activating→sending

@@ -15,7 +15,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { cn } from "../../lib/utils";
-import { SessionBackendBadge } from "./SessionSourceBadge";
+import { AcpBackendMark, SessionBackendBadge } from "./SessionSourceBadge";
 import { TitleScrollText } from "../sidebar/TitleScrollText";
 import { SessionHeader } from "./SessionHeader";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
@@ -964,7 +964,13 @@ function SessionTab(props: {
 						<SessionActivityIndicator status={status} sessionId={sessionId} busy={props.isRestarting || props.isStopping || props.isReloading} />
 						{pinned && <Pin className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />}
 						<TitleScrollText text={title} disabled className="truncate font-bold" />
-						{(record?.backend === "dsh" || record?.backend === "imagegen" || record?.backend === "acp") && <SessionBackendBadge backend={record.backend} className="h-4 shrink-0" />}
+						{record?.backend === "acp" ? (
+							// ACP 会话用工具品牌图标（Claude/Codex/CodeBuddy…），与消息区作者标同源；
+							// 通用「Agent CLI」文字徽标认不出具体 CLI（用户反馈 tab logo 不对）。
+							<AcpBackendMark acpToolId={record.acpToolId} className="size-3.5 shrink-0" />
+						) : (
+							(record?.backend === "dsh" || record?.backend === "imagegen") && <SessionBackendBadge backend={record.backend} className="h-4 shrink-0" />
+						)}
 						{runtime?.state?.planModeActive && <span className="shrink-0 text-xs text-muted-foreground">{t("app.composerModePlan")}</span>}
 						{runtime?.state?.goal && runtime.state.goal.phase !== "complete" && <span className="shrink-0 text-xs text-muted-foreground">{t("app.composerModeGoal")}</span>}
 					</div>
@@ -1039,7 +1045,12 @@ function SessionTab(props: {
 								)}
 								{pinned && <Pin className="size-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />}
 								{/* DSH/生图是文字标记，保留自然宽度；固定 size-4 会让文字溢出到右侧操作按钮区域。 */}
-								{(record?.backend === "dsh" || record?.backend === "imagegen" || record?.backend === "acp") && <SessionBackendBadge backend={record?.backend} className="h-4 shrink-0" />}
+								{record?.backend === "acp" ? (
+									// 同上：ACP 品牌图标；DSH/生图保留文字标记（自然宽度，固定 size-4 会溢出到右侧按钮区）。
+									<AcpBackendMark acpToolId={record?.acpToolId} className="size-3.5 shrink-0" />
+								) : (
+									(record?.backend === "dsh" || record?.backend === "imagegen") && <SessionBackendBadge backend={record?.backend} className="h-4 shrink-0" />
+								)}
 								{/* G12：DSH plan 模式 / danger 权限预设全局可见（数据来自 runtime state，tab 级常显） */}
 								{runtime?.state?.planModeActive && (
 									<span className="shrink-0 rounded bg-primary/15 px-1 text-[10px] font-medium leading-4 text-primary" title={t("app.composerModePlan")}>

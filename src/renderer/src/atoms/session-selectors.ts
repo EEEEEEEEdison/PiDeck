@@ -30,6 +30,7 @@ export function sessionRecordToSummary(session: SessionRecord): SessionSummary |
 		source: session.source,
 		backend: session.backend,
 		dshSessionId: session.dshSessionId,
+		acpToolId: session.acpToolId,
 		wsl: session.environment === "wsl" || session.wsl || undefined,
 		codexSessionId: session.codexSessionId,
 		codexThreadSource: session.codexThreadSource,

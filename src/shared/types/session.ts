@@ -187,6 +187,8 @@ export type SessionSummary = {
 	hasImageGen?: boolean;
 	/** DSH 会话身份（DSH host 的 sessionId）；backend=dsh 的会话用来重启后 attach 旧会话。 */
 	dshSessionId?: string;
+	/** ACP 工具 id；backend=acp 的会话用来解析侧栏/tab 品牌徽标（与 TurnAuthorHeader 同源）。 */
+	acpToolId?: string;
 	codexSessionId?: string;
 	codexThreadSource?: "user" | "subagent";
 	codexParentThreadId?: string;

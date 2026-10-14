@@ -1,9 +1,11 @@
 import { useId } from "react";
+import { useAtomValue } from "jotai";
 import type { AgentBackend, SessionSource } from "../../../../shared/types";
 import type { AcpToolConfig } from "../../../../shared/types/acp";
 import { ImageIcon, Terminal as TerminalIcon } from "lucide-react";
 import { t } from "../../i18n";
 import { cn } from "../../lib/utils";
+import { acpToolsAtom } from "../../atoms/acp-atoms";
 import { Badge } from "../ui-shadcn/badge";
 import { PiTuiLogoMark, useBrandGlyph } from "../app/PiTuiLogo";
 import { resolveAcpToolBrand, type AcpToolBrand } from "./acpToolBrand";
@@ -291,6 +293,17 @@ export function SessionBackendMark(props: { backend?: AgentBackend; className?: 
 		return <SessionBackendBadge backend={props.backend} className={props.className} />;
 	}
 	return null;
+}
+
+/**
+ * ACP 后端品牌标记：按 acpToolId 解析工具品牌（与消息区 TurnAuthorHeader 同源同库），
+ * 解决 tab/侧栏只显示通用「Agent CLI」文本徽标、认不出具体 CLI 的问题；
+ * acpToolId 缺失（旧 catalog / 工具已删）时回退通用终端图标，不假装成某个品牌。
+ */
+export function AcpBackendMark(props: { acpToolId?: string | null; className?: string }) {
+	const tools = useAtomValue(acpToolsAtom);
+	const tool = props.acpToolId ? tools.find((item) => item.id === props.acpToolId) : undefined;
+	return <AcpToolLogo tool={tool} className={props.className} />;
 }
 
 /**
