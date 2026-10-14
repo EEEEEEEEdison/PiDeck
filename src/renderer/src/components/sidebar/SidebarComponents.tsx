@@ -51,7 +51,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import type { SessionSummary, Project, AgentTab, ArchivedDshSession, ArchivedPiSession, SessionSortModeId } from "../../../../shared/types";
 import { SESSION_SORT_MODES, resolveSessionSortMode } from "../../sessionSortModes";
 import { worktreeSlugify } from "../../../../shared/worktreeSlug";
-import { SessionSourceBadge, SessionBackendMark, DshSourceBadge, ImageGenSourceBadge } from "../session/SessionSourceBadge";
+import { SessionSourceBadge, SessionBackendMark, SessionChannelMark, DshSourceBadge, ImageGenSourceBadge } from "../session/SessionSourceBadge";
 import { Checkbox } from "../ui-shadcn/checkbox";
 import { Input } from "../ui-shadcn/input";
 import { Label } from "../../components/ui-shadcn/label";
@@ -417,6 +417,8 @@ export function SessionManagerModal(props: {
 														) : (
 															session.source && session.source !== "pi" && <SessionSourceBadge source={session.source} />
 														)}
+														{/* 外部连接（微信/飞书）入口标志：这类会话 source 恒为 pi，用渠道徽标区分消息从哪来 */}
+														{session.channel && <SessionChannelMark channel={session.channel} />}
 													</div>
 												</TableCell>
 												<TableCell className="w-40 text-right">
@@ -946,6 +948,8 @@ export function DraftSessionContextMenu(props: {
 	onClose: () => void;
 	/** 草稿会话也能直接启动 Agent（不必先打开会话发消息）——全状态可操作的补齐点。 */
 	runControl?: SidebarRunControl;
+	/** 关闭 Agent：草稿会话仍持有绑定（含 error/closed 终态）时由宿主注入，理由同 SessionContextMenu。 */
+	onCloseAgent?: () => void;
 	onDelete: () => void;
 }) {
 	return (
@@ -953,6 +957,15 @@ export function DraftSessionContextMenu(props: {
 			{props.runControl && (
 				<>
 					<SidebarRunControlItems runControl={props.runControl} />
+					<DropdownMenuSeparator />
+				</>
+			)}
+			{props.onCloseAgent && (
+				<>
+					<DropdownMenuItem variant="destructive" title={t("menu.closeAgentHint")} onSelect={props.onCloseAgent}>
+						<XCircle className="size-3.5" aria-hidden="true" />
+						{t("menu.closeAgent")}
+					</DropdownMenuItem>
 					<DropdownMenuSeparator />
 				</>
 			)}
@@ -990,6 +1003,12 @@ export function SessionContextMenu(props: {
 	/** 切换式 RPC 日志开关（SidebarContent 当前实现），与 onOpenRpcLogging 兼容共存 */
 	onToggleRpcLogging?: () => void;
 	onOpenLogs?: () => void;
+	/**
+	 * 关闭 Agent：会话行仍持有绑定（含 error/closed 终态）时由宿主注入。
+	 * 终态绑定不满足 RPC 日志的 live 判据，但报错态恰恰是最需要关闭入口的状态：
+	 * 拿 getBoundSidebarRuntimeAgent 的结果选菜单时它会退回会话菜单，入口就断了。
+	 */
+	onCloseAgent?: () => void;
 	onArchiveSession: () => void;
 	onDeleteSession: () => void;
 }) {
@@ -1065,6 +1084,13 @@ export function SessionContextMenu(props: {
 				</>
 			)}
 			<DropdownMenuSeparator />
+			{/* 关闭 Agent：与 AgentContextMenu 同位（底部危险组），终态会话也不会丢这个出口 */}
+			{props.onCloseAgent && (
+				<DropdownMenuItem variant="destructive" disabled={busy} title={t("menu.closeAgentHint")} onSelect={props.onCloseAgent}>
+					<XCircle className="size-3.5" aria-hidden="true" />
+					{t("menu.closeAgent")}
+				</DropdownMenuItem>
+			)}
 			<DropdownMenuItem disabled={busy} onSelect={props.onArchiveSession}>
 				<Archive className="size-3.5" aria-hidden="true" />
 				{t("menu.archiveSession")}

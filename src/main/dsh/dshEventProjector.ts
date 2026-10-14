@@ -439,6 +439,9 @@ export function projectDshEvent(
 			// 回复都会被拆成独立 agent-run（每个头像时间戳+独立「执行过程」chip）。
 			// 语义：带 tool-call = 中间回复（toolUse）；无 tool-call 的终态 = 最终回复（stop）。
 			const assistantStopReason = hasToolCalls ? "toolUse" : "stop";
+			// 本条 assistant 消息用的模型：DSH 由 request/context 上报路由模型（state.model，
+			// last-wins）；未上报时留空，渲染层不显示。
+			const assistantModel = base.model ? { provider: base.model.provider, modelId: base.model.model } : undefined;
 			if (hasToolCalls && !finalText.trim() && !finalThinking.trim() && !assistantImagesPresent && !base.pendingAssistantId) {
 				next.pendingAssistantId = undefined;
 				next.pendingAssistantText = "";
@@ -463,6 +466,7 @@ export function projectDshEvent(
 						timestamp: eventTime(event.time),
 						stopReason: assistantStopReason,
 						...(assistantImages.length > 0 ? { images: assistantImages } : previous.images ? { images: previous.images } : {}),
+						...(assistantModel ? { model: assistantModel } : previous.model ? { model: previous.model } : {}),
 						// 思考耗时：终态时间作为结束点（startedAt 已在骨架创建时记录）
 						...(finalThinking.trim() || previous.thinkingStartedAt !== undefined ? { thinkingEndedAt: eventTime(event.time) } : {}),
 						...(previous.thinkingStartedAt !== undefined ? { thinkingStartedAt: previous.thinkingStartedAt } : {}),
@@ -485,6 +489,7 @@ export function projectDshEvent(
 						timestamp: eventTime(event.time),
 						stopReason: assistantStopReason,
 						...(assistantImages.length > 0 ? { images: assistantImages } : {}),
+						...(assistantModel ? { model: assistantModel } : {}),
 						...(assistantImageMeta || usageForMessage ? { meta: { ...(assistantImageMeta ?? {}), ...(usageForMessage ? { usage: usageForMessage } : {}) } } : {}),
 					});
 				}
@@ -499,6 +504,7 @@ export function projectDshEvent(
 					timestamp: eventTime(event.time),
 					stopReason: assistantStopReason,
 					...(assistantImages.length > 0 ? { images: assistantImages } : {}),
+					...(assistantModel ? { model: assistantModel } : {}),
 					...(assistantImageMeta || usageForMessage ? { meta: { ...(assistantImageMeta ?? {}), ...(usageForMessage ? { usage: usageForMessage } : {}) } } : {}),
 				});
 				next.messagesChanged = true;

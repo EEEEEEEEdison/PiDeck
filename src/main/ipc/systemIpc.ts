@@ -7,7 +7,7 @@ import { app, dialog, ipcMain, shell } from "electron";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { ipcChannels } from "../../shared/ipc";
-import { resolveUpdateChannel } from "../update/channelIdentity";
+import { isDevChannelBuild, resolveUpdateChannel } from "../update/channelIdentity";
 import { UPDATE_REPO, UPDATE_REPO_OWNER } from "../update/releaseRepo";
 import { probeAllMirrors, type MirrorHealthResult } from "../update/mirrorHealth";
 import { ChangelogService, type ChangelogLanguage } from "../update/ChangelogService";
@@ -41,6 +41,7 @@ import type { SessionRuntimeCoordinator } from "../sessions/SessionRuntimeCoordi
 import { resolveConfigProxyTarget } from "../sessions/sessionProxyPolicy";
 import { setConfiguredGitPath } from "../git/gitExecutable";
 import { applyTrayLogoStyle, applyWindowLogoStyle } from "../appWindowLogo";
+import { syncTaskbarShortcutIcon } from "../appTaskbarIdentity";
 import { detectDshRunnerNode } from "../dsh/dshRunnerNode";
 import { DSH_RUNNER_NODE_ENV } from "../dsh/dshRunnerNodeSidecar";
 import { installDshRunnerNodeSidecar } from "../dsh/dshRunnerNodeInstall";
@@ -48,7 +49,7 @@ import { createNetDownloader, fetchDshRunnerNodeIndex } from "../dsh/runtime/dsh
 import { refreshShortcutBindings } from "../appShortcuts";
 import type { ConfigProxyMode } from "../../shared/types/fetchedModel";
 import type { SkillManager } from "../skills/SkillManager";
-import { fetchModelList, getCachedModelList, invalidateModelListCache, modelsFromPiConfig, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
+import { fetchModelList, invalidateModelListCache, modelsFromPiConfig, refreshModelCatalogStore, refreshModelList, resolveModelListReport } from "../pi/modelListCache";
 import { TokendanceCatalogStore } from "../config/tokendanceCatalog";
 import type { TokendanceInstallResult } from "../config/tokendanceInstaller";
 import type { TokendanceAuthMode, TokendanceAuthStore } from "../config/tokendanceAuth";
@@ -700,7 +701,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		}
 	});
 
-	// ── 模型规格（官方目录 + 当前 Pi 完整目录；第三方 provider 按模型本体匹配）──
+	// ── 模型规格（官方 pi-ai 目录；第三方 provider 按模型本体匹配）──
 
 	ipcMain.handle(ipcChannels.projectsGetModelSpec, async (_event, providerName: unknown, modelId: unknown, modelName: unknown) => {
 		// 边界校验：渲染层输入不可信，拒绝非字符串/超长输入。
@@ -708,11 +709,10 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			return null;
 		}
 		try {
-			// 配置阶段模板优先读运行中 pi 的模型列表（pi --list-models 已含内置目录 +
-			// auth.json/models.json 覆盖后的解析容量），bundled pi-ai catalog 兜底。
-			// 只读缓存不触发新 fork：启动预取（index.ts refreshModelList）已填充，
-			// 保存 models.json/auth.json 后也由 invalidateModelListCache 置空并重取。
-			const runtimeModels = getCachedModelList() ?? undefined;
+			// 模板只读官方 pi-ai 目录（端点 /models 实报字段由渲染层优先合并）。
+			// 不读运行中 pi 的模型列表：那是它对 models.json 的解析后视图，会把
+			// `?? 128000 / ?? 16384 / ?? false / ?? ["text"]` 兜底值回显成事实
+			// （见 modelCapabilityResolver 顶部注释）。
 			return resolveModelSpecFromCatalogs(
 				{
 					providerName,
@@ -720,7 +720,6 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 					...(typeof modelName === "string" && modelName.trim() ? { modelName } : {}),
 				},
 				getPiAiCatalogIndex(),
-				runtimeModels,
 			);
 		} catch (error) {
 			void appLogger.warn("models", "Model spec lookup failed", {
@@ -1191,6 +1190,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.appGetChannel, () => ({
 		channel: resolveUpdateChannel(),
 		currentVersion: app.getVersion(),
+		// 开发中功能（ACP）入口可见性依据：未打包 dev 或 dev 通道包为 true，stable 恒 false。
+		devBuild: isDevChannelBuild(),
 	}));
 	ipcMain.handle(ipcChannels.appDownloadUpdate, async () => {
 		await updateService?.downloadNow();
@@ -1684,11 +1685,17 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if ("autoDownloadUpdates" in patch) {
 			updateService?.applyAutoDownloadPreference();
 		}
-		// Logo 风格：立即切换窗口/任务栏/Dock/托盘图标（安装包与 exe 的静态图标在构建期烘进二进制，
-		// 运行时改不了，见 appWindowLogo.ts）。
-		if ("logoStyle" in patch && prevSettings.logoStyle !== settings.logoStyle) {
-			applyWindowLogoStyle(settings.logoStyle, getMainWindow);
-			if (getTray) applyTrayLogoStyle(settings.logoStyle, getTray);
+		// Logo 风格/自定义 logo 图：立即切换窗口/任务栏/Dock/托盘图标（安装包与 exe 的静态图标在构建期烘进二进制，
+		// 运行时改不了，见 appWindowLogo.ts）。两项要一起判：切图不动风格、或风格已是 custom 只换图，都得刷新。
+		const logoChanged = ("logoStyle" in patch && prevSettings.logoStyle !== settings.logoStyle) || ("logoCustomImage" in patch && prevSettings.logoCustomImage !== settings.logoCustomImage);
+		if (logoChanged) {
+			applyWindowLogoStyle(settings.logoStyle, getMainWindow, settings.logoCustomImage);
+			if (getTray) applyTrayLogoStyle(settings.logoStyle, getTray, settings.logoCustomImage);
+		}
+		// 任务栏按钮的图标取开始菜单快捷方式的图标（窗口图标只是无身份注册时的兜底）：换 logo 时同步重写。
+		// 任务栏按钮上的**文字**不在这里：它取快捷方式/exe 名，与 appDisplayName 无关。
+		if (logoChanged) {
+			syncTaskbarShortcutIcon({ style: settings.logoStyle, customLogoDataUrl: settings.logoCustomImage });
 		}
 		// 更新源切换（预设镜像 / 自定义镜像前缀）：立即重建 feed URL，无需重启生效。
 		if ("updateSource" in patch || "customUpdateSourceUrl" in patch) {

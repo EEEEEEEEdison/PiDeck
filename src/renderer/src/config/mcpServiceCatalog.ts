@@ -6,10 +6,13 @@ import type { McpServerDefinition } from "../../../shared/types/mcp";
  */
 export type McpCatalogAuthKind = "none" | "oauth" | "header-key" | "env-key" | "url-key" | "multi-key";
 
-export type McpCatalogCategory = "dev" | "work" | "maps" | "search" | "design";
+export type McpCatalogCategory = "dev" | "work" | "data" | "maps" | "search" | "design";
 
-/** 单个凭据字段的写入位置：HTTP 头 / stdio 环境变量 / URL query 参数 / 命令行参数。 */
-export type McpCatalogCredential = { kind: "header"; header: string; scheme: "Bearer" } | { kind: "env"; envKey: string } | { kind: "url-query"; param: string } | { kind: "args"; flag: string };
+/**
+ * 单个凭据字段的写入位置：HTTP 头 / stdio 环境变量 / URL query 参数 / 命令行参数。
+ * header 的 `scheme` 缺省表示按原值写入——腾讯文档、Exa 等官方要求裸 token（写 `Bearer ` 会被判 400006 invalid_token）。
+ */
+export type McpCatalogCredential = { kind: "header"; header: string; scheme?: "Bearer" } | { kind: "env"; envKey: string } | { kind: "url-query"; param: string } | { kind: "args"; flag: string };
 
 /** 一个凭据输入框的声明：标签 + 写入位置 + 是否可留空。 */
 export type McpCatalogCredentialField = {
@@ -21,6 +24,8 @@ export type McpCatalogCredentialField = {
 
 /** 文案 key 窄联合：t() 拿到字面量类型，双语漏加直接 typecheck 红灯。 */
 export type McpCatalogTextKey =
+	| "config.mcp.catalog.pideck"
+	| "config.mcp.catalog.pideckHint"
 	| "config.mcp.catalog.context7"
 	| "config.mcp.catalog.playwright"
 	| "config.mcp.catalog.chromeDevtools"
@@ -29,6 +34,9 @@ export type McpCatalogTextKey =
 	| "config.mcp.catalog.supabase"
 	| "config.mcp.catalog.linear"
 	| "config.mcp.catalog.notion"
+	| "config.mcp.catalog.baizhi"
+	| "config.mcp.catalog.baizhiHint"
+	| "config.mcp.catalog.baizhiKey"
 	| "config.mcp.catalog.braveSearch"
 	| "config.mcp.catalog.firecrawl"
 	| "config.mcp.catalog.figma"
@@ -70,7 +78,23 @@ export type McpCatalogTextKey =
 	| "config.mcp.catalog.modelscopeToken"
 	| "config.mcp.catalog.alipayAppId"
 	| "config.mcp.catalog.alipayAppKey"
-	| "config.mcp.catalog.alipayPubKey";
+	| "config.mcp.catalog.alipayPubKey"
+	| "config.mcp.catalog.tavily"
+	| "config.mcp.catalog.tavilyHint"
+	| "config.mcp.catalog.tavilyKey"
+	| "config.mcp.catalog.exa"
+	| "config.mcp.catalog.exaHint"
+	| "config.mcp.catalog.exaKey"
+	| "config.mcp.catalog.tencentDocs"
+	| "config.mcp.catalog.tencentDocsHint"
+	| "config.mcp.catalog.tencentDocsToken"
+	| "config.mcp.catalog.baiduNetdisk"
+	| "config.mcp.catalog.baiduNetdiskHint"
+	| "config.mcp.catalog.baiduNetdiskToken"
+	| "config.mcp.catalog.qcc"
+	| "config.mcp.catalog.qccHint"
+	| "config.mcp.catalog.qccKey"
+	| "config.mcp.catalog.credentialHeaderRaw";
 
 export type McpServiceCatalogEntry = {
 	id: string;
@@ -89,6 +113,18 @@ export type McpServiceCatalogEntry = {
 };
 
 export const MCP_SERVICE_CATALOG: readonly McpServiceCatalogEntry[] = [
+	{
+		id: "pideck",
+		defaultName: "pideck",
+		titleKey: "config.mcp.catalog.pideck",
+		hintKey: "config.mcp.catalog.pideckHint",
+		category: "dev",
+		endpointDisplay: "127.0.0.1",
+		docsUrl: "https://github.com/ayuayue/PiDeck/blob/main/docs/pideck-mcp.md",
+		auth: "header-key",
+		// PiDeckMcpPanel obtains the actual endpoint/credential only after explicit host consent.
+		base: { enabled: false },
+	},
 	{
 		id: "context7",
 		defaultName: "context7",
@@ -238,6 +274,33 @@ export const MCP_SERVICE_CATALOG: readonly McpServiceCatalogEntry[] = [
 		base: { command: "npx", args: ["-y", "@alipay/mcp-server-alipay"] },
 	},
 	{
+		id: "tencent-docs",
+		defaultName: "tencent-docs",
+		titleKey: "config.mcp.catalog.tencentDocs",
+		hintKey: "config.mcp.catalog.tencentDocsHint",
+		category: "work",
+		endpointDisplay: "https://docs.qq.com/openapi/mcp",
+		docsUrl: "https://docs.qq.com/open/document/mcp/get-token",
+		auth: "header-key",
+		// 官方配置要求 Authorization 头直接写 token 原文（不能加 Bearer），否则报 400006。
+		credentials: [{ labelKey: "config.mcp.catalog.tencentDocsToken", credential: { kind: "header", header: "Authorization" } }],
+		base: { url: "https://docs.qq.com/openapi/mcp" },
+	},
+	{
+		id: "baidu-netdisk",
+		defaultName: "baidu-netdisk",
+		titleKey: "config.mcp.catalog.baiduNetdisk",
+		hintKey: "config.mcp.catalog.baiduNetdiskHint",
+		category: "work",
+		endpointDisplay: "npx -y mcp-remote https://mcp-pan.baidu.com/sse",
+		docsUrl: "https://github.com/baidu-netdisk/mcp",
+		auth: "env-key",
+		// 官方远程端点只有 SSE（pi 只支持 streamable HTTP），因此经 mcp-remote 桥接：
+		// 桥接进程先试 streamable HTTP，405 时自动回退 SSE，Authorization 由 --header 传给两条路。
+		credentials: [{ labelKey: "config.mcp.catalog.baiduNetdiskToken", credential: { kind: "env", envKey: "BAIDU_NETDISK_ACCESS_TOKEN" } }],
+		base: { command: "npx", args: ["-y", "mcp-remote@latest", "https://mcp-pan.baidu.com/sse", "--header", "Authorization: Bearer ${BAIDU_NETDISK_ACCESS_TOKEN}"] },
+	},
+	{
 		id: "amap",
 		defaultName: "amap-maps",
 		titleKey: "config.mcp.catalog.amap",
@@ -273,6 +336,18 @@ export const MCP_SERVICE_CATALOG: readonly McpServiceCatalogEntry[] = [
 		base: { command: "npx", args: ["-y", "12306-mcp"] },
 	},
 	{
+		id: "baizhi",
+		defaultName: "baizhi",
+		titleKey: "config.mcp.catalog.baizhi",
+		hintKey: "config.mcp.catalog.baizhiHint",
+		category: "search",
+		endpointDisplay: "https://agent-toolkit.app.baizhi.cloud/mcp",
+		docsUrl: "https://agent-toolkit.app.baizhi.cloud/access-guide",
+		auth: "header-key",
+		credentials: [{ labelKey: "config.mcp.catalog.baizhiKey", credential: { kind: "header", header: "Authorization", scheme: "Bearer" } }],
+		base: { url: "https://agent-toolkit.app.baizhi.cloud/mcp" },
+	},
+	{
 		id: "brave-search",
 		defaultName: "brave-search",
 		titleKey: "config.mcp.catalog.braveSearch",
@@ -297,6 +372,31 @@ export const MCP_SERVICE_CATALOG: readonly McpServiceCatalogEntry[] = [
 		base: { url: "https://mcp.firecrawl.dev/mcp" },
 	},
 	{
+		id: "exa",
+		defaultName: "exa",
+		titleKey: "config.mcp.catalog.exa",
+		hintKey: "config.mcp.catalog.exaHint",
+		category: "search",
+		endpointDisplay: "https://mcp.exa.ai/mcp",
+		docsUrl: "https://docs.exa.ai/reference/exa-mcp",
+		auth: "header-key",
+		// Keyless 也可用（限速）；填 key 走高额度，官方要求裸值写 x-api-key 头。
+		credentials: [{ labelKey: "config.mcp.catalog.exaKey", optional: true, credential: { kind: "header", header: "x-api-key" } }],
+		base: { url: "https://mcp.exa.ai/mcp" },
+	},
+	{
+		id: "tavily",
+		defaultName: "tavily-remote-mcp",
+		titleKey: "config.mcp.catalog.tavily",
+		hintKey: "config.mcp.catalog.tavilyHint",
+		category: "search",
+		endpointDisplay: "https://mcp.tavily.com/mcp/?tavilyApiKey=<KEY>",
+		docsUrl: "https://docs.tavily.com/documentation/mcp",
+		auth: "url-key",
+		credentials: [{ labelKey: "config.mcp.catalog.tavilyKey", credential: { kind: "url-query", param: "tavilyApiKey" } }],
+		base: { url: "https://mcp.tavily.com/mcp/" },
+	},
+	{
 		id: "figma",
 		defaultName: "figma",
 		titleKey: "config.mcp.catalog.figma",
@@ -306,6 +406,18 @@ export const MCP_SERVICE_CATALOG: readonly McpServiceCatalogEntry[] = [
 		docsUrl: "https://developers.figma.com/docs/figma-mcp-server/remote-server-installation",
 		auth: "oauth",
 		base: { url: "https://mcp.figma.com/mcp" },
+	},
+	{
+		id: "qcc",
+		defaultName: "qcc-company",
+		titleKey: "config.mcp.catalog.qcc",
+		hintKey: "config.mcp.catalog.qccHint",
+		category: "data",
+		endpointDisplay: "https://agent.qcc.com/mcp/company/stream",
+		docsUrl: "https://agent.qcc.com/guide",
+		auth: "header-key",
+		credentials: [{ labelKey: "config.mcp.catalog.qccKey", credential: { kind: "header", header: "Authorization", scheme: "Bearer" } }],
+		base: { url: "https://agent.qcc.com/mcp/company/stream" },
 	},
 ];
 
@@ -323,6 +435,7 @@ function appendUrlParam(url: string, param: string, value: string): string {
 /**
  * 目录条目 + 各凭据输入框的值（与 credentials 同序）→ Pi 原生 McpServerDefinition。
  * 凭据只写入各字段声明的位置（header / env / URL query / args），其余字段原样来自 base。
+ * header 默认写 `Bearer <key>`；声明 scheme 缺省的服务（腾讯文档、Exa）写裸值。
  */
 export function buildCatalogDefinition(entry: McpServiceCatalogEntry, values: readonly string[]): McpServerDefinition {
 	let definition = entry.base;
@@ -331,7 +444,7 @@ export function buildCatalogDefinition(entry: McpServiceCatalogEntry, values: re
 		if (!value) return;
 		const credential = field.credential;
 		if (credential.kind === "header") {
-			definition = { ...definition, headers: { ...definition.headers, [credential.header]: `${credential.scheme} ${value}` } };
+			definition = { ...definition, headers: { ...definition.headers, [credential.header]: credential.scheme ? `${credential.scheme} ${value}` : value } };
 		} else if (credential.kind === "env") {
 			definition = { ...definition, env: { ...definition.env, [credential.envKey]: value } };
 		} else if (credential.kind === "url-query") {

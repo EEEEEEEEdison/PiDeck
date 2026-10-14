@@ -8,11 +8,16 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 // 保留真实 React/Jotai 订阅，只隔离设置镜像与无关的文案、别名解析。
 const logoStyleAtom = atom("pi-tui");
-const { PiLogo, DshLogo, SessionSourceBadge } = loadTsCommonJs("src/renderer/src/components/session/SessionSourceBadge.tsx", {
+const customLogoAtom = atom("");
+// AcpBackendMark 需要的工具表镜像（真实 acp-atoms 会引入 channelSwitchAtoms 的 jotai atom，
+// 该沙箱只提供 useAtomValue，用本地 atom 隔离即可）。
+const acpToolsAtom = atom([]);
+const { PiLogo, DshLogo, SessionSourceBadge, AcpBackendMark } = loadTsCommonJs("src/renderer/src/components/session/SessionSourceBadge.tsx", {
 	stubs: {
 		// VM 用 CJS require，测试用 ESM import；共用同一个 Jotai hook，避免两个 Provider context。
 		jotai: { useAtomValue },
-		"../../atoms/app-ui-atoms": { logoStyleAtom },
+		"../../atoms/app-ui-atoms": { logoStyleAtom, customLogoAtom },
+		"../../atoms/acp-atoms": { acpToolsAtom },
 		"../../i18n": { t: (key) => key },
 		"@/lib/utils": { cn: (...classes) => classes.filter(Boolean).join(" ") },
 	},
@@ -74,6 +79,24 @@ test("pi 会话来源徽标复用同一设置，避免另一份旧 SVG 不跟随
 	assert.match(renderLogo(SessionSourceBadge, { source: "pi" }, store), /viewBox="140 140 520 520"/u);
 });
 
+test("自定义 logo 风格：来源徽标渲染用户图片，风格切回内置标后不再渲染图片", () => {
+	const store = createStore();
+	store.set(logoStyleAtom, "custom");
+	store.set(customLogoAtom, "data:image/png;base64,AAAA");
+	const html = renderLogo(PiLogo, {}, store);
+	assert.match(html, /<img src="data:image\/png;base64,AAAA"/u);
+	assert.match(html, /class="size-3\.5 object-contain"/u, "自定义图沿用调用方给的尺寸类");
+
+	// 选了 custom 但还没传图（或图被清掉）：回落内置标，不能渲染空 img
+	store.set(customLogoAtom, "");
+	assertPiTuiLogo(renderLogo(PiLogo, {}, store));
+
+	store.set(logoStyleAtom, "pi-tui");
+	store.set(customLogoAtom, "data:image/png;base64,AAAA");
+	// 非 custom 风格下即使镜像里残留图片也不渲染它
+	assertPiTuiLogo(renderLogo(PiLogo, {}, store));
+});
+
 test("切换 pi logo 风格不改变 DSH 或其他会话来源品牌", () => {
 	const store = createStore();
 	const cases = [[DshLogo, {}], ...["codex", "claude", "qoder", "opencode", "zcode", "workbuddy", "cursor"].map((source) => [SessionSourceBadge, { source }])];
@@ -83,6 +106,19 @@ test("切换 pi logo 风格不改变 DSH 或其他会话来源品牌", () => {
 		store.set(logoStyleAtom, "pi-tui");
 		assert.equal(renderLogo(component, props, store), classic);
 	}
+});
+
+test("ACP 后端标记：按 acpToolId 解析品牌图标，无工具时回退通用终端图标", () => {
+	const store = createStore();
+	store.set(acpToolsAtom, [{ id: "tool-1", name: "Claude Agent", command: "npx", args: ["-y", "@agentclientprotocol/claude-agent"] }]);
+	// brand 表命中 claude：渲染品牌 SVG 而非 lucide 终端图标
+	const branded = renderLogo(AcpBackendMark, { acpToolId: "tool-1" }, store);
+	assert.match(branded, /<svg/u);
+	assert.doesNotMatch(branded, /lucide-terminal/u, "品牌命中时不应回落通用终端图标");
+
+	// acpToolId 缺失（旧 catalog/工具已删）：不假装品牌，回退通用图标
+	const fallback = renderLogo(AcpBackendMark, { acpToolId: undefined }, store);
+	assert.match(fallback, /lucide-terminal/u);
 });
 
 test("输入框后端选择、下拉选项和锁定按钮全部复用统一 PiLogo", () => {

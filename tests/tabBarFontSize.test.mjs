@@ -23,10 +23,12 @@ const MODES = ["compact", "medium", "large", "xlarge"];
 const { cn } = loadTsCommonJs("src/renderer/src/lib/utils.ts");
 
 // 读取实际胶囊 class，经生产 cn 合并状态；只扫描源字符串会漏掉字号被误当颜色删除的回归。
+// 胶囊清单：文件 Tab、会话 Tab、插件面板伪 Tab（a902942bd 挂进 Tab 栏的页面式面板入口）。
+const PILL_NAMES = ["文件", "会话", "插件面板伪"];
 for (const [index, pill] of [...tabsBar.matchAll(/"(session-tab group[^"]*)"/g)].entries()) {
 	for (const active of [false, true]) {
 		for (const preview of [false, true]) {
-			test(`${index === 0 ? "文件" : "会话"} Tab 字号在 cn 合并后保留（active=${active}, preview=${preview}）`, () => {
+			test(`${PILL_NAMES[index] ?? `Tab#${index}`} Tab 字号在 cn 合并后保留（active=${active}, preview=${preview}）`, () => {
 				const classes = cn(pill[1], active ? "border-transparent font-medium text-foreground" : "border-transparent text-muted-foreground hover:-translate-y-px hover:bg-accent-soft hover:text-foreground", preview && "italic font-normal text-muted-foreground");
 				assert.match(classes, /(?:^|\s)(?:text-tab|text-\[length:var\(--font-size-tab\)\])(?:\s|$)/, `合并状态颜色后必须保留 Tab 字号：${classes}`);
 				assert.ok(classes.split(/\s+/).includes(preview || !active ? "text-muted-foreground" : "text-foreground"), "字号类与状态颜色必须同时保留");
@@ -81,9 +83,10 @@ test("Tailwind 暴露 text-tab 工具类并接上 token", () => {
 	assert.match(tailwind, /--text-tab--line-height:\s*var\(--line-height-tab\)/);
 });
 
-test("SessionTabsBar：会话 Tab 与文件 Tab 消费字号及行高 token，字号不再依赖 text-micro", () => {
+test("SessionTabsBar：会话/文件/插件伪 Tab 消费字号及行高 token，字号不再依赖 text-micro", () => {
 	const pills = tabsBar.match(/"session-tab group[^"]*"/g) ?? [];
-	assert.equal(pills.length, 2, "应有会话 Tab 与工作台文件 Tab 两处胶囊");
+	// a902942bd 起会话 Tab 栏还有页面式插件面板的伪 Tab，同样消费字号 token，计入契约
+	assert.equal(pills.length, 3, "应有会话 Tab、工作台文件 Tab 与插件面板伪 Tab 三处胶囊");
 	for (const pill of pills) {
 		assert.match(pill, /text-\[length:var\(--font-size-tab\)\]/);
 		assert.match(pill, /leading-\(--line-height-tab\)/);

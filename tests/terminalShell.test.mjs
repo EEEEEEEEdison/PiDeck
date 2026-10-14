@@ -37,7 +37,9 @@ function loadTerminalSessionManagerModule() {
 	const sandbox = {
 		exports: {},
 		require: (name) => {
-			if (name === "node-pty") return {};
+			// 原生模块只经 ./nodePtyRuntime 惰性加载（见该文件头注释）：
+			// 本用例只测纯函数，替身不参与。
+			if (name === "./nodePtyRuntime") return { loadNodePty: () => ({}) };
 			if (name === "node:crypto") return { randomUUID: () => "id" };
 			if (name === "../../shared/ipc") return { ipcChannels: {} };
 			// shell 检测依赖宿主环境（git-bash 路径、wsl.exe），桩掉以保证候选列表断言可复现；
@@ -123,7 +125,7 @@ function loadWithPty() {
 		exports: {},
 		process: { platform: "win32", env: {} },
 		require: (name) => {
-			if (name === "node-pty") return ptyStub;
+			if (name === "./nodePtyRuntime") return { loadNodePty: () => ptyStub };
 			if (name === "node:crypto") return { randomUUID: () => `id-${spawns.length}` };
 			if (name === "../../shared/ipc") return { ipcChannels: {} };
 			if (name === "node:fs") return { existsSync: () => false };

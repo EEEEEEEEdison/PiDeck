@@ -3,7 +3,7 @@ import { getDefaultStore, useAtom, useAtomValue } from "jotai";
 import { settingsFocusAtom, type SettingsPaneId, type SettingsTabId } from "../../atoms";
 import { hasPendingUpdateAtom } from "../../atoms/update-atoms";
 import { useSettingsFocus } from "./settings/useSettingsFocus.ts";
-import { Settings2, Network, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, Loader2, SlidersHorizontal, MonitorCog, Keyboard, TerminalSquare, X, Bot, Puzzle } from "lucide-react";
+import { Settings2, Network, Wrench, PawPrint, Bell, Trash2, Brush, Eye, ChartColumnBig, Activity, MessageSquare, ImageIcon, DatabaseBackup, Globe, FileCode2, GitBranch, Loader2, SlidersHorizontal, MonitorCog, Keyboard, TerminalSquare, X, Bot, Puzzle, Clapperboard } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import { applyAppearanceAttributes, type AppearanceSettings } from "../../themeAppearance";
 import { applyCustomThemeTokens, applyFontSizeAttributes } from "../../hooks/appearance/useAppAppearance";
@@ -17,7 +17,8 @@ import { buttonVariants } from "../ui-shadcn/button";
 import { useVisionBridgeDraft } from "./settings/visionDraft.ts";
 import { dirtySettingsTabIds, type SettingsUnsavedTabId } from "./settings/unsavedChangesSummary";
 import { computeDirtyFields } from "./settings/settingsDirtyFields.ts";
-import { SETTINGS_TAB_IDS, SETTINGS_TAB_LABEL_KEYS } from "./settings/settingsTabLayout";
+import { SETTINGS_TAB_IDS, SETTINGS_TAB_LABEL_KEYS, SETTINGS_TAB_LAYOUT } from "./settings/settingsTabLayout";
+import { acpChannelAvailableAtom } from "../../atoms/acp-atoms";
 import { isSettingsTabHidden, resolveInitialSettingsTab, resolveVisibleSettingsTabs } from "./settings/settingsTabVisibility";
 import { BridgeGuiSlot, useBridgeSessionId } from "../bridge/BridgeSlot";
 import { showNotice } from "../../utils/notice";
@@ -45,6 +46,7 @@ const ProcessMetricsTab = lazy(() => import("./settings/ProcessMetricsTab").then
 const UsageStatsTab = lazy(() => import("./settings/UsageStatsTab").then((m) => ({ default: m.UsageStatsTab })));
 const VisionBridgeSettingsTab = lazy(() => import("./settings/VisionBridgeSettingsTab").then((m) => ({ default: m.VisionBridgeSettingsTab })));
 const ImageGenSettingsTab = lazy(() => import("./settings/ImageGenSettingsTab").then((m) => ({ default: m.ImageGenSettingsTab })));
+const VideoGenSettingsTab = lazy(() => import("./settings/VideoGenSettingsTab").then((m) => ({ default: m.VideoGenSettingsTab })));
 const AcpToolsTab = lazy(() => import("./settings/AcpToolsTab").then((m) => ({ default: m.AcpToolsTab })));
 const HostPluginsTab = lazy(() => import("../../config/HostPluginsTab").then((m) => ({ default: m.HostPluginsTab })));
 const TerminalTab = lazy(() => import("./settings/TerminalTab").then((m) => ({ default: m.TerminalTab })));
@@ -65,6 +67,9 @@ const SETTINGS_LAST_PANE_KEY = "pideck-settings-last-pane";
 
 /** 旧 settings.json 缺 hiddenModules 时的稳定空值：避免每次渲染新建数组让侧栏过滤 effect 空转。 */
 const NO_HIDDEN_MODULES: readonly string[] = [];
+
+/** 开发构建下无硬隐藏 tab 的稳定空值：与 NO_HIDDEN_MODULES 同理由，避免 useMemo 每次新建 Set。 */
+const EMPTY_TAB_SET: ReadonlySet<string> = new Set();
 
 /**
  * 读取上次打开的设置 tab；localStorage 不可用、无记录或值已失效时回退默认值 "common"。
@@ -260,6 +265,7 @@ const TAB_META: Record<SettingsTabId, { labelKey: TranslationKey; icon: ReactNod
 	process: { labelKey: SETTINGS_TAB_LABEL_KEYS.process, icon: <Activity size={16} /> },
 	vision: { labelKey: SETTINGS_TAB_LABEL_KEYS.vision, icon: <Eye size={16} /> },
 	imagegen: { labelKey: SETTINGS_TAB_LABEL_KEYS.imagegen, icon: <ImageIcon size={16} /> },
+	videogen: { labelKey: SETTINGS_TAB_LABEL_KEYS.videogen, icon: <Clapperboard size={16} /> },
 	acp: { labelKey: SETTINGS_TAB_LABEL_KEYS.acp, icon: <Bot size={16} /> },
 	hostplugins: { labelKey: SETTINGS_TAB_LABEL_KEYS.hostplugins, icon: <Puzzle size={16} /> },
 };
@@ -272,10 +278,13 @@ function SettingsModalContent(props: SettingsModalProps) {
 	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容）。
 	// 深链（如 Git「去设置」）优先于上次记住的 tab，否则会停在外观/开发等其它页。
 	const hasPendingUpdate = useAtomValue(hasPendingUpdateAtom);
+	// ACP 仅开发构建可见：stable 把 acp tab 从设置页硬隐藏（侧栏列表 + 初始记忆值 + 深链都回退）。
+	const acpChannelAvailable = useAtomValue(acpChannelAvailableAtom);
+	const unavailableTabs = useMemo<ReadonlySet<string>>(() => (acpChannelAvailable ? EMPTY_TAB_SET : new Set<SettingsTabId>(["acp"])), [acpChannelAvailable]);
 	// GUI 扩展桥：设置弹窗是应用级单实例 chrome，由当前聚焦会话的 pi 进程供给内容（不做回落）。
 	const bridgeSessionId = useBridgeSessionId();
 	// 开弹窗时的隐藏模块快照只用于算初始 tab；侧栏过滤读草稿（下方 draftSettings.hiddenModules），开关一切即预览。
-	const [activeTab, setActiveTab] = useState<SettingsTabId>(() => resolveInitialSettingsTab(getDefaultStore().get(settingsFocusAtom)?.tab, loadLastSettingsTab(), props.settings.hiddenModules ?? NO_HIDDEN_MODULES));
+	const [activeTab, setActiveTab] = useState<SettingsTabId>(() => resolveInitialSettingsTab(getDefaultStore().get(settingsFocusAtom)?.tab, loadLastSettingsTab(), props.settings.hiddenModules ?? NO_HIDDEN_MODULES, getDefaultStore().get(acpChannelAvailableAtom) ? undefined : new Set(["acp"])));
 	/**
 	 * 本次弹窗内临时显示的已隐藏 tab：深链（Git「去设置」、命令面板「已隐藏，点击显示」）
 	 * 指向隐藏 tab 时不阻断也不改持久化，只让它在侧栏临时出现；弹窗关闭即失效。
@@ -336,6 +345,10 @@ function SettingsModalContent(props: SettingsModalProps) {
 	const imageGenRef = useRef<{ save: () => Promise<boolean> } | null>(null);
 	const [imageGenDirty, setImageGenDirty] = useState(false);
 	const handleImageGenDirtyChange = useCallback((dirty: boolean) => setImageGenDirty(dirty), []);
+	// ── 生视频草稿：独立文件 userData/videogen.json，保存链与生图一致（ref.save + 脏标记） ──
+	const videoGenRef = useRef<{ save: () => Promise<boolean> } | null>(null);
+	const [videoGenDirty, setVideoGenDirty] = useState(false);
+	const handleVideoGenDirtyChange = useCallback((dirty: boolean) => setVideoGenDirty(dirty), []);
 	// ── ACP 工具表：独立 settings.acpTools 字段，保存链与生图一致（ref.save + 脏标记） ──
 	const acpToolsRef = useRef<{ save: () => Promise<boolean> } | null>(null);
 	const [acpDirty, setAcpDirty] = useState(false);
@@ -447,6 +460,11 @@ function SettingsModalContent(props: SettingsModalProps) {
 			const imageGenOk = (await imageGenRef.current?.save()) ?? false;
 			ok = ok && imageGenOk;
 			// 保存成功后脏标记由子组件通过 onDirtyChange 自动清掉
+		}
+		if (videoGenDirty) {
+			// 校验失败（必填缺失）时子组件返回 false，保留脏标记供用户修正后重试
+			const videoGenOk = (await videoGenRef.current?.save()) ?? false;
+			ok = ok && videoGenOk;
 		}
 		if (acpDirty) {
 			// 校验失败（必填/重名）时子组件返回 false，保留脏标记供用户修正后重试
@@ -576,8 +594,9 @@ function SettingsModalContent(props: SettingsModalProps) {
 	);
 
 	// 侧栏条目 = 布局模块定义的顺序/分组边界，经隐藏模块过滤（按草稿，开关即预览），再拼上面的图标文案元数据
+	// unavailableTabs（stable 的 acp）比用户隐藏更硬：深链/临时显示都救不回来，直接不渲染。
 	const hiddenModules = draftSettings.hiddenModules ?? NO_HIDDEN_MODULES;
-	const tabs = resolveVisibleSettingsTabs(hiddenModules, revealedTabs).map((entry) => ({
+	const tabs = resolveVisibleSettingsTabs(hiddenModules, revealedTabs, SETTINGS_TAB_LAYOUT, unavailableTabs).map((entry) => ({
 		id: entry.id,
 		dividerBefore: entry.dividerBefore ?? false,
 		label: t(TAB_META[entry.id].labelKey),
@@ -592,7 +611,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 	const hasDirtyChanges = dirtyFields.size > 0;
 	// 视觉桥/生图草稿有未保存改动时，头部保存/取消按钮同样点亮（与全局设置脏标记合并判定）
-	const hasAnyDirtyChanges = hasDirtyChanges || visionDraft.dirty || imageGenDirty || acpDirty;
+	const hasAnyDirtyChanges = hasDirtyChanges || visionDraft.dirty || imageGenDirty || videoGenDirty || acpDirty;
 	// 关闭确认：列出全部变更项（不再只点第一条），多项按设置页 tab/字段顺序逐条展示。
 	const unsavedSummary = useMemo(
 		() =>
@@ -867,7 +886,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 								</TabsContent>
 							)}
 
-							{/* ── 外部连接 tab（飞书机器人，由 Pi 管理界面迁入） ── */}
+							{/* ── 外部连接 tab（飞书 / 微信，由 Pi 管理界面迁入） ── */}
 							{activeTab === "im" && (
 								<TabsContent value="im" className="settings-panel min-w-0">
 									<Suspense fallback={<SettingsTabLoading />}>
@@ -939,6 +958,12 @@ function SettingsModalContent(props: SettingsModalProps) {
 							<TabsContent value="imagegen" className="settings-panel min-w-0" hidden={activeTab !== "imagegen"}>
 								<Suspense fallback={<SettingsTabLoading />}>
 									<ImageGenSettingsTab ref={imageGenRef} onDirtyChange={handleImageGenDirtyChange} />
+								</Suspense>
+							</TabsContent>
+							{/* ── 生视频 tab：独立 videogen.json，草稿/脏标记/保存链与生图同构（hidden 保挂载）。 ── */}
+							<TabsContent value="videogen" className="settings-panel min-w-0" hidden={activeTab !== "videogen"}>
+								<Suspense fallback={<SettingsTabLoading />}>
+									<VideoGenSettingsTab ref={videoGenRef} onDirtyChange={handleVideoGenDirtyChange} />
 								</Suspense>
 							</TabsContent>
 							{/* ── ACP 工具 tab：独立 settings.acpTools 字段；草稿自持，切换 tab 保持挂载（hidden）以免丢失未保存行 ── */}

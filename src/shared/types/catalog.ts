@@ -30,6 +30,7 @@ export type CatalogUpdateStatus = {
 export type CatalogUpdateFailCode =
 	| "network" // 两个下载源（npm + 分支回退）都失败/超时
 	| "validation" // 下载内容与 manifest 校验不过（防坏数据上盘）
+	| "incompatible" // 远端产物 schemaVersion 与当前版本支持的版本不一致，需先升级 PiDeck
 	| "write" // 磁盘写入失败
 	| "no-backup"; // 没有可用备份（恢复上一个覆盖版时）
 

@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useSetAtom } from "jotai";
 import { t } from "../i18n";
 import { settingsOpenAtom } from "../atoms";
+import { resolvePiStatusFromProbe } from "../utils/piStatusSync";
 import type { AppSettings, NpmAvailabilityResult, PiCliUpdateResult, PiInstallation, PiInstallExecResult, PiInstallStatus, PiUpdateCheckResult } from "../../../shared/types";
 import type { PiDesktopApi } from "../../../preload";
 
@@ -49,6 +50,13 @@ export function usePiUpdate(options: UsePiUpdateOptions) {
 		}
 	}, [settings.piInstall, piStatus]);
 
+	// piStatus 的 ref 快照：探测结果校正（syncPiStatusFromProbe）要读「当前显示值」，
+	// 但它必须保持稳定身份——loadPiInstallations / checkPiCliUpdate 的依赖数组不能随 piStatus 变化重建。
+	const piStatusRef = useRef<PiInstallStatus | null>(null);
+	useEffect(() => {
+		piStatusRef.current = piStatus;
+	}, [piStatus]);
+
 	// 缓存复核的会话级闸门（effect 本体在 persistPiInstall 声明之后）。
 	const piStatusRevalidatedRef = useRef(false);
 
@@ -92,6 +100,32 @@ export function usePiUpdate(options: UsePiUpdateOptions) {
 		[api],
 	);
 
+	/**
+	 * 用一次「实时探测」出的版本校正顶部状态与持久化缓存。
+	 *
+	 * 为什么要单独一条链路：settings.piInstall 只在探测时刷新，而 pi 会被外部升级（`npm install -g`、
+	 * `pi update`，都绕开 PiDeck）。运行期间用户升级完，「检查 Pi 更新」/安装列表已经拿到新版本，
+	 * 顶部却还显示旧版本（实测同屏「已找到 1.1.0」+ 列表 v1.2.0，还伴随「Pi 已是最新版本」提示）。
+	 * 凡是真跑过 `pi --version` 的结果都必须与缓存比对，不一致就以探测结果回写。
+	 *
+	 * 失败必须自收：写 settings 只是缓存维护，不能因为一次写盘失败把调用方的正常流程带崩
+	 * （安装列表已经拿到了，不能让它的 catch 退化成空数组）；持久化失败仅意味着下次启动缓存仍旧，
+	 * 届时会由会话级复核再次纠正。
+	 */
+	const syncPiStatusFromProbe = useCallback(
+		async (probe: { command?: string; version?: string }) => {
+			const next = resolvePiStatusFromProbe(piStatusRef.current, probe);
+			if (!next) return;
+			setPiStatus(next);
+			try {
+				setSettings(await persistPiInstall(next));
+			} catch {
+				// 静默：顶部已经显示真实版本，只有缓存没跟上
+			}
+		},
+		[persistPiInstall, setSettings],
+	);
+
 	// 缓存恢复后按会话静默复核一次：pi 可能已被外部升级（npm/self-update），
 	// 持久化的版本会永久过期——startup 检测只在首次引导跑（piEnvironmentChecked 之后
 	// 没人纠正缓存，实测 dev 实例停在 0.84.4 而真实已是 1.0.2）。
@@ -106,15 +140,12 @@ export function usePiUpdate(options: UsePiUpdateOptions) {
 				// 只在确认仍安装时纠正展示与缓存：探测失败可能是暂时性的（杀软锁文件等），
 				// 不用「疑似未安装」静默盖掉上次成功的结果。
 				if (!next.installed) return;
-				setPiStatus(next);
-				if (next.command !== settings.piInstall?.command || next.version !== settings.piInstall?.version) {
-					setSettings(await persistPiInstall(next));
-				}
+				await syncPiStatusFromProbe({ command: next.command, version: next.version });
 			} catch {
 				// 静默失败：缓存照常显示，真实错误由下次手动检测或会话启动暴露。
 			}
 		})();
-	}, [settings.piInstall, piStatus, api, persistPiInstall, setSettings]);
+	}, [settings.piInstall, piStatus, api, syncPiStatusFromProbe]);
 
 	/**
 	 * 拉取全部 pi 安装。
@@ -127,6 +158,10 @@ export function usePiUpdate(options: UsePiUpdateOptions) {
 			try {
 				const list = await api.pi.listInstallations(options.forceShellProbe === true);
 				setPiInstallations(list);
+				// 列表里「当前使用」那条的版本也是真跑 `pi --version` 得来的：顺带校正顶部显示与缓存，
+				// 用户不点「检测环境」也能看到外部升级后的真实版本（列表与顶部显示同一版本）。
+				const active = list.find((item) => item.isActive);
+				if (active?.version) await syncPiStatusFromProbe({ command: active.path, version: active.version });
 				return list;
 			} catch {
 				setPiInstallations([]);
@@ -135,7 +170,7 @@ export function usePiUpdate(options: UsePiUpdateOptions) {
 				if (options.forceShellProbe) setPiInstallationsProbing(false);
 			}
 		},
-		[api],
+		[api, syncPiStatusFromProbe],
 	);
 
 	const checkPiInstall = useCallback(
@@ -403,11 +438,13 @@ export function usePiUpdate(options: UsePiUpdateOptions) {
 		try {
 			const result = await api.pi.checkUpdate();
 			setPiUpdateCheck(result);
+			// 「检查 Pi 更新」就是一次真探测：版本不一致时校正顶部，避免“已是最新版本”与顶部旧版本并存（外部升级后必现）。
+			await syncPiStatusFromProbe({ command: result.command, version: result.currentVersion });
 			showToast(result.error ? t("settings.piUpdateFailed", { error: result.error }) : result.hasUpdate ? t("settings.piUpdateAvailable") : t("settings.piUpdateChecked"));
 		} finally {
 			setPiUpdateChecking(false);
 		}
-	}, [api]);
+	}, [api, syncPiStatusFromProbe]);
 
 	const updatePiCli = useCallback(async () => {
 		setPiUpdating(true);

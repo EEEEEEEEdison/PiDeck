@@ -52,6 +52,20 @@ function loadPiLocatorModule(platform = process.platform, envOverrides = {}, hom
 			target: ts.ScriptTarget.ES2022,
 		},
 	});
+	// 沙箱内的 require：相对导入逐层以「发起 import 的文件所在目录」为基准解析。
+	// 若把相对 specifier 直接丢给真实 require，会以 tests/ 为基准 → 生产代码新增本地 import 就整片 MODULE_NOT_FOUND。
+	const sandboxRequire = (baseDir, id) => {
+		if (id in moduleOverrides) return moduleOverrides[id];
+		if (id === "electron") return { app: { getPath: () => homePath } };
+		if (id.startsWith(".")) {
+			const dependencyPath = join(baseDir, id + ".ts");
+			return loadTsFile(dependencyPath, {
+				process: sandbox.process,
+				require: (nested) => sandboxRequire(dirname(dependencyPath), nested),
+			});
+		}
+		return require(id);
+	};
 	const sandbox = {
 		Buffer,
 		TextDecoder,
@@ -61,20 +75,7 @@ function loadPiLocatorModule(platform = process.platform, envOverrides = {}, hom
 			env: { ...process.env, ...envOverrides },
 			platform,
 		},
-		require: (id) => {
-			if (id in moduleOverrides) return moduleOverrides[id];
-			if (id === "electron") {
-				return { app: { getPath: () => homePath } };
-			}
-			// 相对依赖（../wsl/wslPiProbe、../wsl/wslExe）用同一套沙箱环境加载
-			if (id.startsWith(".")) {
-				return loadTsFile(join(PI_LOCATOR_DIR, id + ".ts"), {
-					process: sandbox.process,
-					require: (nested) => (nested in moduleOverrides ? moduleOverrides[nested] : require(nested)),
-				});
-			}
-			return require(id);
-		},
+		require: (id) => sandboxRequire(PI_LOCATOR_DIR, id),
 		...sandboxExtra,
 	};
 	sandbox.global = sandbox;
@@ -754,6 +755,50 @@ test("Windows shim falls back to cmd.exe for a hand-written wrapper", () => {
 		const { PiLocator } = loadPiLocatorModule("win32", { APPDATA: join(root, "Roaming") }, root);
 		const invocation = new PiLocator().createInvocation(piCmd, ["--version"]);
 		assert.match(invocation.command.toLowerCase(), /cmd\.exe$/);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+// npm 12 起 npm.cmd/npx.cmd 换成变量式垫片：`SET "NPM_CLI_JS=%~dp0\node_modules\npm\bin\npm-cli.js"`
+// + 执行行 `"%NODE_EXE%" "%NPM_CLI_JS%" %*`。按全文取第一个 `node_modules\...js` 会抓到变量赋值里的
+// `npm-prefix.js`——实测把「装包」跑成「打印前缀」（exit 0 却什么都没装）。入口变量还可能被 prefix
+// 覆盖，静态解析给不出与 cmd 等价的目标，所以这种形态必须回退 cmd.exe 而不是猜。
+test("npm 12+ 的变量式 .cmd 垫片回退 cmd.exe（不再误取 npm-prefix.js）", () => {
+	const body = [
+		":: Created by npm, please don't edit manually.",
+		"@ECHO OFF",
+		"",
+		"SETLOCAL",
+		"",
+		'SET "NODE_EXE=%~dp0\\node.exe"',
+		'IF NOT EXIST "%NODE_EXE%" (',
+		'  SET "NODE_EXE=node"',
+		")",
+		"",
+		'SET "NPM_PREFIX_JS=%~dp0\\node_modules\\npm\\bin\\npm-prefix.js"',
+		'SET "NPM_CLI_JS=%~dp0\\node_modules\\npm\\bin\\npm-cli.js"',
+		`FOR /F "delims=" %%F IN ('CALL "%NODE_EXE%" "%NPM_PREFIX_JS%"') DO (`,
+		'  SET "NPM_PREFIX_NPM_CLI_JS=%%F\\node_modules\\npm\\bin\\npm-cli.js"',
+		")",
+		'IF EXIST "%NPM_PREFIX_NPM_CLI_JS%" (',
+		'  SET "NPM_CLI_JS=%NPM_PREFIX_NPM_CLI_JS%"',
+		")",
+		"",
+		'"%NODE_EXE%" "%NPM_CLI_JS%" %*',
+		"",
+	].join("\r\n");
+	const { root, binDir, piCmd } = makeNpmShimInstall(body, "node_modules/npm/bin/npm-cli.js");
+	// 两个入口都存在：旧实现会命中第一个（npm-prefix.js）并误判成 node 直启。
+	writeFileSync(join(binDir, "node_modules", "npm", "bin", "npm-prefix.js"), "console.log('prefix')", "utf8");
+	try {
+		const { PiLocator } = loadPiLocatorModule("win32", { APPDATA: join(root, "Roaming") }, root);
+		const invocation = new PiLocator().createInvocation(piCmd, ["install", "-g", "pkg"]);
+		assert.match(invocation.command.toLowerCase(), /cmd\.exe$/, "入口在运行时才定，必须回退 cmd.exe");
+		assert.equal(invocation.windowsVerbatimArguments, true);
+		assert.match(invocation.windowsLaunch?.reason ?? "", /变量式|无法静态解析/);
+		// 关键回归：绝不能把变量赋值里的 npm-prefix.js 当成入口。
+		assert.ok(!invocation.args.some((arg) => arg.includes("npm-prefix.js")), `不得解析出 npm-prefix.js：${invocation.args.join(" ")}`);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

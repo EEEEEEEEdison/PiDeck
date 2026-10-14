@@ -158,6 +158,22 @@ PiDeck 的设置页更新走主进程的 Node `execFile` + `PiLocator` 平台适
 - **更新目标**：检查、执行、结果核验使用同一份安装设置快照；执行后失效版本缓存并重新检测该安装。退出码 0 但版本未达到检查时的目标版本，仍返回失败，不显示「更新成功」。
 - **失败信息**：更新检查的网络失败不能当成「无需更新」；命令失败保留有长度上限、已脱敏的 stdout/stderr 与错误详情，便于区分网络、代理、权限或安装来源问题。扩展更新部分失败时也失效列表缓存。
 
+#### 更新通道分派（2026-10-13）
+
+通道由选中 pi 的**可执行路径形状**判定（`src/main/pi/piSelfUpdateChannel.ts`，零依赖纯函数）：
+
+| 通道 | 触发形态 | PiDeck 实际执行 | 关键点 |
+|---|---|---|---|
+| `pi-self` | npm/pnpm/yarn 全局、官方 managed、homebrew、WSL、裸命令名 | `pi update --self` | WSL 的运行时命令形如 `wsl -d <distro> -u <user> <pi 路径>`（不是 `wsl://` 标记），一律交回发行版内的 pi 自己更新，绝不能用宿主包管理器代跑（会把 pi 装到 Windows 上） |
+| `bun-global` | `…/.bun/bin/pi` 或 `…/install/global/node_modules/…` | `bun install -g --ignore-scripts [--minimum-release-age=0] <pkg>@<ver>` | bun 本体从**安装根** `<root>/bin` 推导（不是与 pi 入口同目录：Homebrew/scoop 的 bun 本体在别处，软链解析后的包路径下更不存在）；推导路径不存在时回退裸 `bun`；`<root>` 作为 `BUN_INSTALL` 传给子进程；年龄门开关只在 `bun --version` ≥ 1.3 时附带（1.3 才引入，老 bun 拒绝未知参数） |
+| `portable-prefix` | `<userData>/pi-runtime/pi-global/…` | `npm install -g --ignore-scripts --min-release-age=0 <pkg>@<ver> --prefix <prefix>` | pi 的 npm 自更新在 Windows 不推断前缀，必须显式 `--prefix`，否则装到用户真实全局目录、前缀副本原地不动 |
+
+- **源未同步提示**：失败输出命中 npm `ETARGET`/`notarget` 或 bun `No version matching` 时追加排查提示（文案已用真 bun 1.4.3 实测校准）。PiDeck 亲自代跑的通道给与代跑同源的命令 + `--registry=https://registry.npmjs.org`；`pi-self` 通道只给「把 registry 指向官方源」的建议、不给命令（npm/pnpm/yarn/brew/managed 都在这档，写死 npm 会在别的目录另装一份）。
+- **发布年龄门提示**：bun 的 `blocked by minimum-release-age`、npm 的 `… with a date before …` 命中时给「放宽年龄门」的提示（bunfig `minimumReleaseAge` / npm `min-release-age`，或重试时加 `--minimum-release-age=0` / `--min-release-age=0`）。这两类先于镜像提示判定：年龄门文案里也含 `No version matching`，不先判会把「版本已发布但被年龄门拦下」误诊成镜像滞后（实测：配了年龄门时镜像重试命令会再次被拦下）。
+- **已知局限**：自定义 `BUN_INSTALL` 的 shim 路径（`<root>/bin/pi`，路径里既无 `.bun` 也无 `install/global/node_modules`）无法与其它全局安装区分，归 `pi-self`；POSIX 上 pi 自己能更新，Windows 上受 pi 自身的 npm/pnpm gate 限制（默认 `~/.bun` 布局不受影响）。
+- **提示里的路径不脱敏**（唯一的失败输出例外）：`--prefix` 要能直接粘贴执行，脱敏后的 `<user>` 在 shell/CMD 里都不是路径；该路径是 PiDeck 自己的 userData/pi-runtime 目录，不涉及用户数据。
+- **提示与代跑同源**：命令由 `npmGlobalInstallArgs` / `bunGlobalInstallArgs` 一处生成，避免「代跑加了 flag、提示里还是旧命令」的漂移。
+
 ## 验证
 
 ```bash
@@ -165,6 +181,35 @@ npm run typecheck
 node --test tests/piLocatorInstallations.test.mjs tests/piInstallationOptions.test.mjs \
   tests/piInstallGuard.test.mjs tests/piLocator.test.mjs tests/piLocatorLoginShell.test.mjs
 ```
+
+### Windows 真机 smoke（2026-10-13）
+
+上述单测在 Linux 宿主上用夹具模拟 win32；启动通道与 bun / npm 前缀 / WSL 更新通道的五个 Windows 形态
+（2026-10 复审遗留项）由 `scripts/smoke-pi-windows-launch.mjs` 在真 Windows 上验证（人工触发，不进 CI）：
+
+| 覆盖 | 断言要点 |
+|---|---|
+| cmd 包裹 | npm `pi.cmd` 走 node-direct 真跑 `--version`；非 npm `.cmd` 回退 `cmd.exe /d /s /c`（windowsVerbatimArguments），含空格/引号/`&` 的 11 个参数原样到达；`.cmd`/`.exe` 参数预算 5000、node 直启 26000 |
+| pi.exe shim | bun 生成的 `<root>\bin\pi.exe` 能被 `normalizeCustomPath` 补全、`check()` 真跑出版本 |
+| 自定义 BUN_INSTALL | `<root>\bin\pi.exe` 先归 `pi-self`，靠 `<root>\install\global\node_modules` 细化为 `bun-global`；`PiSelfUpdateRunner.update()` 真调 pi.dev 最新版 → bun 代跑带 `BUN_INSTALL` 与 `--minimum-release-age=0` → 1.1.0 → 1.2.0，`~/.bun` 前后一致 |
+| portable-prefix | 真跑 `npm install -g --prefix <prefix>` 装出旧版与 `<prefix>\pi.cmd`，再经 `PiSelfUpdateRunner.update()` 真跑 npm 代跑（命令行带 `--prefix <prefix>`）原地更新到最新版 |
+| WSL / UNC | 真探测 + `wsl.exe -e /usr/bin/env PATH=… <pi> --version`；运行时召唤串与 `\\wsl.localhost\`、`\\wsl$\` 一律 `pi-self` |
+
+本机实测（Windows 10.0.26200 / bun 1.4.3 / npm pi 1.2.0 / WSL Ubuntu-26.04）：**11/11 通过**。
+脚本在 `%TEMP%\pideck win smoke` 内自建隔离环境（路径刻意带空格），不写系统目录、不动 `~/.bun`、
+不更新 WSL 里的 pi（只读版本）；`--clean` 清空临时根，`PIDECK_SMOKE_BUN` 可指定已有 bun。
+
+这次真机 smoke 顺带抓到一个 Windows 缺陷（已修 + 回归测试 `tests/piLocator.test.mjs`）：npm 12 的
+`npm.cmd`/`npx.cmd` 改用变量式垫片（`SET "NPM_CLI_JS=%~dp0\node_modules\npm\bin\npm-cli.js"` +
+`"%NODE_EXE%" "%NPM_CLI_JS%" %*`），旧的「全文取第一个 `node_modules\…js`」会抓到变量赋值里的
+`npm-prefix.js`：设置里把 npm 命令填成绝对路径的用户，扩展版本/源查询、旧前缀副本更新与引导安装
+会跑成「打印前缀」——退出码 0 却什么都没装。现在只在**实际执行行**（含 `%*`）上认入口，这类无法
+静态确定目标的垫片回退 `cmd.exe` 跑真实垫片。
+
+两条真机事实（决定 UNC 行为边界，不是缺陷）：
+
+- `\\wsl.localhost\<distro>\…` 经 9P **看不到 Linux 符号链接的目标**（`existsSync` 对 npm/bun 全局 pi 的软链返回 false；目录与普通文件正常），而两种全局安装的 pi 恰恰都是软链；
+- Windows 不能从 UNC 执行 ELF（`execFile` 报 ENOENT、cmd 报找不到路径）。因此 UNC 形态的 WSL pi 过不了 `locator.check()`，`refineChannelForCustomBunRoot` 的磁盘细化也不会把它翻成宿主 bun——守卫是双保险。
 
 ## 后续可做（本次未做）
 

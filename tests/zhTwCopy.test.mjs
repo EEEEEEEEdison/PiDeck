@@ -2,12 +2,14 @@
  * 繁体中文（zh-TW）支持：locale 解析、四份词典的接线、以及各进程的语言分支。
  *
  * 词典是 `scripts/genZhTwCopy.mjs` 从 zh-CN 源生成的（台湾用语 + 繁体字形），所以这里既测行为，
- * 也守住「生成物没落后于 zh-CN 源」——加键忘了重新生成时，键集断言会红。
+ * 也守住「生成物没落后于 zh-CN 源」的两道门禁：键集断言（加键忘了重新生成）与
+ * source-sha256 指纹（只改值、忘了重新生成；见 scripts/zhTwCopySources.mjs）。
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { ZHTW_TARGETS, readSourceRegion } from "../scripts/zhTwCopySources.mjs";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const ROOT = process.cwd();
@@ -113,6 +115,17 @@ test("生成物带生成器标识，且繁体字形确实换过", () => {
 	assert.equal(zhTW["settings.composer.security"], "權限");
 	assert.equal(zhTW["common.global"], "全域");
 	assert.notEqual(zhTW["timeline.processGroup.done.code"], zhCN["timeline.processGroup.done.code"]);
+});
+
+test("生成物新鲜度：头部 source-sha256 必须等于 zh-CN 源区块指纹（改值不重跑会被抓）", () => {
+	// 键集断言只能发现新增/删除键：只改一条文案的值而不加键时，四份产物依旧是旧译文且全绿。
+	// 指纹不需要 opencc（脚本的 --check 在无 opencc 时直接跳过，当不了门禁），能直接复算。
+	for (const target of ZHTW_TARGETS) {
+		const generated = readSource(target.out);
+		const recorded = generated.match(/source-sha256: ([0-9a-f]{64})/)?.[1];
+		assert.ok(recorded, `${target.out}: 头部缺少 source-sha256（旧产物请重跑 node scripts/genZhTwCopy.mjs）`);
+		assert.equal(recorded, readSourceRegion(ROOT, target).regionSha256, `${target.out} 与 ${target.source} 不同步：请运行 node scripts/genZhTwCopy.mjs 重新生成`);
+	}
 });
 
 test("设置页提供繁体中文选项，AppLanguageMode 已收录 zh-TW", () => {

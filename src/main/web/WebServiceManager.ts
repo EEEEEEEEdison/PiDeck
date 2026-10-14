@@ -4,7 +4,7 @@ import { Readable } from "node:stream";
 import type { AddressInfo } from "node:net";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
-import { extname, join, normalize } from "node:path";
+import { extname, join, normalize, sep } from "node:path";
 import type {
 	AgentRuntimeState,
 	AppSettings,
@@ -39,6 +39,7 @@ import type {
 	WebServiceStatusInfo,
 } from "../../shared/types";
 import type { PendingUiRequestSnapshot } from "../sessions/SessionRuntimeCoordinator";
+import type { SessionForkResult } from "../sessions/sessionForkCommands";
 import { replaceExpandedRefBlocksWithLabels } from "../../shared/expandedRefBlocks";
 import { serializeWebClientDictionaries, webEnUS } from "./WebI18n";
 import { WebEventStreamRouter, serializeSseFrame, type PiEvent } from "./WebEventStream";
@@ -68,6 +69,14 @@ class WebBodyTooLargeError extends Error {
 	constructor() {
 		super("WEB_SERVICE_BODY_TOO_LARGE");
 		this.name = "WebBodyTooLargeError";
+	}
+}
+
+/** readJson 遇到非法 JSON 的哨兵错误：由统一 catch 映射为 400（客户端错）而非 500 */
+class WebInvalidJsonError extends Error {
+	constructor() {
+		super("WEB_SERVICE_INVALID_JSON");
+		this.name = "WebInvalidJsonError";
 	}
 }
 
@@ -181,7 +190,11 @@ type WebServiceDependencies = {
 	>;
 	/** 从历史轮次分叉新会话（P3 分支条；BrowserApi 已映射，服务端此前缺席）。 */
 	getForkMessages: (target: SessionRuntimeTarget) => Promise<SessionCommandResult<SessionTargetedValue<Array<{ entryId: string; text: string }>>>>;
-	forkRuntimeSession: (target: SessionRuntimeTarget, entryId: string) => Promise<SessionCommandResult<SessionTargetedValue<unknown>>>;
+	/** fork（与桌面 IPC 同源）：options.mutationFork=尾部重发/编辑替换（旧会话打 supersededBy 隐藏），
+	 * options.branchMode=分支保留旧会话。服务端只认显式 true（边界校验）。 */
+	forkRuntimeSession: (target: SessionRuntimeTarget, entryId: string, options?: { mutationFork?: boolean; branchMode?: boolean }) => Promise<SessionForkResult>;
+	/** 冷会话激活（Web 重发/编辑 fork 化用；与桌面 sessionsRuntimeActivate 同源）。 */
+	activateSessionRuntime?: (sessionId: string) => Promise<SessionCommandResult<SessionRuntimeInfo>>;
 	/** 会话活动监控（第二批 strips）：文件变更/子代理/todo 快照，装配侧对齐桌面 IPC 语义（含 running 降级对账）。缺省时路由返回 503。 */
 	listSessionFileChanges?: (sessionId: string) => Promise<SessionFileChange[]>;
 	listSessionSubagents?: (sessionId: string) => Promise<PiSubagentEntry[]>;
@@ -455,6 +468,10 @@ export class WebServiceManager {
 			} catch (error) {
 				if (error instanceof WebBodyTooLargeError) {
 					this.sendError(response, 413, "webError.bodyTooLarge", "Request body exceeds the size limit");
+					return;
+				}
+				if (error instanceof WebInvalidJsonError) {
+					this.sendError(response, 400, "webError.invalidJson", "Request body is not valid JSON");
 					return;
 				}
 				console.error("[WebService] Request failed", error);
@@ -835,10 +852,12 @@ export class WebServiceManager {
 		// SSE 流式端点：按 AI SDK v5 UIMessageStream 协议输出 pi agent 事件，
 		// 前端提交 prompt 后订阅本端点实现打字机/思考/工具实时展示（A1）；
 		// 协议与 useChat 兼容，升级 A2 时前端换成 React hook 即可，后端零改动。
+		// keepAlive：本端点是 EventSource 常驻订阅（useExternalSessionStream），
+		// 一轮 [DONE] 后连接保留等下一轮，消除轮间重连空窗（Ask 续答丢帧的根因）。
 		const streamMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/stream$/);
 		if (streamMatch && request.method === "GET") {
 			const sessionId = decodeURIComponent(streamMatch[1]);
-			this.handleStream(sessionId, request, response);
+			this.handleStream(sessionId, request, response, { keepAlive: true });
 			return;
 		}
 
@@ -910,7 +929,7 @@ export class WebServiceManager {
 			}
 			return;
 		}
-		const sessionRuntimeMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/runtime\/(stop|abort|restart|compact|state|commands|export-html|edit-message|delete-message|prepare-resend|models|model|thinking|permission|clone|fork|get-fork-messages|rewind-list|rewind-diff|rewind-restore)$/);
+		const sessionRuntimeMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/runtime\/(activate|stop|abort|restart|compact|state|commands|export-html|edit-message|delete-message|prepare-resend|models|model|thinking|permission|clone|fork|get-fork-messages|rewind-list|rewind-diff|rewind-restore)$/);
 		if (sessionRuntimeMatch && request.method === "POST") {
 			const sessionId = decodeURIComponent(sessionRuntimeMatch[1]);
 			const action = sessionRuntimeMatch[2];
@@ -931,8 +950,21 @@ export class WebServiceManager {
 				beforeTimestamp?: number;
 				/** fork：从哪个历史轮次分叉（entryId 来自 get-fork-messages）。 */
 				entryId?: string;
+				/** fork 化重试标记（重发/编辑迁移用）：只认显式 true。mutationFork+非 branchMode = 尾部替换（旧会话隐藏）。 */
+				mutationFork?: boolean;
+				/** 分支模式：fork 锚点不是最后一条用户消息 → 旧会话保留可见。 */
+				branchMode?: boolean;
 			}>(request);
 			const target = body.target;
+			// activate 是唯一不要求 runtime target 的动作：冷会话（无 runtime）激活正是它的用途
+			if (action === "activate") {
+				if (!this.deps.activateSessionRuntime) {
+					this.sendError(response, 503, "webError.runtimeUnavailable", "Session runtime activation is not available");
+					return;
+				}
+				this.sendJson(response, { result: await this.deps.activateSessionRuntime(sessionId) });
+				return;
+			}
 			if (!target || target.sessionId !== sessionId) {
 				this.sendError(response, 400, "webError.runtimeTargetRequired", "A matching Session runtime target is required");
 				return;
@@ -989,7 +1021,11 @@ export class WebServiceManager {
 					result = await this.deps.cloneSessionRuntime(target);
 					break;
 				case "fork":
-					result = await this.deps.forkRuntimeSession(target, typeof body.entryId === "string" ? body.entryId : "");
+					result = await this.deps.forkRuntimeSession(target, typeof body.entryId === "string" ? body.entryId : "", {
+						// 边界校验：只认显式 true，其余值（含恶意载荷）一律按 false 处理
+						mutationFork: body.mutationFork === true,
+						branchMode: body.branchMode === true,
+					});
 					break;
 				case "get-fork-messages":
 					result = await this.deps.getForkMessages(target);
@@ -1377,7 +1413,7 @@ export class WebServiceManager {
 		}
 		function render() {
 			el("projects").innerHTML = state.projects.map(project => \`
-				<button class="item \${project.id === creatingProjectId ? "loading" : ""}" data-project="\${project.id}" \${creatingProjectId ? "disabled" : ""}>
+				<button class="item \${project.id === creatingProjectId ? "loading" : ""}" data-project="\${escapeHtml(project.id)}" \${creatingProjectId ? "disabled" : ""}>
 					<strong>\${escapeHtml(project.name)}</strong>
 					<small>\${project.id === creatingProjectId ? '<span class="pulse"></span>' + escapeHtml(tr("web.opening")) : escapeHtml(project.path)}</small>
 				</button>\`).join("");
@@ -1385,11 +1421,11 @@ export class WebServiceManager {
 				const runtime = runtimeFor(session.id);
 				const project = state.projects.find(item => item.id === session.projectId);
 				return \`<div class="session-row">
-					<button class="item \${session.id === activeSessionId ? "active" : ""}" data-session="\${session.id}">
+					<button class="item \${session.id === activeSessionId ? "active" : ""}" data-session="\${escapeHtml(session.id)}">
 						<strong>\${escapeHtml(session.title)}</strong>
 						<small>\${runtime?.status === "running" ? '<span class="pulse"></span>' : ""}\${escapeHtml(displayStatus(session, runtime))} · \${escapeHtml(runtime?.cwd || session.projectPath || project?.path || "")}</small>
 					</button>
-					<button class="close-session ghost" data-close-session="\${session.id}" title="\${escapeHtml(tr("web.closeSession"))}" \${runtime ? "" : "disabled"}>\${escapeHtml(tr("web.closeSession"))}</button>
+					<button class="close-session ghost" data-close-session="\${escapeHtml(session.id)}" title="\${escapeHtml(tr("web.closeSession"))}" \${runtime ? "" : "disabled"}>\${escapeHtml(tr("web.closeSession"))}</button>
 				</div>\`;
 			}).join("");
 			const session = state.sessions.find(item => item.id === activeSessionId);
@@ -1495,7 +1531,7 @@ export class WebServiceManager {
 		function addToolBlock(name, isError) {
 			const block = document.createElement("div");
 			block.className = "streaming-tool" + (isError ? " error" : "");
-			block.innerHTML = '<span class="tool-name">' + escapeHtml(name) + '</span>' + escapeHtml(" 执行中…");
+			block.innerHTML = '<span class="tool-name">' + escapeHtml(name) + '</span>' + escapeHtml(tr("web.toolRunning"));
 			ensureStreamingMessage().appendChild(block);
 			streamBlocks.tools.push(block);
 			return block;
@@ -1548,7 +1584,7 @@ export class WebServiceManager {
 				const tool = streamBlocks.tools.pop();
 				if (tool) {
 					tool.className = "streaming-tool" + (frame.output && frame.output.error ? " error" : "");
-					tool.innerHTML = '<span class="tool-name">' + escapeHtml(tool.dataset.toolName || "tool") + '</span>' + escapeHtml(" 完成");
+					tool.innerHTML = '<span class="tool-name">' + escapeHtml(tool.dataset.toolName || "tool") + '</span>' + escapeHtml(tr("web.toolComplete"));
 				}
 				scrollStreamToBottom();
 				return;
@@ -1685,6 +1721,8 @@ export class WebServiceManager {
 				el("stop").textContent = tr("web.closeSession");
 			}
 		});
+		// 属性值注入统一走 escapeHtml（含引号转义）：data-project/data-session 等 id 插值
+		// 也必须转义——导入/DSH 会话的 id 不受本应用控制，含引号时可造成属性逃逸。
 		function escapeHtml(value) {
 			return String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 		}
@@ -1720,7 +1758,11 @@ export class WebServiceManager {
 		// 缺失资源若被 HTML 冒充，浏览器按 module script 解析报 MIME 错误白屏。
 		const isResourceRequest = Boolean(extname(requestedPath)) && !requestedPath.endsWith(".html");
 		// 路径逃逸检查 + 文件存在性；文档请求缺失时回退内嵌页，资源请求 404。
-		if (!filePath.startsWith(normalize(this.rendererRoot)) || !existsSync(filePath)) {
+		// 前缀比对必须带分隔符边界：不带时会放行 rendererRoot 的兄弟目录
+		// （如 root = /app/web 时 /app/web-other/... 也命中 startsWith）。
+		const rendererRootPrefix = normalize(this.rendererRoot) + sep;
+		const insideRendererRoot = normalize(filePath) === normalize(this.rendererRoot) || normalize(filePath).startsWith(rendererRootPrefix);
+		if (!insideRendererRoot || !existsSync(filePath)) {
 			if (isResourceRequest) {
 				this.sendError(response, 404, "webError.apiNotFound", "Not found: " + requestedPath);
 			} else {
@@ -1911,7 +1953,7 @@ export class WebServiceManager {
 	 * SSE 流式响应：把 pi agent 事件以 AI SDK UIMessageStream 协议推送给指定 session 的订阅者。
 	 * 连接保持到 agent_end（或客户端断开）；断开时由 response close 事件清理路由注册。
 	 */
-	private handleStream(sessionId: string, request: IncomingMessage, response: ServerResponse): void {
+	private handleStream(sessionId: string, request: IncomingMessage, response: ServerResponse, options?: { keepAlive?: boolean }): void {
 		// 写入 SSE 响应头；AI SDK 前端（useChat）靠 x-vercel-ai-ui-message-stream: v1 识别协议。
 		response.writeHead(200, {
 			"content-type": "text/event-stream; charset=utf-8",
@@ -1935,6 +1977,7 @@ export class WebServiceManager {
 		};
 
 		// 注册连接；onClose 在客户端断开/服务停止时被调，确保不再向失效 socket 写数据。
+		// keepAlive（外部 GET /stream）：onFinish 不结束响应，由路由器在一轮结束后换新翻译器保活。
 		const close = this.eventStreamRouter.add(
 			sessionId,
 			writeRaw,
@@ -1950,6 +1993,7 @@ export class WebServiceManager {
 			() => {
 				if (!response.writableEnded) response.end();
 			},
+			options?.keepAlive ? { keepAlive: true } : undefined,
 		);
 
 		// 客户端断开（页面刷新/关闭）时清理；对已结束的请求忽略重复事件。
@@ -2020,6 +2064,21 @@ export class WebServiceManager {
 	}
 
 	private sendError(response: ServerResponse, statusCode: number, code: string, error: string, params?: Record<string, string | number>) {
+		// headersSent 防护：流式路由（如 restart 进度 SSE）已写头后再失败时，不能再
+		// writeHead——那公抛 ERR_HTTP_HEADERS_SENT 并升级为 unhandledRejection；
+		// 尽力往已开的流里写一行 JSON 错误行后直接 end。
+		if (response.headersSent) {
+			try {
+				response.end(`\n${JSON.stringify({ code, error, ...(params ? { params } : {}) })}\n`);
+			} catch {
+				try {
+					response.end();
+				} catch {
+					/* 连接已断，无可-write */
+				}
+			}
+			return;
+		}
 		response.writeHead(statusCode, {
 			"content-type": "application/json; charset=utf-8",
 			"cache-control": "no-store",
@@ -2064,7 +2123,12 @@ export class WebServiceManager {
 		}
 		if (oversized) throw new WebBodyTooLargeError();
 		if (chunks.length === 0) return {} as T;
-		return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
+		try {
+			return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
+		} catch {
+			// 非法 JSON 是客户端错误，回 400 而不是 500（外层 handler 统一映射该异常类型）。
+			throw new WebInvalidJsonError();
+		}
 	}
 
 	private getPort(server: Server, fallback: number) {

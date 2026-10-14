@@ -32,6 +32,38 @@ function loadHookModule() {
 
 const { computeVisibleModes } = loadHookModule();
 
+// 底栏触发器 ghost 外观（2026-10 用户反馈）：shadcn SelectTrigger 基底自带 bg-bg-input，
+// 底栏按钮一旦不显式 bg-transparent 就会被染成实心块，与同排「+」等 ghost 按钮不齐；
+// 模式选择器还自带一个 chevron（图标+箭头并排 → 图标偏左、视觉多一个小按钮）。
+const COMPOSER_TRIGGER_FILES = ["src/renderer/src/components/session/ComposerComponents.tsx", "src/renderer/src/components/session/ComposerImageGenOptions.tsx"];
+
+function composerSelectTriggerClassNames() {
+	const result = [];
+	for (const file of COMPOSER_TRIGGER_FILES) {
+		const source = readFileSync(file, "utf8");
+		// 空白容忍：[^>]* 跨行匹配属性，避免行序/缩进变化让断言失效。
+		for (const match of source.matchAll(/<SelectTrigger\b[^>]*className="([^"]*)"/g)) {
+			if (match[1].includes("composer-bar-btn")) result.push([file, match[1]]);
+		}
+	}
+	return result;
+}
+
+test("底栏 SelectTrigger 保持 ghost 透明底（不被 shadcn 基底的实心底染色）", () => {
+	const triggers = composerSelectTriggerClassNames();
+	assert.ok(triggers.length >= 3, `应扫到底栏触发器（mode/backend/imagegen），实际 ${triggers.length}`);
+	for (const [file, className] of triggers) {
+		assert.ok(className.includes("bg-transparent"), `${file} 的底栏 SelectTrigger 必须显式 bg-transparent：${className}`);
+	}
+});
+
+test("模式选择器隐藏自带 chevron，与后端选择器/「+」同族", () => {
+	const composer = readFileSync("src/renderer/src/components/session/ComposerComponents.tsx", "utf8");
+	const modeTrigger = composer.match(/className="composer-bar-btn[\s]+mode[^"]*"/)?.[0];
+	assert.ok(modeTrigger, "模式选择器应带 composer-bar-btn mode 语义 class（e2e 定位依赖）");
+	assert.ok(modeTrigger.includes("[&_[data-slot='select-icon']]:hidden"), `模式选择器需隐藏自带 chevron：${modeTrigger}`);
+});
+
 test("pi 全扩展可用：菜单只有 普通/目标/规划，不再出现生图", () => {
 	const result = [...computeVisibleModes({ isImageGen: false, planModeAvailable: true, goalModeAvailable: true })];
 	assert.deepEqual(result, ["normal", "goal", "plan"]);
@@ -64,4 +96,14 @@ test("模式选择器已常驻底栏并可被功能模块设置隐藏（源码�
 	assert.doesNotMatch(composer, /composerAddMode/, "「+」菜单不再承载模式分组");
 	const modules = readFileSync("src/renderer/src/components/app/settings/ModuleVisibilitySection.tsx", "utf8");
 	assert.match(modules, /composerModes:/, "功能模块设置页列出模式选择器开关");
+});
+
+// m01733：ACP 会话的模式选择器依赖 plan/goal 可用性回落到只剩 normal 才隐藏；
+// 但初始 useState(true) + 仅在下拉打开时刷新，会让 ACP 会话首帧就渲染出选择器。
+// 契约：挂载/后端切换（refreshAvailability 身份变化）时必须同步一次可用性。
+test("模式可用性在挂载与后端切换时同步（ACP 会话首帧不得显示模式选择器，m01733）", () => {
+	const hook = readFileSync("src/renderer/src/hooks/useComposerModeAvailability.ts", "utf8");
+	assert.match(hook, /useEffect\(\(\) => \{\s*void refreshAvailability\(\);\s*\}, \[refreshAvailability\]\)/, "需存在挂载/身份变化时刷新可用性的 effect");
+	// ACP 分支在 refreshAvailability 内同步置 false（不查 pi 扩展列表）
+	assert.match(hook, /if \(isAcp\) \{\s*setPlanModeAvailable\(false\);\s*setGoalModeAvailable\(false\);\s*return;\s*\}/);
 });

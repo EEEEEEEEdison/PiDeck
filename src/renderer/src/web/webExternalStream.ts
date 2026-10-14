@@ -221,7 +221,12 @@ export function externalStreamUrl(sessionId: string): string {
  * - 开流条件：enabled（= 有活跃会话且 useChat 空闲）且页面可见；切会话/不可见/禁用时关流；
  * - 帧到达 → 合并器更新 → liveMessage 状态驱动时间线打字机渲染；
  * - 收尾三路：finish 帧 + [DONE]（正常）、EventSource error（网络断，浏览器自动重连，
- *   合并器保留已收内容继续追加）、runtimeBusy=false 兜底（收尾帧丢失时由状态通道收口）。
+ *   合并器保留已收内容继续追加）、runtimeBusy=false 兜底（收尾帧丢失时由状态通道收口）；
+ * - 跨轮保活（对齐服务端 keepAlive）：一轮 [DONE] 后不再关流——服务端已把本连接的
+ *   翻译器重置为全新实例，下一轮（Ask 续答/桌面再发起）的 start 帧到达时重置合并器
+ *   继续打字机。旧实现 settle 即 closeStream 且 effect 依赖不变永不重开，导致第一轮
+ *   外部回复之后的所有后续轮次全部丢帧（用户反馈「Ask 回答之后看不到渲染」）；
+ * - 页面可见性：切后台关流省电，回前台立即重开（旧实现只关不开，后台切回后永久断流）。
  *
  * @param onSettled 一轮外部回复结束（含兜底收口）后回调；调用方负责磁盘重拉权威终态。
  */
@@ -229,6 +234,8 @@ export function useExternalSessionStream(options: { sessionId: string; enabled: 
 	const { sessionId, enabled, runtimeBusy, onSettled } = options;
 	const [liveMessage, setLiveMessage] = useState<UIMessage | null>(null);
 	const [externalStreaming, setExternalStreaming] = useState(false);
+	/** 页面可见性作为开流条件之一：后台关流省电，回前台重开（进 effect 依赖）。 */
+	const [visible, setVisible] = useState(() => (typeof document === "undefined" ? true : document.visibilityState === "visible"));
 	const mergerRef = useRef<ExternalReplyMerger | null>(null);
 	const esRef = useRef<EventSource | null>(null);
 	const settledFiredRef = useRef(false);
@@ -249,11 +256,12 @@ export function useExternalSessionStream(options: { sessionId: string; enabled: 
 		setExternalStreaming(false);
 	};
 
-	/** 一轮结束：关流、清打字机状态；磁盘重拉落地后再清除 liveMessage（避免终态重复或闪断）。 */
+	/** 一轮结束：清打字机状态但保留连接（跨轮保活）；磁盘重拉落地后再清除 liveMessage（避免终态重复或闪断）。 */
 	const settle = (withReload: boolean) => {
 		if (settledFiredRef.current) return;
 		settledFiredRef.current = true;
-		closeStream();
+		// 不关流：服务端 keepAlive 已重置翻译器，连接留给下一轮（见组件注释）。
+		// 关流只发生在 enabled/sessionId/可见性变化时（主 effect 清理函数）。
 		setExternalStreaming(false);
 		if (!withReload || !sessionId) {
 			clearLive();
@@ -267,7 +275,7 @@ export function useExternalSessionStream(options: { sessionId: string; enabled: 
 	};
 
 	useEffect(() => {
-		if (!enabled || !sessionId || typeof document === "undefined" || document.visibilityState !== "visible") {
+		if (!enabled || !sessionId || typeof document === "undefined" || !visible) {
 			closeStream();
 			return;
 		}
@@ -282,6 +290,7 @@ export function useExternalSessionStream(options: { sessionId: string; enabled: 
 		esRef.current = es;
 		es.onopen = () => {
 			// 重连场景：上一轮已收尾但收尾帧丢失时，新连接帧属于新一轮 → 重置合并。
+			settledFiredRef.current = false;
 			if (mergerRef.current?.isFinished()) {
 				mergerRef.current.reset();
 				setLiveMessage(null);
@@ -300,6 +309,12 @@ export function useExternalSessionStream(options: { sessionId: string; enabled: 
 			} catch {
 				return;
 			}
+			// 跨轮保活：同一连接上新一轮的 start 帧 → 重置合并器与收尾标记，继续打字机。
+			// （服务端 keepAlive 在 [DONE] 后换了新翻译器，start 是新一轮的第一个帧。）
+			if (frame.type === "start" && merger.isFinished()) {
+				merger.reset();
+				settledFiredRef.current = false;
+			}
 			const snapshot = merger.applyFrame(frame);
 			if (snapshot) {
 				setLiveMessage(snapshot.message);
@@ -313,16 +328,11 @@ export function useExternalSessionStream(options: { sessionId: string; enabled: 
 			closeStream();
 		};
 		// runtimeBusy 不在依赖里：它只通过下方边沿 effect 参与收口，不重建连接。
-	}, [enabled, sessionId]);
+	}, [enabled, sessionId, visible]);
 
-	// 页面不可见关流（省电/省连接额度），回前台重开。
+	// 页面可见性：后台关流（省电/省连接额度），回前台重开——visible 进上方 effect 依赖。
 	useEffect(() => {
-		const onVisibility = () => {
-			if (document.visibilityState !== "visible") {
-				closeStream();
-				// 打字机内容保留：回前台重开流后继续追加或由收尾路径清理。
-			}
-		};
+		const onVisibility = () => setVisible(document.visibilityState === "visible");
 		document.addEventListener("visibilitychange", onVisibility);
 		return () => document.removeEventListener("visibilitychange", onVisibility);
 	}, []);

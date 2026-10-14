@@ -60,7 +60,7 @@ pi --mode rpc
 
 ```bash
 git clone https://github.com/ayuayue/PiDeck.git
-cd pi-desktop
+cd PiDeck
 npm install
 npm run make-icon
 npm run dev

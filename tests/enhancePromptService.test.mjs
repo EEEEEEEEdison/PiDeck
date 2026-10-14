@@ -68,6 +68,7 @@ function createService(overrides = {}) {
 			harnesses.push(harness);
 			return harness.child;
 		},
+		logger: overrides.logger ?? { debug: () => {}, warn: () => {}, error: () => {} },
 		timeouts: { boot: overrides.bootTimeout ?? 500, run: overrides.runTimeout ?? 5_000 },
 	});
 	return { service, harnesses, spawnCalls, latest: () => harnesses.at(-1) };
@@ -356,6 +357,38 @@ test("boot 超时：受理失败 sdk-unavailable，且不残留占位", async ()
 	// boot 失败后下次调用重试新进程（childReady 复位路径）。
 	const retry = await acceptRun(service, latest);
 	assert.equal(retry.result.ok, true);
+});
+
+test("boot 超时诊断：告警带实测耗时与子进程 stderr 摘要", async () => {
+	const warnings = [];
+	const { service, latest } = createService({ bootTimeout: 40, logger: { debug: () => {}, warn: (message) => warnings.push(message), error: () => {} } });
+	const pending = service.enhance({ provider: "p", modelId: "m", userText: "草稿" }, createRecorder().callbacks);
+	await new Promise((resolve) => setImmediate(resolve));
+	// issue #341 的反馈里只有一行「boot 超时」，子进程到底卡在哪一段无从判断：
+	// 告警必须把实测耗时和 stderr 尾巴一起带出去。
+	latest().child.stderr.write("Error: Cannot find module '/pi/dist/index.js'\n");
+	const result = await pending;
+	assert.equal(result.ok, false);
+	assert.equal(warnings.length, 1);
+	assert.match(warnings[0], /boot 超时（\d+ms\/\d+s）/);
+	assert.ok(warnings[0].includes("Cannot find module"), warnings[0]);
+});
+
+test("stdout 混入非法行：留痕告警，不再静默丢弃", async () => {
+	const warnings = [];
+	const { service, latest } = createService({ bootTimeout: 40, logger: { debug: () => {}, warn: (message) => warnings.push(message), error: () => {} } });
+	const pending = service.enhance({ provider: "p", modelId: "m", userText: "草稿" }, createRecorder().callbacks);
+	await new Promise((resolve) => setImmediate(resolve));
+	// SDK/扩展往 stdout 混进一行无换行日志时，它会和紧随其后的 ready 拼成一行，
+	// 两边都解析失败 —— 旧实现把这种行静默丢掉，外部只能看到 boot 超时。
+	latest().emitRaw("node: DeprecationWarning");
+	latest().emitLine({ type: "ready", protocolVersion: 1 });
+	const result = await pending;
+	assert.equal(result.ok, false);
+	assert.ok(
+		warnings.some((message) => message.includes("stdout 非法行") && message.includes("DeprecationWarning")),
+		warnings.join(" | "),
+	);
 });
 
 test("协议版本不匹配：杀进程并按 protocol 结算", async () => {

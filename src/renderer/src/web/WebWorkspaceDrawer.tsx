@@ -188,11 +188,11 @@ function ResourceGroupList(props: {
 							) : props.diff ? (
 								<div className="mt-1 grid gap-1.5 rounded-md border border-border bg-card p-2">
 									<div>
-										<div className="mb-0.5 text-micro text-muted-foreground">original</div>
+										<div className="mb-0.5 text-micro text-muted-foreground">{t("web.diffOriginal")}</div>
 										<pre className="max-h-64 overflow-auto rounded bg-muted/50 p-1.5 text-micro leading-relaxed whitespace-pre-wrap">{props.diff.originalContent || "—"}</pre>
 									</div>
 									<div>
-										<div className="mb-0.5 text-micro text-muted-foreground">modified</div>
+										<div className="mb-0.5 text-micro text-muted-foreground">{t("web.diffModified")}</div>
 										<pre className="max-h-64 overflow-auto rounded bg-muted/50 p-1.5 text-micro leading-relaxed whitespace-pre-wrap">{props.diff.modifiedContent || "—"}</pre>
 									</div>
 								</div>

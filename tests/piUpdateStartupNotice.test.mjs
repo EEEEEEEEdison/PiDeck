@@ -42,14 +42,40 @@ test("cached pi version is silently revalidated once per session (stale-while-re
 	assert.match(hook, /if \(!next\.installed\) return;/);
 });
 
+/**
+ * 找某个 `<SettingsSection>` 在文件里的起始偏移。
+ * 不要用字面量 `'<SettingsSection title={t("...")}>'` 做 indexOf：锚点补全（20fdfcf40）给这些
+ * 分区都加了 `id="settings-section-…"`，属性一多/一换位、或多个空格就永远找不到（红灯）。
+ */
+function sectionStart(source, titleKey) {
+	return source.search(new RegExp(`<SettingsSection[^>]*t\\(\\s*"${titleKey}"\\s*\\)[^>]*>`));
+}
+
+test("live pi version probes refresh the cached version (external upgrade while running)", () => {
+	const hook = readFileSync("src/renderer/src/hooks/usePiUpdate.ts", "utf8");
+	const rule = readFileSync("src/renderer/src/utils/piStatusSync.ts", "utf8");
+
+	// 回归：用户在命令行升级 pi（npm i -g / pi update）后，顶部「Pi CLI 已找到」一直显示缓存里的旧版本，
+	// 而同屏的安装列表（刚跑过 pi --version）已是新版本，点「检查 Pi 更新」还提示「Pi 已是最新版本」
+	// ——实测同屏 1.1.0 vs v1.2.0。判定规则抽成纯函数（tests/piStatusSync.test.mjs），
+	// 这里钉住「凡是真探测到的版本都要接上这条校正链路」的接线。
+	assert.match(rule, /export function resolvePiStatusFromProbe\(/);
+	// 「检查 Pi 更新」：checkUpdate 已经真跑过 pi --version，用它的 currentVersion 校正顶部与缓存
+	assert.match(hook, /checkUpdate\(\)[\s\S]{0,400}?syncPiStatusFromProbe\(\s*\{\s*command: result\.command,\s*version: result\.currentVersion\s*\},?\s*\)/);
+	// 安装列表里「当前使用」那条同理：用户从不点「检测环境」也能看到外部升级后的真实版本
+	assert.match(hook, /find\(\(item\) => item\.isActive\)[\s\S]{0,240}?syncPiStatusFromProbe\(\s*\{\s*command: active\.path,\s*version: active\.version\s*\},?\s*\)/);
+	// 校正必须连缓存一起写：只改顶部不写 settings.piInstall，下次启动又变回旧版本
+	assert.match(hook, /setSettings\(await persistPiInstall\(next\)\)/);
+});
+
 test("Pi CLI update notice is anchored to its controls", () => {
 	const devTab = readFileSync("src/renderer/src/components/app/settings/DevTab.tsx", "utf8");
 	const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 	const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
 
-	const environmentStart = devTab.indexOf('<SettingsSection title={t("settings.environment")}>');
+	const environmentStart = sectionStart(devTab, "settings.environment");
 	const piNoticeStart = devTab.indexOf("{piUpdateNotice &&");
-	const updatesStart = devTab.indexOf('<SettingsSection title={t("settings.sectionUpdates")}>');
+	const updatesStart = sectionStart(devTab, "settings.sectionUpdates");
 
 	assert.ok(environmentStart >= 0, "environment section must exist");
 	assert.ok(piNoticeStart > environmentStart && piNoticeStart < updatesStart, "Pi CLI update notice must appear in the environment section beside its action buttons");

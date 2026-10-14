@@ -1,7 +1,6 @@
 import { useAtomValue } from "jotai";
 import { Check, ChevronDown, ChevronRight, CircleStop, CircleX, Copy, FileDown, FileText, Fingerprint, Folder, Globe, Link2, MessagesSquare, MoreHorizontal, Pencil, PanelLeft, PanelRight, Pin, PinOff, Play, Plus, RefreshCw, RotateCw, Terminal, X } from "lucide-react";
-import { Fragment, useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { motion, useReducedMotion, type Transition } from "motion/react";
+import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily, sessionRecordsAtom, projectInventoryByIdAtom, projectByIdAtomFamily, acpEnabledAtom, acpToolsAtom } from "../../atoms";
 import { t } from "../../i18n";
 import { displayProjectDirectoryName } from "../../rendererUtils";
@@ -16,13 +15,13 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { cn } from "../../lib/utils";
-import { SessionBackendBadge } from "./SessionSourceBadge";
+import { AcpBackendMark, SessionBackendBadge, SessionChannelMark } from "./SessionSourceBadge";
 import { TitleScrollText } from "../sidebar/TitleScrollText";
 import { SessionHeader } from "./SessionHeader";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
 
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
-import { buildProjectTabGroups, type ProjectTabGroup } from "../../utils/sessionTabGroups";
+import { buildSessionTabBarEntries } from "../../utils/sessionTabGroups";
 import { SESSION_TAB_BADGE_EXTRA_WIDTH } from "../../../../shared/sessionTabWidth";
 
 /**
@@ -39,19 +38,6 @@ export const SPLIT_GROUP_COLOR_PALETTE = [
 	{ name: "pink", value: "#d6409f", labelKey: "session.splitGroup.color.pink" },
 	{ name: "gray", value: "#8d8d8d", labelKey: "session.splitGroup.color.gray" },
 ] as const;
-
-/**
- * beui Tabs（motion）同款 spring：活动 Tab 指示条切换时带轻微过冲，
- * 落地有生命感而不是硬切；数值与 beui.dev 官方 registry 保持一致。
- */
-const TAB_INDICATOR_SPRING: Transition = {
-	type: "spring",
-	stiffness: 170,
-	damping: 24,
-	mass: 1.2,
-};
-/** 用户开启「减少动态效果」时禁用指示条滑动（瞬时切换，不动画）。 */
-const TAB_INDICATOR_INSTANT: Transition = { duration: 0 };
 
 /**
  * 会话 Tab 栏（浏览器式多 Tab）：标题栏下方展示当前打开的所有会话。
@@ -71,7 +57,8 @@ const TAB_INDICATOR_INSTANT: Transition = { duration: 0 };
  * - 每个会话 Tab 的下拉按钮（或右键）打开操作菜单：切换到该会话、固定、
  *   停止 Agent（仅当前 Tab，保留会话与 Tab）、重启（仅当前 Tab）、关闭/关闭其他/关闭全部；
  * - 当前 Tab 识别：灰色柔和实底（选中态背景 = --color-bg-active，与左侧 SessionTree 选中态
- *   同一套语义），由共享 layoutId 的 motion.span 滑动呈现；不做浮起/阴影/底部横条
+ *   同一套语义），直接画在激活 Tab 自己身上、切换瞬时出现；不做滑动/浮起/阴影/底部横条
+ *   （2026-10 用户指定取消 beui 同款 layoutId 共享投影：旧实现下选中底色会从上一个 Tab 滑到新 Tab）。
  *   （曾因过粗被弃用）。
 
 /** “+” 下拉里的新建目标：聊天对话区或已打开项目 */
@@ -229,7 +216,6 @@ export type SessionTabActions = {
 export function SessionTabsBar(props: SessionTabsBarProps) {
 	const embeddedHeaderRef = useRef<HTMLDivElement>(null);
 	const { tabs, pinnedTabs, currentSessionId, previewTabId, tabMaxWidth } = props;
-	const tabItems = useMemo(() => tabs.map((sessionId) => ({ sessionId })), [tabs]);
 	const dragSourceRef = useRef<string | null>(null);
 	const dragTargetRef = useRef<{ targetId: string; position: "before" | "after" } | null>(null);
 	const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -239,41 +225,26 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 	const [splitGroupMenuOpen, setSplitGroupMenuOpen] = useState(false);
 	const [splitGroupNameDraft, setSplitGroupNameDraft] = useState("");
 
-	// —— 活动 Tab 指示器（beui Tabs 同款）——
-	// 所有 Tab（会话/文件）共用同一个 layoutId：active 变化时指示条 spring 滑到新位置，
-	// 而不是每个 Tab 自己画一条硬切底条。layoutRoot 使投影作用域限定在本栏内，
-	// 滚动容器里的偏移不会被重放成位移（见 beui tabs.tsx 同款注释）。
-	const activeIndicatorId = useId();
-	const reduceMotion = useReducedMotion();
-	const indicatorTransition = reduceMotion ? TAB_INDICATOR_INSTANT : TAB_INDICATOR_SPRING;
-
-	// —— 按项目分组（始终生效，不再受开关控制）——
-	// 分组排序是会话 Tab 的固有行为：新会话归入其所属项目组的尾部（buildProjectTabGroups
-	// 按 tabs 原序归组，天然保证“新开会话加到自己项目组尾”）；组在视觉上只以 `|` 边界体现，
-	// 不渲染胶囊/颜色/折叠。2026-09 收敛：旧“浏览器标签组胶囊 + 开关”已废弃，分组成为默认。
+	// —— 按项目分组 + 分屏组折叠（始终生效，不再受开关控制）——
+	// 分组排序是会话 Tab 的固有行为：新会话归入其所属项目组的尾部（按 tabs 原序归组，天然保证
+	// “新开会话加到自己项目组尾”）；组在视觉上只以 `|` 边界体现，不渲染胶囊/颜色/折叠。
+	// 2026-09 收敛：旧“浏览器标签组胶囊 + 开关”已废弃，分组成为默认。
 	const sessionRecords = useAtomValue(sessionRecordsAtom);
 	const projectsById = useAtomValue(projectInventoryByIdAtom);
 
-	// 项目分组视图：始终构建（分组排序是固有行为）。分屏组内的 Tab 不参与项目分组（保持分屏语义），
-	// 从输入中剔除后再聚合；组顺序 = 组内首个 Tab 在 tabs 中的出现顺序。
-	const projectView = useMemo(() => {
-		const splitSet = new Set(props.splitGroupIds ?? []);
-		const groupedTabs = tabs.filter((id) => !splitSet.has(id));
-		return buildProjectTabGroups(groupedTabs, pinnedTabs, (sessionId) => {
-			const record = sessionRecords[sessionId];
-			const projectId = record?.projectId;
-			if (!projectId) return undefined;
-			return { projectId, name: projectsById[projectId]?.name };
-		});
-	}, [props.splitGroupIds, tabs, pinnedTabs, sessionRecords, projectsById]);
-	// sessionId → 所属项目组（循环里判断落在哪个组，按“组”为单位渲染用）。
-	const projectGroupBySession = useMemo(() => {
-		const map = new Map<string, ProjectTabGroup>();
-		for (const group of projectView.groups) {
-			for (const id of group.sessionIds) map.set(id, group);
-		}
-		return map;
-	}, [projectView]);
+	// 显示单元序列：渲染顺序与 Ctrl+Tab 循环顺序的唯一来源（issue #346）——快捷键侧
+	// （useSessionWorkspaceChrome）消费同一纯函数，避免一边按底层打开顺序切换、一边按聚拢顺序显示。
+	// 分屏组在渲染层折叠成「组头胶囊 + 组内 Tab」节点，组内 Tab 不参与项目分组。
+	const tabBarEntries = useMemo(
+		() =>
+			buildSessionTabBarEntries(tabs, pinnedTabs, props.splitGroupIds ?? [], (sessionId) => {
+				const record = sessionRecords[sessionId];
+				const projectId = record?.projectId;
+				if (!projectId) return undefined;
+				return { projectId, name: projectsById[projectId]?.name };
+			}),
+		[props.splitGroupIds, tabs, pinnedTabs, sessionRecords, projectsById],
+	);
 
 	// —— 滚动容器 ref（拖拽排序与新建菜单共用）——
 	const scrollRef = useRef<HTMLDivElement>(null);
@@ -400,12 +371,10 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 				</Button>
 			) : null}
 			<div className="relative flex min-w-0 flex-1 items-center">
-				<motion.div ref={scrollRef} layoutRoot onWheel={handleTabsWheel} className="session-tabs-scroll relative flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
+				<div ref={scrollRef} onWheel={handleTabsWheel} className="session-tabs-scroll relative flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
 					{(() => {
 						// 分屏组：组内会话聚合渲染（组头胶囊 + 颜色标记）；收起时组内 Tab 隐藏
-						const splitGroupIds = props.splitGroupIds ?? [];
-						const splitGroupSet = new Set(splitGroupIds);
-						const hasSplitGroup = splitGroupIds.length > 1;
+						const hasSplitGroup = tabBarEntries.some((entry) => entry.kind === "split");
 						const groupCollapsed = hasSplitGroup && Boolean(props.splitGroupCollapsed);
 						const renderTab = (sessionId: string) => (
 							<SessionTab
@@ -423,8 +392,6 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 								isStopping={sessionId === currentSessionId ? props.runControl?.isStopping : undefined}
 								isRestarting={sessionId === currentSessionId ? props.runControl?.isRestarting : undefined}
 								isReloading={sessionId === currentSessionId ? props.runControl?.isReloading : undefined}
-								indicatorId={activeIndicatorId}
-								indicatorTransition={indicatorTransition}
 								onSelect={props.onSelect}
 								onPromotePreview={props.onPromotePreview}
 								onClose={props.onClose}
@@ -460,8 +427,9 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 									)}
 								</>
 							);
-						// —— 收集顶层 Tab 节点：普通会话 Tab；分屏组「胶囊 + 组内 Tab」整体算一个节点。
-						// 分隔线策略改为显式 emitDivider：默认只在「进入新组 / 离开分组 / 普通 Tab 之间」插分隔线，
+						// —— 顶层 Tab 节点：普通 Tab / 项目分组 / 分屏组胶囊。显示单元由共享纯函数
+						// buildSessionTabBarEntries 给出（与 Ctrl+Tab 循环同源），这里只负责渲染节点 + 在单元边界插分隔线。
+						// 分隔线策略：单元边界插线（进入/离开分组、分屏组之间），连续两个自由 Tab 之间不插；
 						// 同一项目分组内相邻 Tab 不插线（保持组内连续），避免浏览器式分隔线把分组切散。
 						// 强度：border-default（#dfdfdf）再打五折后与白底几乎无差（用户报「看不清」），
 						// 必须用不透明的 border-strong（浅 #d7d7d7 / 暗 #3a3a3a），高度也从 h-4 提到 h-5。
@@ -471,141 +439,112 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 								nodes.push(<span key={`tab-sep:${nodes.length}`} className="mx-0.5 h-5 w-px shrink-0 bg-border-strong" aria-hidden="true" />);
 							}
 						};
-						// groupKey 记录当前节点是否处于某项目分组内；null 表示自由/分屏，切换回组时均需分隔线。
-						let currentGroupKey: string | null = null;
-						// seen 用于“整组重排”：项目组在首个未消费成员处整块输出（组内所有 Tab 一并 emit 并标记
-						// seen），保证同一项目的会话永远连续聚合，不因打开顺序被打散；loose/分屏亦标记。
-						const seen = new Set<string>();
-						const emitNode = (node: ReactNode, groupKey?: string) => {
-							nodes.push(node);
-							currentGroupKey = groupKey ?? null;
-						};
-						tabItems.forEach(({ sessionId }) => {
-							if (seen.has(sessionId)) return;
-							// 1) 分屏组：整组作为一个单元输出（组内 Tab 不参与项目分组）
-							if (hasSplitGroup && splitGroupSet.has(sessionId)) {
-								// 组内会话：只在组内第一个位置渲染「组头胶囊 +（展开时）组内全部 Tab」
-								if (sessionId !== splitGroupIds[0]) return;
-								const groupHasFocus = currentSessionId != null && splitGroupSet.has(currentSessionId);
-								const groupName = props.splitGroupName?.trim() || t("session.splitGroup.label");
-								const groupColor = props.splitGroupColor || SPLIT_GROUP_COLOR_PALETTE[0].value;
-								// role="group" 挂在外层容器（容纳胶囊 + 组内 Tab），按钮保持原生 button 语义；
-								// aria-expanded/aria-controls 挂在按钮上；右键打开组管理菜单（Popover），
-								// 左键点击仍是展开/收起（与浏览器标签组一致）
-								const groupNode = (
-									<Popover open={splitGroupMenuOpen} onOpenChange={setSplitGroupMenuOpen} key={`split-group:${sessionId}`}>
-										<PopoverAnchor asChild>
-											<div role="group" aria-label={groupName} className="flex min-w-0 items-center gap-1">
-												<GroupCapsuleButton
-													color={groupColor}
-													name={groupName}
-													count={splitGroupIds.length}
-													expanded={!groupCollapsed}
-													focused={groupHasFocus}
-													ariaLabel={groupCollapsed ? t("session.splitGroup.expand") : t("session.splitGroup.collapse")}
-													ariaControls="session-split-group-tabs"
-													onToggle={props.onToggleSplitGroup}
-													onContextMenu={(event) => {
-														// 右键：打开组管理菜单（重命名/颜色/取消分屏）
-														event.preventDefault();
-														setSplitGroupNameDraft(groupName);
-														setSplitGroupMenuOpen(true);
-													}}
-												/>
-												{!groupCollapsed && (
-													<div id="session-split-group-tabs" className="flex min-w-0 items-center gap-1">
-														{splitGroupIds.map((id) => renderTab(id))}
-													</div>
-												)}
-											</div>
-										</PopoverAnchor>
-										{/* 组管理菜单：重命名 + 颜色选择 + 取消分屏（其余按钮不要） */}
-										<PopoverContent align="start" sideOffset={6} className="w-64 p-3">
-											<div className="flex flex-col gap-3">
-												<input
-													type="text"
-													value={splitGroupNameDraft}
-													placeholder={t("session.splitGroup.renamePlaceholder")}
-													maxLength={24}
-													aria-label={t("session.splitGroup.rename")}
-													onChange={(event) => setSplitGroupNameDraft(event.target.value)}
-													onKeyDown={(event) => {
-														if (event.key === "Enter") {
-															event.currentTarget.blur();
-														}
-													}}
-													onBlur={() => {
-														const next = splitGroupNameDraft.trim();
-														if (next && next !== (props.splitGroupName ?? "")) {
-															props.onSplitGroupRename?.(next);
-														}
-													}}
-													className="h-8 w-full rounded-md border border-border-strong bg-background px-2 text-caption text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-accent focus:ring-1 focus:ring-accent/40"
-												/>
-												{/* 颜色选择排（浏览器标签组同款：预设色板） */}
-												<div className="flex items-center gap-2" role="radiogroup" aria-label={t("session.splitGroup.color")}>
-													{SPLIT_GROUP_COLOR_PALETTE.map((c) => (
-														<button
-															key={c.name}
-															type="button"
-															role="radio"
-															aria-checked={groupColor === c.value}
-															aria-label={t(c.labelKey)}
-															title={t(c.labelKey)}
-															onClick={() => props.onSplitGroupColorChange?.(c.value)}
-															className={cn("size-5 rounded-full transition-transform hover:scale-110", groupColor === c.value && "ring-2 ring-offset-2 ring-offset-popover")}
-															style={{
-																backgroundColor: c.value,
-																...(groupColor === c.value ? { boxShadow: `0 0 0 1px ${c.value}` } : {}),
-															}}
-														/>
-													))}
+						// 分屏组节点：胶囊 +（展开时）组内全部 Tab；组内顺序 = 传入的 sessionIds（分屏 layout 视觉顺序）。
+						const renderSplitGroup = (sessionIds: readonly string[]) => {
+							const splitSet = new Set(sessionIds);
+							const groupHasFocus = currentSessionId != null && splitSet.has(currentSessionId);
+							const groupName = props.splitGroupName?.trim() || t("session.splitGroup.label");
+							const groupColor = props.splitGroupColor || SPLIT_GROUP_COLOR_PALETTE[0].value;
+							// role="group" 挂在外层容器（容纳胶囊 + 组内 Tab），按钮保持原生 button 语义；
+							// aria-expanded/aria-controls 挂在按钮上；右键打开组管理菜单（Popover），
+							// 左键点击仍是展开/收起（与浏览器标签组一致）
+							return (
+								<Popover open={splitGroupMenuOpen} onOpenChange={setSplitGroupMenuOpen} key={`split-group:${sessionIds[0]}`}>
+									<PopoverAnchor asChild>
+										<div role="group" aria-label={groupName} className="flex min-w-0 items-center gap-1">
+											<GroupCapsuleButton
+												color={groupColor}
+												name={groupName}
+												count={sessionIds.length}
+												expanded={!groupCollapsed}
+												focused={groupHasFocus}
+												ariaLabel={groupCollapsed ? t("session.splitGroup.expand") : t("session.splitGroup.collapse")}
+												ariaControls="session-split-group-tabs"
+												onToggle={props.onToggleSplitGroup}
+												onContextMenu={(event) => {
+													// 右键：打开组管理菜单（重命名/颜色/取消分屏）
+													event.preventDefault();
+													setSplitGroupNameDraft(groupName);
+													setSplitGroupMenuOpen(true);
+												}}
+											/>
+											{!groupCollapsed && (
+												<div id="session-split-group-tabs" className="flex min-w-0 items-center gap-1">
+													{sessionIds.map((id) => renderTab(id))}
 												</div>
-												{/* 取消分屏：全部会话退出分屏布局 */}
-												<button
-													type="button"
-													onClick={() => {
-														setSplitGroupMenuOpen(false);
-														props.onExitAllSplit?.();
-													}}
-													className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-caption text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
-												>
-													<CircleX className="size-3.5" aria-hidden="true" />
-													{t("session.splitGroup.exitAll")}
-												</button>
+											)}
+										</div>
+									</PopoverAnchor>
+									{/* 组管理菜单：重命名 + 颜色选择 + 取消分屏（其余按钮不要） */}
+									<PopoverContent align="start" sideOffset={6} className="w-64 p-3">
+										<div className="flex flex-col gap-3">
+											<input
+												type="text"
+												value={splitGroupNameDraft}
+												placeholder={t("session.splitGroup.renamePlaceholder")}
+												maxLength={24}
+												aria-label={t("session.splitGroup.rename")}
+												onChange={(event) => setSplitGroupNameDraft(event.target.value)}
+												onKeyDown={(event) => {
+													if (event.key === "Enter") {
+														event.currentTarget.blur();
+													}
+												}}
+												onBlur={() => {
+													const next = splitGroupNameDraft.trim();
+													if (next && next !== (props.splitGroupName ?? "")) {
+														props.onSplitGroupRename?.(next);
+													}
+												}}
+												className="h-8 w-full rounded-md border border-border-strong bg-background px-2 text-caption text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-accent focus:ring-1 focus:ring-accent/40"
+											/>
+											{/* 颜色选择排（浏览器标签组同款：预设色板） */}
+											<div className="flex items-center gap-2" role="radiogroup" aria-label={t("session.splitGroup.color")}>
+												{SPLIT_GROUP_COLOR_PALETTE.map((c) => (
+													<button
+														key={c.name}
+														type="button"
+														role="radio"
+														aria-checked={groupColor === c.value}
+														aria-label={t(c.labelKey)}
+														title={t(c.labelKey)}
+														onClick={() => props.onSplitGroupColorChange?.(c.value)}
+														className={cn("size-5 rounded-full transition-transform hover:scale-110", groupColor === c.value && "ring-2 ring-offset-2 ring-offset-popover")}
+														style={{
+															backgroundColor: c.value,
+															...(groupColor === c.value ? { boxShadow: `0 0 0 1px ${c.value}` } : {}),
+														}}
+													/>
+												))}
 											</div>
-										</PopoverContent>
-									</Popover>
-								);
-								// 分屏组作为独立单元：进组前插分隔线；组内不再插线（组颜色胶囊已表达归属）。
-								// groupKey 用固定 "split" 参与边界判定：与前后普通 Tab/项目组都自动插 |。
-								// 整组仅输出一次：首个成员处输出并标记整组 seen（其余成员在顶部 seen 拦截）。
-								for (const sid of splitGroupIds) seen.add(sid);
-								emitDivider();
-								emitNode(groupNode, "split");
-								return;
-							}
-							// 2) 项目分组（始终生效）：同一项目的会话在这里整组输出——在首个未消费成员处
-							//    把整组 sessionIds 逐个 emit 并标记 seen，从而把“后打开的会话”归回其项目组尾，
-							//    而不是追加到全局末尾。组间用 currentGroupKey 判界插 |，组内相邻不插。
-							const projectGroup = projectGroupBySession.get(sessionId);
-							if (projectGroup) {
-								const groupKey = "project:" + projectGroup.projectId;
-								if (currentGroupKey !== groupKey) emitDivider();
-								for (const sid of projectGroup.sessionIds) {
-									if (seen.has(sid)) continue;
-									emitNode(renderTab(sid), groupKey);
-									seen.add(sid);
-								}
-								return;
-							}
-							// 3) 普通 Tab（无项目归属 / 固定 Tab / 分组外）：平铺。
-							//    只在与“上一个节点不属于同一组”时插 | 分隔（相邻两个普通 Tab 不插线）。
-							if (currentGroupKey !== null) emitDivider();
-							emitNode(renderTab(sessionId));
-							seen.add(sessionId);
-						});
-						// 分隔线已由 emitDivider 在构建 nodes 时按组边界插入，这里直接平铺输出。
+											{/* 取消分屏：全部会话退出分屏布局 */}
+											<button
+												type="button"
+												onClick={() => {
+													setSplitGroupMenuOpen(false);
+													props.onExitAllSplit?.();
+												}}
+												className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-caption text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
+											>
+												<CircleX className="size-3.5" aria-hidden="true" />
+												{t("session.splitGroup.exitAll")}
+											</button>
+										</div>
+									</PopoverContent>
+								</Popover>
+							);
+						};
+						// 显示单元 → 节点：单元边界插分隔线（连续两个自由 Tab 之间不插）。
+						let previousGroupKey: string | null = null;
+						for (const entry of tabBarEntries) {
+							const entryGroupKey = entry.kind === "project" ? `project:${entry.projectId}` : entry.kind === "split" ? "split" : null;
+							if (previousGroupKey !== null || entryGroupKey !== null) emitDivider();
+							if (entry.kind === "split") nodes.push(renderSplitGroup(entry.sessionIds));
+							else if (entry.kind === "project") {
+								for (const sessionId of entry.sessionIds) nodes.push(renderTab(sessionId));
+							} else nodes.push(renderTab(entry.sessionId));
+							previousGroupKey = entryGroupKey;
+						}
 						return nodes;
 					})()}
 					{/* 浏览器式新建入口：跟在最后一张标签后面，下拉选择新建到哪个项目。
@@ -615,7 +554,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 					{!props.simple && props.pluginTab ? (
 						<>
 							<span className="mx-0.5 h-5 w-px shrink-0 bg-border-strong" aria-hidden="true" />
-							<HostPluginTab tab={props.pluginTab} indicatorId={activeIndicatorId} indicatorTransition={indicatorTransition} />
+							<HostPluginTab tab={props.pluginTab} />
 						</>
 					) : null}
 					{/* 文件/Diff 与会话共用本栏：同一套 session-tab 皮，不另开绿条栏 */}
@@ -623,13 +562,13 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 						<>
 							<span className="mx-0.5 h-5 w-px shrink-0 bg-border-strong" aria-hidden="true" />
 							{props.editorTabs.flatMap((tab, index) => {
-								const node = <EditorWorkbenchTab key={tab.id} tab={tab} indicatorId={activeIndicatorId} indicatorTransition={indicatorTransition} onSelect={props.onSelectEditorTab} onClose={props.onCloseEditorTab} onPromotePreview={props.onPromoteEditorPreview} />;
+								const node = <EditorWorkbenchTab key={tab.id} tab={tab} onSelect={props.onSelectEditorTab} onClose={props.onCloseEditorTab} onPromotePreview={props.onPromoteEditorPreview} />;
 								if (index === 0) return [node];
 								return [<span key={`editor-tab-sep:${tab.id}`} className="mx-0.5 h-5 w-px shrink-0 bg-border-strong" aria-hidden="true" />, node];
 							})}
 						</>
 					) : null}
-				</motion.div>
+				</div>
 				{/* 右缘渐变：溢出时提示「右侧还有 Tab」（纯装饰，不拦截鼠标）。
           放在滚动容器外层（absolute 子元素放 overflow-x-auto 容器内会随内容滚走）。 */}
 				{tabsOverflow && <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-gradient-to-l from-background/90 to-transparent" />}
@@ -750,15 +689,7 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
  * 工作台文件/Diff Tab：视觉复用 session-tab，不引入第二套绿条样式。
  * 与会话 Tab 正交：不参与会话拖拽/固定，只转发选中/关闭/预览晋升。
  */
-function EditorWorkbenchTab(props: {
-	tab: WorkbenchEditorTabItem;
-	/** 与会话 Tab 共用的指示器 layoutId（选中态滑动到本 Tab，同一套 spring） */
-	indicatorId: string;
-	indicatorTransition: Transition;
-	onSelect?: (tabId: string) => void;
-	onClose?: (tabId: string) => void;
-	onPromotePreview?: (tabId: string) => void;
-}) {
+function EditorWorkbenchTab(props: { tab: WorkbenchEditorTabItem; onSelect?: (tabId: string) => void; onClose?: (tabId: string) => void; onPromotePreview?: (tabId: string) => void }) {
 	const { tab } = props;
 	// 工作台 Tab 富提示：第一行 tab 标题，第二行完整路径（tab.title 由装配层传入 filePath）。
 	// title 缺省时退化为单行，与旧原生 title 行为一致。
@@ -809,10 +740,10 @@ function EditorWorkbenchTab(props: {
 							<X className="size-3" />
 						</button>
 					</span>
-					{/* 灰色选中背景：与会话 Tab 同一 layoutId（active 变化即 spring 滑动到本 Tab），
+					{/* 灰色选中背景：只属于激活 Tab 自身，切换时瞬时出现（无滑动动画），
           替代旧的底部细条；内容包装层已 z-10 抬升到背景之上。
           背景色用 inline 变量（var(--color-bg-active)）而非 bg-accent 类，同 SessionTab 一致。 */}
-					{tab.active && <motion.span aria-hidden="true" layoutId={props.indicatorId} layout="position" transition={props.indicatorTransition} className="pointer-events-none absolute inset-0 rounded-md bg-accent" />}
+					{tab.active && <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-md bg-accent" />}
 				</div>
 			</TooltipTrigger>
 			{tab.title ? (
@@ -832,10 +763,10 @@ function EditorWorkbenchTab(props: {
 
 /**
  * 页面式宿主插件面板伪 Tab：与 EditorWorkbenchTab 同一套 session-tab 皮。
- * 它在栏里始终是选中态（呈现的视图就是它），背景走与会话 Tab 共享的 layoutId 指示器，
- * 选中背景从上一个 Tab spring 滑过来。不可拖拽排序，唯一动作是关闭（即收起插件页）。
+ * 它在栏里始终是选中态（呈现的视图就是它），选中背景瞬时铺满（无滑动动画）。
+ * 不可拖拽排序，唯一动作是关闭（即收起插件页）。
  */
-function HostPluginTab(props: { tab: { title: string; icon?: React.ComponentType<{ className?: string }>; onClose: () => void }; indicatorId: string; indicatorTransition: Transition }) {
+function HostPluginTab(props: { tab: { title: string; icon?: React.ComponentType<{ className?: string }>; onClose: () => void } }) {
 	const { tab } = props;
 	const Icon = tab.icon;
 	return (
@@ -865,7 +796,7 @@ function HostPluginTab(props: { tab: { title: string; icon?: React.ComponentType
 					<X className="size-3" />
 				</button>
 			</span>
-			<motion.span aria-hidden="true" layoutId={props.indicatorId} layout="position" transition={props.indicatorTransition} className="pointer-events-none absolute inset-0 rounded-md bg-accent" />
+			<span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-md bg-accent" />
 		</div>
 	);
 }
@@ -951,10 +882,6 @@ function SessionTab(props: {
 	onDragOver: (event: React.DragEvent) => void;
 	onDrop: (event: React.DragEvent) => void;
 	onDragEnd: () => void;
-	/** 与全栏共享的指示器 layoutId（beui Tabs 同款：active 切换时 spring 滑动） */
-	indicatorId: string;
-	/** 指示器 transition：spring（默认）/ 减少动态时瞬时 */
-	indicatorTransition: Transition;
 	/** 右键菜单的「会话操作」组（App 按 sessionId 参数化装配）；undefined = 整组不渲染 */
 	sessionActions?: SessionTabActions;
 }) {
@@ -999,7 +926,13 @@ function SessionTab(props: {
 						<SessionActivityIndicator status={status} sessionId={sessionId} busy={props.isRestarting || props.isStopping || props.isReloading} />
 						{pinned && <Pin className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />}
 						<TitleScrollText text={title} disabled className="truncate font-bold" />
-						{(record?.backend === "dsh" || record?.backend === "imagegen" || record?.backend === "acp") && <SessionBackendBadge backend={record.backend} className="h-4 shrink-0" />}
+						{record?.backend === "acp" ? (
+							// ACP 会话用工具品牌图标（Claude/Codex/CodeBuddy…），与消息区作者标同源；
+							// 通用「Agent CLI」文字徽标认不出具体 CLI（用户反馈 tab logo 不对）。
+							<AcpBackendMark acpToolId={record.acpToolId} className="size-3.5 shrink-0" />
+						) : (
+							(record?.backend === "dsh" || record?.backend === "imagegen") && <SessionBackendBadge backend={record.backend} className="h-4 shrink-0" />
+						)}
 						{runtime?.state?.planModeActive && <span className="shrink-0 text-xs text-muted-foreground">{t("app.composerModePlan")}</span>}
 						{runtime?.state?.goal && runtime.state.goal.phase !== "complete" && <span className="shrink-0 text-xs text-muted-foreground">{t("app.composerModeGoal")}</span>}
 					</div>
@@ -1058,7 +991,7 @@ function SessionTab(props: {
 								hasLeadingBadges ? "w-fit max-w-(--session-tab-max-w-badged)" : "w-fit max-w-(--session-tab-max-w)",
 								dragging && "opacity-50",
 								// 选中态：灰色柔和实底（bg-accent = --color-bg-active，与左侧 SessionTree 选中行一致），
-								// 背景由下方共享 layoutId 的 motion.span spring 滑到当前 Tab；不做黑色实底/阴影/底部条。
+								// 背景由下方 span 画在激活 Tab 自身，切换瞬时出现；不做黑色实底/阴影/底部条。
 								// 文字用 text-foreground（灰底上直接可读，无需反色）。
 								// hover 底用 accent-soft 实底而非 accent/50：半透明灰叠在白底上几乎不可见（同 EditorWorkbenchTab 注释）。
 								active ? "border-transparent font-medium text-foreground" : "border-transparent text-muted-foreground hover:-translate-y-px hover:bg-accent-soft hover:text-foreground",
@@ -1074,7 +1007,14 @@ function SessionTab(props: {
 								)}
 								{pinned && <Pin className="size-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />}
 								{/* DSH/生图是文字标记，保留自然宽度；固定 size-4 会让文字溢出到右侧操作按钮区域。 */}
-								{(record?.backend === "dsh" || record?.backend === "imagegen" || record?.backend === "acp") && <SessionBackendBadge backend={record?.backend} className="h-4 shrink-0" />}
+								{record?.backend === "acp" ? (
+									// 同上：ACP 品牌图标；DSH/生图保留文字标记（自然宽度，固定 size-4 会溢出到右侧按钮区）。
+									<AcpBackendMark acpToolId={record?.acpToolId} className="size-3.5 shrink-0" />
+								) : (
+									(record?.backend === "dsh" || record?.backend === "imagegen") && <SessionBackendBadge backend={record?.backend} className="h-4 shrink-0" />
+								)}
+								{/* 外部连接渠道（微信/飞书）：tab 上带渠道标志，与侧栏同一套徽标 */}
+								{record?.channel && <SessionChannelMark channel={record.channel} className="size-3.5 shrink-0" />}
 								{/* G12：DSH plan 模式 / danger 权限预设全局可见（数据来自 runtime state，tab 级常显） */}
 								{runtime?.state?.planModeActive && (
 									<span className="shrink-0 rounded bg-primary/15 px-1 text-[10px] font-medium leading-4 text-primary" title={t("app.composerModePlan")}>
@@ -1119,13 +1059,13 @@ function SessionTab(props: {
 							</span>
 							{/* 拖拽插入指示线：2px 主题色竖线，贴在目标 Tab 左/右缘 */}
 							{props.indicator && <span aria-hidden="true" className={cn("pointer-events-none absolute top-1 bottom-1 w-0.5 rounded-full bg-primary", props.indicator === "before" ? "-left-0.5" : "-right-0.5")} />}
-							{/* 灰色选中背景按钮（beui Tabs 同款滑动；无底部条）：只有 active Tab 渲染，layoutId 全栏共享，
-            切换时 spring 滑到新位置并在目标 Tab 铺满整块灰底——替代旧的底部细条/黑色实底；
-            拖拽插入线（props.indicator）是竖线且仅拖拽期存在，二者位置不重叠。
+							{/* 灰色选中背景：只属于激活 Tab 自身，切换时瞬时出现；拖拽插入线（props.indicator）
+            是竖线且仅拖拽期存在，二者位置不重叠。旧实现用全栏共享 layoutId 把底色从旧 Tab 滑到新 Tab，
+            用户明确不要这个移动动画，已改为普通 span（不做浮起/阴影/底部条）。
             背景色用 inline 变量（var(--color-bg-active)）而非 bg-accent 类：类依赖 Tailwind
             扫描生成，曾出现在部分环境下类未输出导致「激活 Tab 无背景」的回归。inline 变量
             随主题实时切换，与 SessionTree 选中态同色。 */}
-							{active && <motion.span aria-hidden="true" layoutId={props.indicatorId} layout="position" transition={props.indicatorTransition} className="pointer-events-none absolute inset-0 rounded-md bg-accent" />}
+							{active && <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-md bg-accent" />}
 						</div>
 					</ContextMenuTrigger>
 				</TooltipTrigger>

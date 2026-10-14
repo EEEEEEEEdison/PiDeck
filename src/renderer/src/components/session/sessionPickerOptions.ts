@@ -203,10 +203,16 @@ export function computeModelPickerDefaultExpanded(params: {
 	current?: { provider?: string; modelId?: string };
 	/** 排序后的提供商 key 列表（与选择器分组顺序一致） */
 	providers: string[];
+	/** 调用方要求全展开：收藏栏与所有提供商分组都展开（外部连接设置等「翻找某个模型」的场景）。 */
+	expandAll?: boolean;
 }): string[] {
 	const { favorites, current, providers } = params;
 	const expanded: string[] = [];
 	if (favorites.length > 0) expanded.push("favorites");
+
+	// 全展开场景：不按「当前选中模型可见」收敛——这里是「自己挑一个模型加入列表」，
+	// 用户需要直接看到所有供应商的模型，而不是先展开第一个供应商再逐个点开。
+	if (params.expandAll) return [...expanded, ...providers.map((provider) => `provider:${provider}`)];
 
 	const currentProvider = current?.provider?.trim();
 	const currentModelId = current?.modelId?.trim();

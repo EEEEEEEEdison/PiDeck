@@ -1,5 +1,7 @@
 export type ChatRole = "user" | "assistant" | "tool" | "system" | "error";
 
+import type { VideoContent } from "./videogen";
+
 export type I18nParams = Record<string, string | number | boolean | null | undefined>;
 
 /** Structured copy crosses process boundaries without forcing main to choose a locale. */
@@ -18,6 +20,8 @@ export type ChatMessage = {
 	timestamp: number;
 	meta?: Record<string, unknown> & I18nDescriptor;
 	images?: ImageContent[]; // 用户消息中附加的图片
+	/** 生视频产物（meta.videoGen 消息）：只有落盘 ref 形态，展示走 pideck-video:// 协议 */
+	videos?: VideoContent[];
 	/** 思考内容：来自 thinking 内容块，用于展示模型推理过程 */
 	thinking?: string;
 	/** 思考段开始时间（可选；缺省回退 message.timestamp） */
@@ -31,14 +35,22 @@ export type ChatMessage = {
 	 * 历史会话/旧版本数据可能缺失，渲染层需回退启发式判定。
 	 */
 	stopReason?: string;
+	/**
+	 * 本条 assistant 消息实际使用的模型（provider + modelId）。
+	 * 来源：pi 会话文件每条 assistant 消息自带 provider/model 字段，实时链路由
+	 * message_end 的完整消息提供；DSH 用当轮 request/context 上报的路由模型。
+	 * 旧数据、非模型产出的消息（错误/扩展输出）与 ACP 会话可能缺失，渲染层按缺省不显示。
+	 */
+	model?: { provider: string; modelId: string };
 };
 
 /**
- * 历史暂时不可读的结构化原因（渲染层据此出专态 UI，而不是让 IPC 抛裸错误）。
- * 目前只有一种：DSH host 被用户手动停止——此时 host 不会自动拉起，历史读取
- * 必然失败且不会自愈，「启动 host」是唯一恢复路径。
+ * 历史不可读的结构化原因（渲染层据此出专态 UI，而不是让 IPC 抛裸错误）。
+ * - dsh-host-stopped：DSH host 被用户手动停止，host 不会自动拉起，「启动 host」是唯一恢复路径。
+ * - file-missing：pi 会话文件还不存在——新建会话（含微信/飞书桥建的会话）在收到第一条
+ *   消息前不落盘，此前打开会读到 ENOENT；这是「还没内容」而不是读取故障。
  */
-export type SessionHistoryUnavailableReason = "dsh-host-stopped";
+export type SessionHistoryUnavailableReason = "dsh-host-stopped" | "file-missing";
 
 /** A bounded historical timeline slice. `nextBefore` is the exclusive index for an older page. */
 export type SessionMessagePage = {
@@ -96,6 +108,13 @@ export type FileSearchResult = {
 
 export type SessionSource = "pi" | "codex" | "claude" | "opencode" | "zcode" | "workbuddy" | "cursor" | "qoder" | "kimi" | "kimiwork" | "minimax";
 export type SessionEnvironment = "native" | "wsl";
+
+/**
+ * 外部连接渠道（会话来源标记）：外部 IM 桥（微信/飞书）在 PiDeck 里建的会话。
+ * 侧栏与标题栏据此显示渠道标志，让「手机发来的会话」在会话列表里可辨认；
+ * 缺省表示桌面端直接创建。旧 catalog 没有该字段，缺省即兼容，无需迁移。
+ */
+export type SessionChannel = "wechat" | "feishu";
 
 /**
  * 会话级代理覆盖模式（单会话开关，复用全局代理 URL，不存每会话 URL）：
@@ -167,6 +186,11 @@ export type SessionSummary = {
 	source?: SessionSource;
 	/** 运行时后端；缺省 "pi"。草稿/历史行用来区分 DSH 会话。 */
 	backend?: import("./agent").AgentBackend;
+	/**
+	 * 外部连接渠道（微信/飞书桥建的会话）：来源徽标只能区分 pi/dsh，渠道徽标区分「从哪来」。
+	 * 由 catalog 记录透传（见 sessionRecordToSummary），扫描摘要不带该字段。
+	 */
+	channel?: SessionChannel;
 	/** 标记此会话文件来自 WSL，rename/delete/copy 等操作需走 wsl.exe */
 	wsl?: boolean;
 	/** 从 JSONL 中的 model_change / thinking_level_change 提取的最后值 */
@@ -176,6 +200,8 @@ export type SessionSummary = {
 	hasImageGen?: boolean;
 	/** DSH 会话身份（DSH host 的 sessionId）；backend=dsh 的会话用来重启后 attach 旧会话。 */
 	dshSessionId?: string;
+	/** ACP 工具 id；backend=acp 的会话用来解析侧栏/tab 品牌徽标（与 TurnAuthorHeader 同源）。 */
+	acpToolId?: string;
 	codexSessionId?: string;
 	codexThreadSource?: "user" | "subagent";
 	codexParentThreadId?: string;
@@ -216,6 +242,8 @@ export type SessionRecord = {
 	noSession?: boolean;
 	source: SessionSource;
 	environment: SessionEnvironment;
+	/** 外部连接渠道（微信/飞书桥建的会话）；缺省 = 桌面端创建。 */
+	channel?: SessionChannel;
 	/** 运行时后端（pi/dsh）；缺省 "pi"，旧 catalog 数据无需迁移。 */
 	backend?: import("./agent").AgentBackend;
 	filePath?: string;

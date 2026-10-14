@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "version": "1.0.1",
-  "bundleSha256": "ef8e35ec40c4284e17d5157babe77cdd1e92a4190f906c56f44b602063d9e189",
+  "bundleSha256": "24ea0f4cfcf35cc521a391eaaffbb910f69b7266b630882ca3e8f9612700d2be",
   "fileCount": 26,
   "files": [
     {
@@ -81,8 +81,8 @@
     },
     {
       "name": "pi-deck-plan-mode.ts",
-      "sha256": "af7d0e57c23d24a2c75aefe219da756a6586a352411cd6d192d63929921695ab",
-      "bytes": 17883
+      "sha256": "a0340c9e98b14f7deff9c0a7becd4f3ae4721833fdc98e5e9d56a53a08ba7375",
+      "bytes": 18788
     },
     {
       "name": "pi-deck-request-size-recovery.ts",
@@ -101,8 +101,8 @@
     },
     {
       "name": "pi-deck-session-title.ts",
-      "sha256": "fe5734a430b0686040b74164e6aa1b8bf59c55c9331201d38452812d4f677477",
-      "bytes": 24166
+      "sha256": "cf600891b1d147d206df0405eb197eb20bff1d8861cf684afed8fad41e2132fb",
+      "bytes": 26528
     },
     {
       "name": "pi-deck-shell-proxy.ts",
@@ -111,8 +111,8 @@
     },
     {
       "name": "pi-deck-subagents.ts",
-      "sha256": "14d7929dee69923732f11f54c5792cb4ee2fc6e37141255f0f142dcb8b10b8d6",
-      "bytes": 24206
+      "sha256": "a8979f143e84a59044eae234a571a2dcd291e97a74df9443dec8e9a270552a77",
+      "bytes": 34320
     },
     {
       "name": "pi-deck-todo-state.ts",

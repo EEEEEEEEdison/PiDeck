@@ -67,6 +67,19 @@ test("微信号与 QQ 群号在 README 和官网都对用户可见", () => {
 	}
 });
 
+test("小店价目表图：README 与官网首页引用同一张共用图", () => {
+	// 小店价目表会随行情改（价格/套餐），两边各存一份就会变成「README 是新价、官网还挂着旧价」。
+	const expectations = [
+		["README.md", "docs/images/gpt-recharge-price.png"],
+		[join("docs-site", "index.md"), "/images/gpt-recharge-price.png"],
+	];
+	for (const [file, expected] of expectations) {
+		const content = readFileSync(join(REPO_ROOT, file), "utf8");
+		assert.ok(content.includes(expected), `${file} 未引用 ${expected}`);
+	}
+	assert.ok(SHARED_README_IMAGES.includes("gpt-recharge-price.png"), "价目表图必须在共用图片白名单里，否则站点 404");
+});
+
 test("syncSharedReadmeImages 把源图复制进 publicDir/images", () => {
 	const tmp = mkdtempSync(join(tmpdir(), "pideck-shared-img-"));
 	try {

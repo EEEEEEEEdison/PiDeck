@@ -1,9 +1,9 @@
 import { Button } from "../../ui-shadcn/button";
 import { Input } from "../../ui-shadcn/input";
 /**
- * ImTab — 外部链接配置选项卡
+ * ImTab — 外部连接配置选项卡
  *
- * 在 PiDeck 设置中集中管理外部 IM/Bot 连接（由 Pi 管理界面迁入）（当前支持飞书/Lark）。
+ * 在 PiDeck 设置中集中管理外部 IM/Bot 连接（由 Pi 管理界面迁入）：飞书/Lark 与微信（iLink）。
  * 样式统一使用配置页的设计 tokens。
  */
 
@@ -13,7 +13,9 @@ import { ConfirmDialog } from "../../app/AppParts";
 import { writeClipboard } from "../../../utils/clipboard";
 import type { FeishuBotConfig, FeishuBridgeStatus, FeishuChatBinding, FeishuTestResult } from "../../../../../shared/types";
 import { formatI18nDateTime, t } from "../../../i18n";
+import { WeChatSection } from "./WeChatSection";
 import { Label } from "../../ui-shadcn/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui-shadcn/tabs";
 
 type Props = {
 	onSave?: () => void;
@@ -99,7 +101,10 @@ type FeishuApiRaw = {
 	onWhoamiResult?: (cb: (openId: string) => void) => () => void;
 };
 
-export function ImTab(_props: Props) {
+/**
+ * 飞书接入面板。原 ImTab 本体（2027-02 加微信时改名）：只负责飞书，平台切换由下面的 ImTab 承担。
+ */
+function FeishuPane(_props: Props) {
 	const [bots, setBots] = useState<FeishuBotConfig[]>([]);
 	const [status, setStatus] = useState<FeishuBridgeStatus>({ status: "disconnected", activeBindings: 0 });
 	const [bindings, setBindings] = useState<FeishuChatBinding[]>([]);
@@ -129,6 +134,25 @@ export function ImTab(_props: Props) {
 	const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
 	const [guideAnimating, setGuideAnimating] = useState(false);
 	const [connecting, setConnecting] = useState(false);
+
+	// 指南弹窗统一关闭路径：150ms 退场动画后卸载；overlay 点击、头部关闭钮、Escape 三入口共用，
+	// 防止三处内联后行为漂移（如改动画时长漏一处）。
+	const closeGuide = useCallback(() => {
+		setGuideAnimating(true);
+		setTimeout(() => {
+			setGuideAnimating(false);
+			setGuideOpen(false);
+		}, 150);
+	}, []);
+	// 模态惯例：Escape 可关（与 overlay 点击/头部关闭钮等价）
+	useEffect(() => {
+		if (!guideOpen) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") closeGuide();
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [guideOpen, closeGuide]);
 
 	const api = (window as unknown as { piDesktop?: { feishu?: FeishuApiRaw } }).piDesktop?.feishu;
 
@@ -452,6 +476,14 @@ export function ImTab(_props: Props) {
 					const isThisConnected = status.status === "connected" && status.botId === bot.id;
 					const isEditingOpenId = editingOpenIdBotId === bot.id;
 					const isExpanded = expandedBotIds.has(bot.id);
+					// 展开/折叠唯一入口：鼠标点击与键盘 Enter/Space 共用，避免两处内联后行为漂移
+					const toggleBotExpanded = () =>
+						setExpandedBotIds((prev) => {
+							const next = new Set(prev);
+							if (next.has(bot.id)) next.delete(bot.id);
+							else next.add(bot.id);
+							return next;
+						});
 					const visibleBindingCount = getVisibleBindingsForBot(bot.id);
 					const visibleBotBindings = botBindings.slice(0, visibleBindingCount);
 					const secretValue = revealedSecrets[bot.id];
@@ -459,14 +491,17 @@ export function ImTab(_props: Props) {
 						<div key={bot.id} className={`mb-2 overflow-hidden rounded-lg border border-border-subtle bg-bg-panel transition-[border-color,box-shadow,background-color] duration-fast config-im-bot-card${isThisConnected ? " border-[var(--color-accent)]/30" : ""}`}>
 							<div
 								className="flex cursor-pointer items-center gap-3 px-3.5 py-2.5 hover:bg-bg-hover config-im-bot-header"
-								onClick={() =>
-									setExpandedBotIds((prev) => {
-										const next = new Set(prev);
-										if (next.has(bot.id)) next.delete(bot.id);
-										else next.add(bot.id);
-										return next;
-									})
-								}
+								/* 展开是进入 Bot 配置的唯一入口，键盘必须可达；全局 [role=button]:focus-visible 自动提供焦点环 */
+								role="button"
+								tabIndex={0}
+								aria-expanded={isExpanded}
+								onKeyDown={(e) => {
+									if (e.key === "Enter" || e.key === " ") {
+										e.preventDefault();
+										toggleBotExpanded();
+									}
+								}}
+								onClick={toggleBotExpanded}
 							>
 								<div className="min-w-0 flex-1">
 									<div className="truncate text-control font-semibold text-text-primary">
@@ -668,30 +703,13 @@ export function ImTab(_props: Props) {
 				<div
 					className={`config-im-guide-overlay${guideAnimating ? " closing" : ""}`}
 					onClick={(e) => {
-						if (e.target === e.currentTarget) {
-							setGuideAnimating(true);
-							setTimeout(() => {
-								setGuideAnimating(false);
-								setGuideOpen(false);
-							}, 150);
-						}
+						if (e.target === e.currentTarget) closeGuide();
 					}}
 				>
 					<div className="config-im-guide-modal">
 						<div className="config-im-guide-modal-header">
 							<strong>{t("config.im.guide")}</strong>
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								className="size-7"
-								onClick={() => {
-									setGuideAnimating(true);
-									setTimeout(() => {
-										setGuideAnimating(false);
-										setGuideOpen(false);
-									}, 150);
-								}}
-							>
+							<Button variant="ghost" size="icon-sm" className="size-7" onClick={closeGuide}>
 								<X size={16} strokeWidth={2.2} />
 							</Button>
 						</div>
@@ -818,6 +836,33 @@ export function ImTab(_props: Props) {
 					</div>
 				</div>
 			)}
+		</div>
+	);
+}
+
+/**
+ * IM 接入设置页：飞书与微信是两套完全不同的登录流程（App ID/Secret vs 扫码），
+ * 共用一个表单会把两边的状态混在一起，所以这里只做平台切换，各自的面板内部自理。
+ */
+export function ImTab() {
+	const [platform, setPlatform] = useState<"feishu" | "wechat">("feishu");
+	return (
+		<div className="flex flex-col gap-4">
+			{/* 平台切换用共享 Tabs 分组控件：容器包住两个 tab，选中项靠 data-state 高亮 */}
+			<Tabs value={platform} onValueChange={(value) => setPlatform(value === "wechat" ? "wechat" : "feishu")} className="gap-4">
+				<TabsList className="w-auto self-start" aria-label={t("config.im.platformLabel")}>
+					<TabsTrigger value="feishu">{t("config.im.platformFeishu")}</TabsTrigger>
+					<TabsTrigger value="wechat">{t("config.im.platformWechat")}</TabsTrigger>
+				</TabsList>
+				<TabsContent value="feishu">
+					<FeishuPane />
+				</TabsContent>
+				<TabsContent value="wechat">
+					<div className="config-im-tab">
+						<WeChatSection />
+					</div>
+				</TabsContent>
+			</Tabs>
 		</div>
 	);
 }

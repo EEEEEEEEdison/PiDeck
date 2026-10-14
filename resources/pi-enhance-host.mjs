@@ -152,6 +152,12 @@ async function runComplete(runtime, command) {
 // ---------------------------------------------------------------------------
 
 async function main() {
+	// boot 阶段计时日志（stderr，不碰协议通道）：宿主侧报 boot 超时时，能区分
+	// 「进程没起来 / SDK 导入慢 / create 卡住 / ready 发出但被丢」的只有这几行。
+	// 同时把实际执行的 node 与 cwd 写进日志——手工测试与宿主 spawn 未必同一个 node。
+	log(`boot: node ${process.version} execPath=${process.execPath} cwd=${process.cwd()}`);
+	log(`boot: sdk=${sdkEntry}`);
+	const bootStartedAt = Date.now();
 	let sdk;
 	try {
 		sdk = await import(`file:///${sdkEntry.replace(/\\/g, "/")}`);
@@ -160,7 +166,9 @@ async function main() {
 		return;
 	}
 	sdkVersion = typeof sdk.VERSION === "string" ? sdk.VERSION : null;
+	log(`boot: sdk imported in ${Date.now() - bootStartedAt}ms${sdkVersion ? ` (pi ${sdkVersion})` : ""}`);
 
+	const createStartedAt = Date.now();
 	let runtime;
 	try {
 		// 不传覆盖项：让 pi 按自己的配置目录解析 auth.json / models.json，
@@ -170,8 +178,10 @@ async function main() {
 		fatal("runtime-create", error instanceof Error ? error.message : String(error));
 		return;
 	}
+	log(`boot: runtime created in ${Date.now() - createStartedAt}ms`);
 
 	send({ type: "ready", protocolVersion: PROTOCOL_VERSION });
+	log("boot: ready sent");
 
 	createInterface({ input: process.stdin })
 		.on("line", (line) => {

@@ -151,7 +151,7 @@ export const WebRemoteAccessSection = memo(function WebRemoteAccessSection(props
 				: { text: t("settings.remote.status.connected"), tone: "ok" as const };
 
 	return (
-		<SettingsSection title={t("settings.remote.title")} description={t("settings.remote.desc")}>
+		<SettingsSection id="settings-section-web-remote-access" title={t("settings.remote.title")} description={t("settings.remote.desc")}>
 			{/* 前提提示：Web 服务未开启时渠道不可用 */}
 			{!webReady ? <p className="text-caption text-warning">{t("settings.remote.webServiceRequired")}</p> : null}
 			{/* Token 鉴权关闭时的公网暴露警告（与局域网卡片的警告同源，公网场景更严重） */}

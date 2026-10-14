@@ -536,3 +536,69 @@ test("扩展自带的块清洗与 shared 解析层逐条一致", () => {
 	assert.equal(titleTextFromUserInput(`帮我翻译 ${template}\n\n这段话`).blockOnly, false);
 	assert.equal(titleTextFromUserInput("普通消息，没有块").blockOnly, false);
 });
+
+// 回归 2026-10-14：内置自动命名扩展的旁路补全被第三方上下文代理（billion-context 的 acp-proxy）
+// 接管，模型返回的是代理自己注入的确认标记行（`📦 [ACP] acp_status result: …`）。
+// 扩展剥掉前导 emoji 与尾部冒号后原样收下，脏标记被写进 session_info，侧栏标题于是变成一段工具日志。
+test("cleanTitle 拒绝工具/上下文代理的确认标记行", () => {
+	const { cleanTitle } = compileExtension({ completeSimple: () => Promise.reject(new Error("unused")) });
+	assert.equal(cleanTitle("[ACP] acp_status result"), undefined);
+	assert.equal(cleanTitle("📦 [ACP] acp_status result: 压缩完成"), undefined);
+	assert.equal(cleanTitle("[ACP] Compression FAILED: None of the 1 requested range(s) resolved"), undefined);
+	assert.equal(cleanTitle("📦 [ACP] Compressed 3 ranges, saved 12k tokens"), undefined);
+});
+
+// 防误伤：模型写的正常标题不能被形态黑名单丢掉。中文正文、混合大小写标签、标签不在行首的都不是日志行。
+// 只有「[全大写标签] + 纯 ASCII 整行」这种日志形态会被丢弃（代价是本轮不命名，宿主侧所有权仍按窄判定走）。
+test("cleanTitle 不误伤带方括号/冒号/下划线的正常标题", () => {
+	const { cleanTitle } = compileExtension({ completeSimple: () => Promise.reject(new Error("unused")) });
+	assert.equal(cleanTitle("[WIP] 重构商店页"), "[WIP] 重构商店页");
+	assert.equal(cleanTitle("[Bug] fix the API timeouts"), "[Bug] fix the API timeouts");
+	assert.equal(cleanTitle("Debug [ACP] 状态泄漏"), "Debug [ACP] 状态泄漏");
+	assert.equal(cleanTitle("Pi 机理与应用：90分钟课程规划"), "Pi 机理与应用：90分钟课程规划");
+	assert.equal(cleanTitle("[TODO] 补全标题形态说明"), "[TODO] 补全标题形态说明");
+});
+
+test("模型返回确认标记行时不写会话名，下一轮仍可正常命名", async () => {
+	const entries = freshBranch();
+	const harness = createHarness({ entries });
+	harness.setCompletion(() => Promise.resolve(assistantMessage([{ type: "text", text: "📦 [ACP] acp_status result: ok" }])));
+	await startFresh(harness, entries);
+	await harness.emit("agent_settled");
+	await flushAsyncWork();
+
+	// 既不写 session_info，也不发 marker（宿主侧 triple match 因此拿不到脏名）。
+	assert.deepEqual(harness.setNames, []);
+	assert.deepEqual(harness.statusUpdates, []);
+
+	harness.setCompletion(() => Promise.resolve(assistantMessage([{ type: "text", text: "修复登录流程" }])));
+	await harness.emit("agent_start");
+	await harness.emit("agent_settled");
+	await flushAsyncWork();
+	assert.deepEqual(harness.setNames, ["修复登录流程"]);
+});
+
+test("扩展自带的标记标题判定与 shared 逐条一致", () => {
+	// 扩展由 pi 用 -e 独立加载、不能 import 应用源码，只能自带一份；这里逐条对照防分叉。
+	const { looksLikeToolMarkerTitle: sharedLooks } = loadTsCommonJs("src/shared/sessionIdentity.ts");
+	const { looksLikeToolMarkerTitle: extensionLooks } = loadTsCommonJs(extensionPath, {
+		stubs: { "@earendil-works/pi-ai/compat": { completeSimple: () => Promise.reject(new Error("unused")) } },
+	});
+	const samples = [
+		"[ACP] acp_status result",
+		"📦 [ACP] acp_status result: 压缩完成",
+		"[ACP] Compression FAILED: None of the 1 requested range(s) resolved",
+		"❌ [ACP] Compression FAILED: none",
+		"[WIP] 重构商店页",
+		"[Bug] fix the API timeouts",
+		"[TODO] refactor login page",
+		"Debug [ACP] 状态泄漏",
+		"[ACP]",
+		"修复登录流程",
+		"Pi 机理与应用：90分钟课程规划 (fork)",
+		"Untitled",
+	];
+	for (const sample of samples) {
+		assert.equal(extensionLooks(sample), sharedLooks(sample), `diverged on: ${sample}`);
+	}
+});

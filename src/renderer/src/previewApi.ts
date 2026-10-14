@@ -1,6 +1,7 @@
 import type { PiDesktopApi } from "../../preload";
 import { createDefaultExternalEditorSettings, createDefaultSecurityConfig, createDefaultSoundAlertSettings, DEFAULT_PET_SCALE, DEFAULT_TOAST_DURATION_MS, emptyRemoteAccessState } from "../../shared/types";
 import { DEFAULT_VOICE_TRANSCRIPTION_CONFIG } from "../../shared/voiceTranscriptionConfig";
+import { EMPTY_VIDEO_GEN_CONFIG } from "../../shared/videoGenConfig";
 import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import { ACP_TOOL_PRESETS } from "../../shared/acpToolPresets";
 import type { AppSettings, FileTreeNode, Project, SessionRecord, SessionSummary, TerminalDataEvent, TerminalExitEvent, TerminalTab } from "../../shared/types";
@@ -22,7 +23,7 @@ const projects: Project[] = [
 	{
 		id: "builtin-chat",
 		name: "Chat",
-		path: "C:/Users/14012/AppData/Roaming/pi-desktop/chat-workspace",
+		path: "C:/Users/14012/AppData/Roaming/PiDeck/chat-workspace",
 		lastOpenedAt: now,
 		pinned: true,
 		sortOrder: -1,
@@ -131,6 +132,8 @@ let previewSettings: AppSettings = {
 	autoSessionTitle: true,
 	// Ask 提问系统通知默认关闭：与主进程 SettingsStore 默认一致
 	askNotificationEnabled: false,
+	// 仅失焦提醒开关：与主进程 SettingsStore 默认一致（预览 mock 需覆盖 AppSettings 全部必填字段）
+	alertOnlyWhenUnfocused: false,
 	// 人文关怀提醒开关：与主进程 SettingsStore 默认值保持一致（预览 mock 需覆盖 AppSettings 全部必填字段）
 	agentCountReminderEnabled: true,
 	// 公告通知开关：与主进程 SettingsStore 默认一致（预览 mock 需覆盖 AppSettings 全部必填字段）
@@ -169,7 +172,7 @@ let previewSettings: AppSettings = {
 	workspaceContentOpenMode: "split",
 	contentMaxWidth: 1800,
 	chatContentWidthPct: 80,
-	sessionStatusPlacement: "sidebar",
+	sessionStatusPlacement: "composer",
 	navigationMode: "tabs",
 	sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
 	maxEditorFileSizeMB: 5,
@@ -220,6 +223,7 @@ let previewSettings: AppSettings = {
 	imageGenWatermark: false,
 	imageGenOutputFormat: "png",
 	autoDownloadUpdates: true,
+	catalogAutoUpdate: true,
 	// 与主进程 defaultSettings 保持一致：更新源默认 GitHub 官方，自定义镜像前缀留空
 	updateSource: "github",
 	customUpdateSourceUrl: "",
@@ -277,6 +281,11 @@ export function createPreviewApi(): PiDesktopApi {
 		return tab;
 	};
 	return {
+		piDeckMcp: {
+			getState: async () => ({ ok: false, code: "desktop-only" }),
+			setAccess: async () => ({ ok: false, code: "desktop-only" }),
+			connection: async () => ({ ok: false, code: "desktop-only" }),
+		},
 		hostPlugins: {
 			list: async () => ({ ok: false, code: "desktop-only" }),
 			rescan: async () => ({ ok: false, code: "desktop-only" }),
@@ -288,8 +297,10 @@ export function createPreviewApi(): PiDesktopApi {
 			mount: async () => ({ ok: false, code: "desktop-only" }),
 			update: async () => ({ ok: false, code: "desktop-only" }),
 			unmount: async () => ({ ok: false, code: "desktop-only" }),
+			remove: async () => ({ ok: false, code: "desktop-only" }),
 			onChanged: () => () => undefined,
 			onNavigate: () => () => undefined,
+			onOpenBrowser: () => () => undefined,
 		},
 		clipboard: clipboardStub,
 		// 资源管理器右键菜单预览桩：预览环境无注册表操作，一律报不支持
@@ -1146,12 +1157,12 @@ export function createPreviewApi(): PiDesktopApi {
 				releasesUrl: "https://github.com/ayuayue/PiDeck/releases",
 				platform: "win32" as NodeJS.Platform,
 				homeDir: "C:/Users/preview",
-				userDataDir: "C:/Users/preview/AppData/Roaming/pi-desktop",
+				userDataDir: "C:/Users/preview/AppData/Roaming/PiDeck",
 			}),
 			preferredSystemLanguages: async () => (navigator.languages?.length ? [...navigator.languages] : [navigator.language]),
 			networkAddresses: async () => [{ address: "192.168.1.100", interfaceName: "Wi-Fi", cidr: "192.168.1.100/24", isPrivate: true, family: "IPv4" }],
 			checkUpdate: async () => undefined,
-			getChannel: async () => ({ channel: "stable" as const, currentVersion: "preview" }),
+			getChannel: async () => ({ channel: "stable" as const, currentVersion: "preview", devBuild: false }),
 			onUpdateStatus: () => () => undefined,
 			onOpenSettings: () => () => undefined,
 			// 预览/浏览器模式没有全局快捷键，订阅退化为空操作
@@ -1812,6 +1823,23 @@ export function createPreviewApi(): PiDesktopApi {
 		browser: {
 			openExternal: async () => {},
 		},
+		wechat: {
+			snapshot: async () => ({ ok: false, message: "预览模式不支持" }),
+			setEnabled: async () => ({ ok: false, message: "预览模式不支持" }),
+			updateSettings: async () => ({ ok: false, message: "预览模式不支持" }),
+			renameAccount: async () => ({ ok: false, message: "预览模式不支持" }),
+			logout: async () => ({ ok: false, message: "预览模式不支持" }),
+			beginLogin: async () => ({ ok: false, message: "预览模式不支持" }),
+			cancelLogin: async () => ({ ok: false, message: "预览模式不支持" }),
+			submitVerifyCode: async () => ({ ok: false, message: "预览模式不支持" }),
+			getLoginState: async () => ({ phase: "idle" as const }),
+			getStatus: async () => ({ status: "disconnected" as const, account: null, activeBindings: 0 }),
+			getBindings: async () => [],
+			unbindChat: async () => ({ ok: false, message: "预览模式不支持" }),
+			onStatus: () => () => {},
+			onLoginState: () => () => {},
+			onBindingsChanged: () => () => {},
+		},
 		scratchPad: {
 			list: async () => [],
 			create: async () => ({ id: "", name: "", path: "", createdAt: 0, updatedAt: 0 }),
@@ -1827,6 +1855,15 @@ export function createPreviewApi(): PiDesktopApi {
 			getConfig: async () => ({ providers: [], activeProviderId: "", activeModel: "" }),
 			saveConfig: async (config) => ({ ok: true, config }),
 			readImageBlob: async () => null,
+		},
+		// 生视频预览桩：与生图同策略（LAN web 模式继承此桩，远程暂不支持生视频任务）
+		videogen: {
+			submit: async () => ({ ok: false, error: "notConfigured" }),
+			cancel: async () => ({ ok: false }),
+			getConfig: async () => ({ ...EMPTY_VIDEO_GEN_CONFIG, providers: [] }),
+			saveConfig: async (config) => ({ ok: true, config }),
+			listJobs: async () => [],
+			onEvent: () => () => {},
 		},
 		enhance: {
 			run: async () => ({ ok: false, errorKind: "sdk-unavailable", message: "preview mode" }),

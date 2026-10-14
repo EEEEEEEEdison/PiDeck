@@ -15,10 +15,11 @@ import { filterSidebarSessions, getBoundSidebarRuntimeAgent, type SidebarControl
 import { Button } from "../ui-shadcn/button";
 import type { SidebarActions } from "./SidebarContent";
 import { PendingAskBadge } from "./PendingAskBadge";
-import { SessionBackendMark, SessionSourceBadge } from "../session/SessionSourceBadge";
+import { AcpBackendMark, SessionBackendMark, SessionChannelMark, SessionSourceBadge } from "../session/SessionSourceBadge";
 import { SessionActivityIndicator } from "../session/SessionActivityIndicator";
 import { SessionHoverCard } from "./SessionHoverCard";
 import { TitleScrollText } from "./TitleScrollText";
+import { resolveBoundSession } from "./activitySessionsModel";
 import { cn } from "../../lib/utils";
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
 
@@ -101,7 +102,7 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 		sortMode: props.controller.sessionSortMode,
 	});
 	const displayedSessionIds = collectDisplayedSessionIds(display.visibleChildren, (agent) => {
-		const linked = props.sessions.find((session) => props.controller.catalog.runtimeBySessionId[session.id]?.agentId === agent.id) ?? summaries.find((session) => session.filePath === agent.sessionPath);
+		const linked = resolveBoundSession(agent, props.sessions, props.controller.catalog.runtimeBySessionId) ?? (agent.sessionPath ? summaries.find((session) => session.filePath === agent.sessionPath) : undefined);
 		return linked?.id;
 	});
 	const draftSessions = props.sessions
@@ -243,10 +244,10 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 		const groupKey = `${props.project.id}:${child.key}`;
 		const childCount = child.codexSubagents.length + child.piSubagents.length;
 		if (child.type === "agent") {
-			const agentSession = props.sessions.find((session) => props.controller.catalog.runtimeBySessionId[session.id]?.agentId === child.agent.id) ?? summaries.find((session) => session.filePath === child.agent.sessionPath);
+			const agentSession = resolveBoundSession(child.agent, props.sessions, props.controller.catalog.runtimeBySessionId) ?? (child.agent.sessionPath ? summaries.find((session) => session.filePath === child.agent.sessionPath) : undefined);
 			// Catalog owns the display title. AgentTab.title may reflect a transient pi/TUI
 			// session_info event, so only use it for an unbound runtime with no record.
-			const displayTitle = agentSession ? ("title" in agentSession ? agentSession.title : agentSession.name || child.agent.title) : child.agent.title;
+			const displayTitle = (agentSession ? ("title" in agentSession ? agentSession.title : agentSession.name || child.agent.title) : child.agent.title) || t("common.untitled");
 			return (
 				<SidebarRemovalRow key={child.key} itemId={agentSession?.id ?? child.agent.id}>
 					{/* 运行中 Agent 行：标题常被 truncate（如 "JZSSC40..."），悬浮展示完整标题 */}
@@ -279,7 +280,7 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 										{/* 运行中 Agent 行：标题常被 truncate（如 "JZSSC40..."），悬浮展示完整标题；
                     选中背景仍保留，聚焦行也允许 hover 查看完整标题。 */}
 										<TitleScrollText text={displayTitle} className="font-medium" />
-										<SessionBackendMark backend={child.agent.backend} />
+										{child.agent.backend === "acp" ? <AcpBackendMark acpToolId={agentSession?.acpToolId} /> : <SessionBackendMark backend={child.agent.backend} />}
 										{/* 待确认 ask：运行中 Agent 行同样按会话粒度标记，避免多会话同时等待时分不清。 */}
 										{hasPendingAskForSession(agentSession?.id, sessionRuntimeUiById) && <PendingAskBadge count={1} />}
 										{child.agent.noSession && (
@@ -340,7 +341,7 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
                   标题被截断时 hover 滚动展示全文（TitleScrollText，未溢出则静止）；
                   选中背景仍保留，聚焦行也允许 hover 查看完整标题。 */}
 									<TitleScrollText text={child.session.name || t("common.untitled")} className={cn(runtime ? "font-medium" : "font-normal text-muted-foreground/90")} />
-									{(child.session.backend === "dsh" || child.session.backend === "imagegen" || child.session.backend === "acp") && <SessionBackendMark backend={child.session.backend} />}
+									{child.session.backend === "acp" ? <AcpBackendMark acpToolId={child.session.acpToolId} /> : (child.session.backend === "dsh" || child.session.backend === "imagegen") && <SessionBackendMark backend={child.session.backend} />}
 									{/* 待确认 ask：挂在会话行本身，用户一眼看出是哪个会话在等回答
                   （项目/标题栏徽章只给汇总数，多会话同时等待时分不清）。
                   与 ActiveSessionsTree、项目行共用 PendingAskBadge，语义与视觉一致。 */}
@@ -348,6 +349,7 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 									{/* 生图角标：imagegen 后端会话的徽标已含生图标识，此处仅对遗留 pi 后端含生图消息的会话补图标 */}
 									{child.session.backend !== "imagegen" && child.session.hasImageGen && <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
 									{child.session.source && child.session.source !== "pi" && <SessionSourceBadge source={child.session.source} />}
+									{child.session.channel && <SessionChannelMark channel={child.session.channel} />}
 									{renderToggle(groupKey, childCount)}
 									{/* 相对时间常显：会话更新于多久前一目了然；hover 行时让位给右侧「⋯」按钮。
                   窄侧栏时间可能被截断，title 提示完整相对时间。 */}
@@ -409,8 +411,8 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 											<div className="conversation-title flex min-w-0 items-center gap-1.5">
 												{props.actions.sessions.simpleNavigation ? <SessionActivityIndicator status={runtime?.status} sessionId={session.id} /> : renderRuntimeStatusDot(runtime?.status)}
 												{/* 草稿会话：选中背景仍保留，聚焦行也允许 hover 查看完整标题 */}
-												<TitleScrollText text={session.title} className="font-medium" />
-												<SessionBackendMark backend={session.backend} />
+												<TitleScrollText text={session.title || t("common.untitled")} className="font-medium" />
+												{session.backend === "acp" ? <AcpBackendMark acpToolId={session.acpToolId} /> : <SessionBackendMark backend={session.backend} />}
 												{/* 草稿会话同样按会话粒度标记待确认 ask。 */}
 												{hasPendingAskForSession(session.id, sessionRuntimeUiById) && <PendingAskBadge count={1} />}
 											</div>

@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.0-blue)
+![Version](https://img.shields.io/badge/version-0.9.1-blue)
 
 <!-- star-history:start -->
 <picture>
@@ -81,25 +81,10 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.9.0 (2026-10-10)** (2026-10-10)
+> **Latest: v0.9.1 (2026-10-14)** (2026-10-14)
 
-### v0.9.0 (2026-10-10) Release Highlights
-- 🚀 **ACP backend: more AI coding tools in one workbench**
-- 🚀 **Independent PiDeck host-plugin system**
-- 🚀 **Built-in remote access and access tokens**
-- 🚀 **Web live events and Plan Mode**
-- 🚀 **Terminal settings, WebGL and snapshot replay**
-- 🚀 **Native sessions and model catalogs aligned with pi 1.0.4**
-- 🚀 **MCP service catalog and AI configuration assistant**
-- 🚀 **Session branch panel**
-- 🚀 **Project pinning and list management**
-- 🚀 **Traditional Chinese UI**
-- 🚀 **Notification history across restarts**
-- 🚀 **Choose which composer controls to show**
-- ✨ **Extension-command previews in draft sessions**
-- ✨ **Faster resource-toggle feedback**
-- ✨ **Remote and mobile polish**
-- ✨ **Security and long-running stability hardening**
+### v0.9.1 (2026-10-14) Release Highlights
+- ✨ **macOS app would not launch on Apple Silicon**
 
 [View Full Changelog →](CHANGELOG.md)
 
@@ -170,7 +155,7 @@
 | **System Tray** | Closing the window minimizes to tray by default; tray context menu; double-click to restore. |
 | **Desktop Pet** | Turn multi-agent status into a little companion on your desktop: aggregated states, always-on-top, scaling, petdex community pets. |
 | **Themes & Appearance** | One-click cycle through light / dark / follow-system (sidebar footer); semantic design tokens with natural dark-mode support. |
-| **Notifications** | Global notifications as card toasts; a dedicated Ask system-notification toggle keeps background queries silent. |
+| **Notifications** | Global notifications as card toasts; a dedicated Ask system-notification toggle keeps background queries silent, and "notify only when unfocused" stays quiet while the window is in front. |
 | **Application Updates** | App-update checks always run in the background and `autoDownloadUpdates` defaults to enabled; after download, the user confirms **Restart and install** in Settings. Windows/Linux use the bundled updater, while macOS opens the GitHub Release for manual installation; Pi CLI checks run independently. |
 | **Feishu Bot** | Bind a session to a Feishu bot to sync messages and status into a Feishu group. |
 | **LAN Web Service** | Start a local web service from Settings and open the web edition from any device on the LAN, with dual-backend session browsing and the DSH tool panel. |

@@ -34,7 +34,7 @@ test("thinking and diagnostic cards use the same marker shell (ask/compaction ca
 	// ask_question 交互已收敛到 SessionRuntimeUiOverlay，AskQuestionCard 死代码删除：
 	// 时间线不再有 kind=\\"ask\\" 的卡片（与 askUiStateMachine 测试注释同一语义）。
 	assert.doesNotMatch(events, /kind=\\"ask\\"/);
-	assert.match(events, /setExpanded\(\(v\) => !v\)/);
+	assert.match(events, /setExpanded\(\((\w+)\) => !\1\)/);
 	// 旧断言 setExpanded(!expanded) 对应已废弃写法（函数式更新等价且更稳），不再断言实现细节
 	assert.match(events, /data-message-id=\{props\.message\.id\}/);
 });

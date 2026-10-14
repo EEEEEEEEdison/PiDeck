@@ -3,11 +3,12 @@ import { useAtom, useAtomValue } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, ChevronsDownUp, FileText, Folder, FolderOpen, FolderTree, LoaderCircle, RefreshCw, X } from "lucide-react";
 import { normalizeSessionPathForCompare } from "../../agentListDisplay";
-import { SessionBackendMark, SessionSourceBadge } from "./SessionSourceBadge";
+import { SessionBackendMark, SessionChannelMark, SessionSourceBadge } from "./SessionSourceBadge";
 import { Button } from "../ui-shadcn/button";
 import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui-shadcn/collapsible";
 import { FileSortControl } from "./FileSortControl";
+import { FileTreeIndentGuides } from "./FileTreeIndentGuides";
 import { getFileIconSeti, getFileIconColor, getFileTypeLabel } from "../../fileIcons";
 import { sortFileNodes, FILE_SORT_OPTIONS, FILE_SORT_DEFAULT_DIRECTION, type FileSortMode, type FileSortDirection } from "../../utils/fileTreeSort";
 import { compactMiddlePackages } from "../../utils/fileTreeCompact";
@@ -22,6 +23,7 @@ import { Input } from "../ui-shadcn/input";
 import { PathTooltip } from "../ui-shadcn/PathTooltip";
 import { FileSearch, Search } from "lucide-react";
 import { useFileSearch } from "../../hooks/useFileSearch";
+import { useFileTreeStickyAppearance } from "../../hooks/files/useFileTreeStickyAppearance";
 import { FileSearchResults } from "./FileSearchResults";
 import { isEditableTarget, isFileSearchShortcut, isTypeToSearchKey } from "../../utils/fileSearchTrigger";
 
@@ -171,6 +173,7 @@ function FilesPanel(props: {
 	const sortedFiles = useMemo(() => sortFileNodes(props.files, sortMode, sortDirection), [props.files, sortMode, sortDirection]);
 	// 折叠中间包是排序之后的另一层纯展示变换：开启时把单子目录链压成一行。
 	const displayFiles = useMemo(() => (compactPackages ? compactMiddlePackages(sortedFiles) : sortedFiles), [sortedFiles, compactPackages]);
+	useFileTreeStickyAppearance(panelRef, displayFiles, props.expandedDirs, !searchOpen);
 	/** 拖入高亮的目标目录路径（null = 拖在面板空白区域） */
 	const [dragOverDir, setDragOverDir] = useState<string | null>(null);
 	const dragCountRef = useRef(0);
@@ -240,7 +243,7 @@ function FilesPanel(props: {
 	};
 	return (
 		<div
-			className="files-panel flex min-h-0 flex-1 flex-col overflow-x-hidden"
+			className="files-panel group/file-tree flex min-h-0 flex-1 flex-col overflow-x-hidden p-0"
 			ref={panelRef}
 			tabIndex={-1}
 			onMouseDown={handlePanelMouseDown}
@@ -253,8 +256,8 @@ function FilesPanel(props: {
 			onKeyDown={handlePanelKeyDown}
 			onContextMenu={handlePanelContextMenu}
 		>
-			{/* 工具行压矮：去掉顶栏后这是文件抽屉唯一 chrome；h-7 + size-6 对齐侧栏密度 */}
-			<div className="panel-action-row flex h-7 min-w-0 shrink-0 items-center justify-end gap-1 border-b border-border/40 px-2 text-xs text-muted-foreground">
+			{/* 工具行贴顶，目录紧接其下；无外圈留白，避免滚动文件名从吸顶区上沿露出。 */}
+			<div data-file-tree-toolbar="" className="panel-action-row flex h-7 min-w-0 shrink-0 items-center justify-end gap-1 border-b border-border/40 bg-background px-2 text-xs text-muted-foreground sticky top-0 z-20">
 				<div className="panel-action-buttons flex min-w-0 items-center gap-0.5">
 					{/* 文件树排序：方向切换与维度选择合并在一个图标菜单内（默认按名称·升序） */}
 					<FileSortControl sortMode={sortMode} sortDirection={sortDirection} onSortModeChange={setSortMode} onToggleDirection={() => setSortDirection((d) => (d === "asc" ? "desc" : "asc"))} />
@@ -439,12 +442,18 @@ function fileIconElement(name: string, isDirectory: boolean, isExpanded: boolean
 		const { svg, colorName } = getFileIconSeti(name);
 		const color = getFileIconColor(colorName);
 		// SVG 只来自仓库内附带许可证的只读 Seti 数据快照，不接收文件内容或用户输入。
-		// 尺寸由 .file-node-seti-icon → --file-type-icon-size 承担（树行不用 shadcn Button，避免其 [&_svg]:size-4 抢尺寸）。
+		// 尺寸由 .file-node-seti-icon → --file-type-icon-size（24px）承担，与目录行共存于同一 24px 图标槽。
 		return <span aria-hidden="true" className="file-node-seti-icon" style={{ color }} dangerouslySetInnerHTML={{ __html: svg }} />;
 	} catch {
 		return <FileText size={16} aria-hidden="true" />;
 	}
 }
+
+/* 行高与工具行高度各为 28px：目录吸顶在固定工具行下面，不与操作按钮重叠。 */
+const FILE_ROW_HEIGHT_PX = 28;
+const FILE_TOOLBAR_HEIGHT_PX = 28;
+/* 最外层最多三行吸顶；缩进只放在行内，所有层的行盒都覆盖完整面板宽度。 */
+const FILE_STICKY_MAX_LEVELS = 3;
 
 function FileNode(props: {
 	node: FileTreeNode;
@@ -469,12 +478,11 @@ function FileNode(props: {
 	const activeEditorFile = useAtomValue(activeEditorFileAtom);
 	const isActiveFile = node.type === "file" && node.path === activeEditorFile;
 	const typeLabel = node.type === "file" ? getFileTypeLabel(node.name) : "";
-	const rowStyle = {
-		/* 每层 8px：旧 16 在窄抽屉里空白过大（标注「缩进太大」）。 */
-		"--file-depth-offset": `${depth * 8}px`,
-		paddingLeft: `calc(var(--space-1) + ${depth * 8}px)`,
-		paddingRight: "var(--space-1)",
-	} as CSSProperties;
+	// 对应 VS Code defaultIndent + depth × indent；外层不缩进，全宽背景保持不变。
+	const rowStyle: CSSProperties = {
+		paddingLeft: `calc(var(--space-2) + ${depth * 8}px)`,
+		paddingRight: "var(--space-2)",
+	};
 	const menu = (event: ReactMouseEvent) => {
 		event.preventDefault();
 		props.onFileContextMenu(node, event.clientX, event.clientY);
@@ -526,10 +534,10 @@ function FileNode(props: {
 	   2027-01：hover 高亮加与侧栏行同款的过渡动画（transition-[background-color,
 	   border-color,box-shadow] duration-200），移入文件列表时背景平滑渐变而非瞬切。 */
 	const fileRowButtonClass =
-		"file-node-row inline-flex h-[28px] min-h-0 w-full items-center justify-start gap-1.5 rounded-sm border-0 bg-transparent py-0 text-left text-body font-normal text-foreground transition-[background-color,border-color,box-shadow] duration-base hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset";
+		"file-node-row flex h-[28px] min-h-0 w-full items-center justify-start gap-1.5 rounded-sm border-0 bg-transparent py-0 text-left text-body font-normal text-foreground transition-[background-color,border-color,box-shadow] duration-base hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset relative";
 	if (node.type === "file")
 		return (
-			<div className="file-node" style={rowStyle}>
+			<div className="file-node">
 				<button
 					type="button"
 					className={cn("file", fileRowButtonClass, isActiveFile && "bg-accent text-accent-foreground hover:bg-accent")}
@@ -544,31 +552,58 @@ function FileNode(props: {
 					}}
 					onContextMenu={menu}
 				>
+					<FileTreeIndentGuides depth={depth} />
+					{/* 文件也保留 16px twistie 槽位，确保与同级目录的图标和名称对齐。 */}
+					<span data-file-tree-twistie="" aria-hidden="true" className="h-full w-4 shrink-0" />
 					<span className="file-node-icon">{fileIconElement(node.name, false, false)}</span>
 					<span className="file-node-name">{node.name}</span>
 					<span className="file-node-type-label">{typeLabel}</span>
 				</button>
 			</div>
 		);
+	/* 吸顶沿用原行的事件与内容；全宽不透明背景负责遮住滚动内容。
+	   z-10 避免子树覆盖行，底部阴影只由几何 hook 标在真正吸顶的最后一行。
+	   注意：行必须是块级 flex（不是 inline-flex）——行内级盒会让 .file-node 容器多出
+	   行盒空隙（实测行距 33px > 行高 28px），相邻两行的引导线之间就裂出 5px 缝，
+	   吸顶行之间也会露出滚动内容。 */
+	const stickyRow = depth < FILE_STICKY_MAX_LEVELS;
 	return (
-		<div className="file-node" style={rowStyle}>
+		<div className="file-node">
 			<Collapsible open={expanded} onOpenChange={() => onToggleDirectory(node.path)}>
 				<CollapsibleTrigger asChild>
-					<button type="button" className={cn("directory group", fileRowButtonClass, isDragOver && "bg-muted ring-1 ring-border")} style={rowStyle} title={node.relativePath} draggable onDragStart={handleDragStart} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} onContextMenu={menu}>
-						<ChevronRight
-							className={cn(
-								"file-node-chevron size-3.5 shrink-0 transition-transform",
-								/* 受控 Collapsible 在部分挂载时序下 data-state=open 不可靠，
-							   按 expanded 显式旋转，保证与子树可见性一致。 */
-								expanded ? "rotate-90" : "rotate-0",
-							)}
-							aria-hidden="true"
-						/>
+					<button
+						type="button"
+						className={cn("directory group", fileRowButtonClass, "rounded-none", stickyRow && "sticky z-10 bg-background data-[file-sticky-last=true]:shadow-sm", isDragOver && "bg-muted ring-1 ring-border")}
+						data-file-sticky-level={stickyRow ? depth : undefined}
+						style={stickyRow ? { ...rowStyle, top: `${FILE_TOOLBAR_HEIGHT_PX + depth * FILE_ROW_HEIGHT_PX}px` } : rowStyle}
+						title={node.relativePath}
+						draggable
+						onDragStart={handleDragStart}
+						onDragOver={handleDragOver}
+						onDragLeave={handleDragLeave}
+						onDrop={handleDrop}
+						onContextMenu={menu}
+					>
+						<FileTreeIndentGuides depth={depth} />
+						{/* 对应 VS Code 的 16px twistie 与 3px 视觉偏移；占位宽度不随展开状态改变。 */}
+						<span data-file-tree-twistie="" aria-hidden="true" className="inline-flex h-full w-4 shrink-0 translate-x-[3px] items-center justify-center">
+							<ChevronRight
+								className={cn(
+									"file-node-chevron size-3.5 shrink-0 transition-transform",
+									/* 受控 Collapsible 的 data-state 时序不可靠，显式跟随 expanded。 */
+									expanded ? "rotate-90" : "rotate-0",
+								)}
+								aria-hidden="true"
+							/>
+						</span>
 						<span className="file-node-icon">{fileIconElement(node.name, true, expanded)}</span>
 						<span className="file-node-name">{node.name}</span>
 					</button>
 				</CollapsibleTrigger>
-				<CollapsibleContent>
+				{/* overflow-clip 取代默认的 overflow-hidden：hidden 会让本层变成「不滚动的 scrollport」，
+				   深层目录行的 sticky 只相对它生效（等于不挂顶）；clip 同样按 padding box 裁剪、
+				   高度动画观感不变，但不建立滚动容器，挂顶仍相对抽屉滚动层（.files-panel）。 */}
+				<CollapsibleContent className="overflow-clip">
 					{/* 懒加载占位与加载失败态：二者互斥，都不会再盖住文件名。
 					 - 占位独立成行（不是行内绝对定位），children 到位后整行消失；
 					 - hasChildren=false 表示目录 listing 已失败或目录为空，不展示占位。
@@ -735,6 +770,7 @@ function SessionsPanel(props: {
 											<div className="session-card-title">
 												<strong>{session.name || t("common.untitled")}</strong>
 												{session.source && session.source !== "pi" && <SessionSourceBadge source={session.source} />}
+												{session.channel && <SessionChannelMark channel={session.channel} />}
 												{/* 非 pi 后端（dsh/imagegen/acp）用后端徽标区分；此前只显 source 徽标，ACP/DSH 会话在此卡无任何标识 */}
 												{session.backend && session.backend !== "pi" && <SessionBackendMark backend={session.backend} />}
 												<small>

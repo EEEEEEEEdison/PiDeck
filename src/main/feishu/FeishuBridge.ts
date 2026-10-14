@@ -26,18 +26,9 @@ import { buildAskCard, normalizeAskOption, parseAskActionValue, parseAskInputVal
 import { feishuLanguage, feishuT, normalizeFeishuLocale, type FeishuLocale } from "./FeishuI18n";
 import type { AgentManager } from "../pi/AgentManager";
 
-export interface SessionRuntimeBindingGateway {
-	ensureSession(input: { projectId: string; title: string; existingSessionId?: string; sessionPath?: string }): Promise<{ sessionId: string }>;
-	activateRuntime(sessionId: string): Promise<AgentTab>;
-	bindRuntime(input: { projectId: string; agent: AgentTab; existingSessionId?: string }): Promise<{ sessionId: string }>;
-	sendPrompt(input: { sessionId: string; message: string; agentMessage?: string; images?: ImageContent[] }): Promise<void>;
-	abortRuntime(sessionId: string): Promise<void>;
-	listRuntimeModels(sessionId: string): Promise<AvailableModel[]>;
-	getRuntimeState(sessionId: string): Promise<AgentRuntimeState | undefined>;
-	setRuntimeModel(sessionId: string, provider: string, modelId: string): Promise<void>;
-	/** 把 ask/confirm 等扩展 UI 的答案写回 pi（与桌面端弹窗回答同一条链路）。 */
-	sendUIResponse(agentId: string, requestId: string, response: { value?: string | boolean; confirmed?: boolean; cancelled?: boolean }): void;
-}
+import type { SessionRuntimeBindingGateway } from "../sessions/sessionRuntimeBinding";
+
+export type { SessionRuntimeBindingGateway };
 
 // ===== 常量 =====
 const DEDUP_MAX = 200;
@@ -1149,6 +1140,7 @@ export class FeishuBridge {
 			const session = await this.runtimeBindings.ensureSession({
 				projectId,
 				title: _title?.trim() || ctx.groupName || feishuT(this.locale, "group.defaultSession"),
+				channel: "feishu",
 			});
 			const binding: FeishuChatBinding = {
 				chatId,
@@ -1199,6 +1191,7 @@ export class FeishuBridge {
 				title,
 				existingSessionId: binding.sessionId,
 				sessionPath: binding.sessionPath,
+				channel: "feishu",
 			});
 			let tab: AgentTab;
 			try {
@@ -1206,7 +1199,7 @@ export class FeishuBridge {
 			} catch (error) {
 				if (!binding.sessionPath) throw error;
 				log(`[飞书 Bridge] sessionPath 恢复失败，创建新 Session: ${error instanceof Error ? error.message : String(error)}`);
-				session = await this.runtimeBindings.ensureSession({ projectId, title });
+				session = await this.runtimeBindings.ensureSession({ projectId, title, channel: "feishu" });
 				tab = await this.runtimeBindings.activateRuntime(session.sessionId);
 			}
 			log(`[飞书 Bridge] 已为 Session ${session.sessionId} 激活 runtime ${tab.id}`);
@@ -1991,20 +1984,43 @@ export class FeishuBridge {
 		return this.downloadMessageResource(messageId, fileKey, "file");
 	}
 
+	/**
+	 * 飞书资源（图片/文件）下载的统一字节上界：超限即中止流并抛错。
+	 * 过去 streamToBuffer 无上界整流到内存，文件型 50MiB 拦截又发生在全量下载之后——
+	 * 飞书侧一个超大附件就能把主进程内存打爆（与 filesReadContent 无界读同族）。
+	 * 64MiB 覆盖 UX 允许的 50MiB 文件上限；图片路径过去完全没有检查，同样受此闸保护。
+	 */
+	private static readonly MAX_RESOURCE_DOWNLOAD_BYTES = 64 * 1024 * 1024;
+
 	private async streamToBuffer(result: unknown): Promise<Buffer> {
 		const resp = result as Record<string, unknown>;
+		const cap = FeishuBridge.MAX_RESOURCE_DOWNLOAD_BYTES;
 		if (typeof resp?.getReadableStream === "function") {
 			const chunks: Buffer[] = [];
+			let total = 0;
 			const readable = (resp.getReadableStream as () => NodeJS.ReadableStream)();
-			for await (const chunk of readable as AsyncIterable<Buffer | string>) {
-				chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+			try {
+				for await (const chunk of readable as AsyncIterable<Buffer | string>) {
+					const piece = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+					total += piece.length;
+					if (total > cap) throw new Error(`FEISHU_RESOURCE_TOO_LARGE:${total}`);
+					chunks.push(piece);
+				}
+			} finally {
+				// 中止后主动销毁底层流，避免连接与缓冲区泄漏（for-await 的 return() 只关迭代器）。
+				const destroyable = readable as { destroy?: (err?: Error) => void };
+				if (total > cap) destroyable.destroy?.(new Error("resource exceeds download budget"));
 			}
 			return Buffer.concat(chunks);
 		}
 		if (typeof (result as AsyncIterable<unknown>)?.[Symbol.asyncIterator] === "function") {
 			const chunks: Buffer[] = [];
+			let total = 0;
 			for await (const chunk of result as AsyncIterable<Buffer | string>) {
-				chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+				const piece = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+				total += piece.length;
+				if (total > cap) throw new Error(`FEISHU_RESOURCE_TOO_LARGE:${total}`);
+				chunks.push(piece);
 			}
 			return Buffer.concat(chunks);
 		}

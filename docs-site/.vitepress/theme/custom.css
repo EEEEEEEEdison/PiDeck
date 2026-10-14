@@ -322,6 +322,23 @@
   box-shadow: var(--pideck-shadow-qr);
 }
 
+/* 作者小店的价目表：与赞赏码同款边界/圆角，但价目表是竖版海报（6:7），
+   宽度得比二维码大才读得清价格，否则缩到 280px 后数字变成一坨 */
+.shop-block {
+  margin: 24px 0 40px;
+  text-align: center;
+}
+
+.shop-price {
+  display: inline-block;
+  width: 420px;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--pideck-radius);
+  box-shadow: var(--pideck-shadow-qr);
+}
+
 @media (max-width: 760px) {
   .home-showcase {
     margin-top: 8px;

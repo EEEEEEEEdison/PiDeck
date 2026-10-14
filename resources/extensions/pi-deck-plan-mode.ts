@@ -228,12 +228,22 @@ export default function piDeckPlanModeExtension(pi: ExtensionAPI): void {
 	}
 
 	function enablePlanModeTools(): void {
-		if (toolsBeforePlanMode === undefined) toolsBeforePlanMode = pi.getActiveTools();
-		pi.setActiveTools(getPlanModeTools(toolsBeforePlanMode));
+		// 快照只在首次进入 plan 时记录（退出时用它找回写权限），plan 模式的工具面以**当前**
+		// 注册表为准：重复进入 plan（/plan on 后发 composer 计划消息）时若用旧快照重算，
+		// 快照之后注册的第三方工具会在进入 plan 的一刻被覆盖删除（与退出路径同一类 bug，issue #349）。
+		const current = pi.getActiveTools();
+		if (toolsBeforePlanMode === undefined) toolsBeforePlanMode = current;
+		pi.setActiveTools(getPlanModeTools(current));
 	}
 
 	function restoreNormalModeTools(): void {
-		pi.setActiveTools(toolsBeforePlanMode ?? getNormalModeTools(pi.getActiveTools()));
+		// 增量恢复：快照只负责找回 plan 前的工具面（含 edit/write 写权限），
+		// plan 期间后注册的第三方工具（billion-context 压缩工具等异步注册）以当前注册表为准保留。
+		// 旧实现用快照全量覆盖 setActiveTools，会把 plan 激活后才注册的工具整批删掉（issue #349）。
+		const current = pi.getActiveTools();
+		const snapshot = toolsBeforePlanMode ?? getNormalModeTools(current);
+		const keepThirdParty = current.filter((name) => !PLAN_MANAGED_TOOLS.has(name));
+		pi.setActiveTools(uniqueToolNames([...snapshot, ...keepThirdParty]));
 		toolsBeforePlanMode = undefined;
 	}
 

@@ -1,8 +1,10 @@
-import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { PACKAGED_USER_DATA_NAME, PACKAGED_USER_DATA_NAME_NEW } from "../portableUserData";
 import type { UserDataNameMigrationNotice } from "../../shared/types/userDataMigration";
 import { repairUserDataSessionHeaders } from "./userDataSessionHeaderMigration";
+import { isMissingMigrationPath, isUserDataMigrationComplete, recordUserDataMigrationComplete } from "./userDataMigrationState";
 
 /**
  * 正式包装版 userData 目录改名迁移（pi-desktop → PiDeck）。
@@ -12,11 +14,14 @@ import { repairUserDataSessionHeaders } from "./userDataSessionHeaderMigration";
  *
  * 设计约束：
  * - 在 app.ready 之前、`app.setPath("userData")` 之前同步执行（纯 node:fs，不依赖 Electron），
- *   返回值即本次启动应使用的 userData；改名失败时回退旧目录，下次启动自动重试。
+ *   返回值即本次启动应使用的 userData；根改名失败回退旧根，后续步骤失败继续新根，下次启动重试。
  * - 一次迁移完整闭环 = 目录改名 + 持久化绝对路径改写 + pi 会话 encoded 目录改名 + header.cwd 修复。
+ *   全部成功后原子写完成记录；状态匹配则跳过扫描，缺失/损坏/版本不符则重新核验。
  *   子步骤均幂等；旧根已消失时仍补完剩余步骤，覆盖中途失败以及 #298 的 beta 存量用户。
  *   header 只换 cwd，历史消息逐字节保留，避免把迁移变成历史内容编辑。
  * - 只碰落在旧根内的路径：用户自定义到别处的聊天目录、同前缀的 pi-desktop-dev 均不受影响。
+ * - 旧根仍存在（降级后两代并存）= 另一份数据仍在被使用：只补修新根自己的内容（如 beta 已改目录名
+ *   但 header 仍指向已消失旧路径的会话），不改名、不合并、不删旧根，也不写完成记录。
  */
 
 /** 历史正式包 userData 目录名（值收口在 portableUserData，改名只改那一处）。 */
@@ -25,11 +30,11 @@ export const LEGACY_PACKAGED_USER_DATA_NAME = PACKAGED_USER_DATA_NAME;
 export const NEW_PACKAGED_USER_DATA_NAME = PACKAGED_USER_DATA_NAME_NEW;
 
 export type UserDataNameMigration =
-	/** 未执行改名（新数据 / 已迁移过 / 便携版 / 显式目录 / 两代目录冲突后保守用新目录） */
+	/** 未执行改名（新数据 / 旧根仍在而降级并存 / 已迁移过 / 便携版 / 显式目录） */
 	| { kind: "skipped"; reason: "new-install" | "already-migrated" | "explicit-user-data-dir" | "collision"; userDataPath: string }
 	/** 改名成功：目录已迁到 PiDeck，路径记账与会话目录已同步改写 */
 	| { kind: "migrated"; oldPath: string; userDataPath: string; migratedSessionDirs: string[] }
-	/** 改名失败（被占用/权限/跨盘等）：本次继续用旧目录，下次启动重试 */
+	/** 目录改名或后续补修失败：使用仍存在的根，不记完成，下次启动重试。 */
 	| { kind: "failed"; reason: string; userDataPath: string };
 
 export type UserDataNameMigrationInput = {
@@ -40,12 +45,14 @@ export type UserDataNameMigrationInput = {
 	platform?: NodeJS.Platform;
 	/** 便携版（PORTABLE_EXECUTABLE_DIR）或显式 --user-data-dir 时跳过改名 */
 	portableOrExplicit?: boolean;
-	/** 覆盖新目录解析结果，测试注入用 */
+	/** 旧目录名：开发态/Dev 独立环境复用同一迁移闭环，默认历史正式版。 */
+	legacyUserDataName?: string;
+	/** 新目录解析结果：开发数据迁移与测试注入用。 */
 	userDataPathOverride?: string;
 };
 
 /** 需要改写的持久化 JSON：内部以绝对路径记账，根改名后必须同步换前缀。 */
-const REWRITTEN_FILES = ["chat-path.json", "projects.json", "dismissed-project-paths.json", "session-catalog.json", "session-catalog.json.bak", "session-summary-cache.json"];
+const REWRITTEN_FILES = ["settings.json", "automation.json", "chat-path.json", "projects.json", "dismissed-project-paths.json", "session-catalog.json", "session-catalog.json.bak", "session-summary-cache.json"];
 /** drafts/<sessionId>/ 下可能内联粘贴文件绝对路径的草稿文件。 */
 const REWRITTEN_DRAFT_FILE_NAMES = ["drafts.json", "drafts.md"];
 
@@ -124,8 +131,9 @@ function rewriteFileInPlace(filePath: string, oldRoot: string, newRoot: string, 
 	let raw: string;
 	try {
 		raw = readFileSync(filePath, "utf8");
-	} catch {
-		return false;
+	} catch (error) {
+		if (isMissingMigrationPath(error)) return false;
+		throw error;
 	}
 	let next = replaceRootInText(raw, oldRoot, newRoot, caseInsensitive);
 	// encoded token 全是连字符，与转义层级无关；磁盘实际目录名大小写混杂，
@@ -135,7 +143,16 @@ function rewriteFileInPlace(filePath: string, oldRoot: string, newRoot: string, 
 		next = next.replace(new RegExp(escapeRegExp(oldName), caseInsensitive ? "gi" : "g"), newName);
 	}
 	if (next === raw) return false;
-	writeFileSync(filePath, next, "utf8");
+	const stat = lstatSync(filePath);
+	// 配置不能留下半截 JSON；不替换用户的符号链接，只对普通文件原子发布。
+	if (!stat.isFile()) throw new Error("Cannot safely rewrite non-regular migration file");
+	const temporary = `${filePath}.${randomUUID()}.tmp`;
+	try {
+		writeFileSync(temporary, next, { encoding: "utf8", mode: stat.mode, flag: "wx", flush: true });
+		renameSync(temporary, filePath);
+	} finally {
+		rmSync(temporary, { force: true });
+	}
 	return true;
 }
 
@@ -150,51 +167,68 @@ function rewriteFileInPlace(filePath: string, oldRoot: string, newRoot: string, 
  * 返回 oldName→newName 映射：既用于目录改名，也用于把 catalog 里的 encoded token
  * （filePath 保留磁盘大小写、originKey 全小写正斜杠）同步换掉——会话 JSONL 的绝对路径
  * 是跨重启的会话身份，目录改名后不改写引用就会全部失联。
+ *
+ * allowRename=false（旧根仍在）时只补修「已改到新名下」的目录：旧根名下的目录属于并存的
+ * 另一份数据，不属于本次修复范围，既不改名也不报错误。
  */
-function migratePiSessionDirs(piSessionsRoot: string, legacyChildren: string[], oldRoot: string, newRoot: string, platform: NodeJS.Platform): Map<string, string> {
+function migratePiSessionDirs(piSessionsRoot: string, legacyChildren: string[], oldRoot: string, newRoot: string, platform: NodeJS.Platform, failures: string[], allowRename: boolean): Map<string, string> {
 	const renamed = new Map<string, string>();
 	let entries: string[];
 	try {
 		entries = readdirSync(piSessionsRoot);
-	} catch {
+	} catch (error) {
+		if (!isMissingMigrationPath(error)) failures.push("Cannot enumerate pi session directories");
 		return renamed;
 	}
 	const caseInsensitive = isCaseInsensitive(platform);
 	const nameKey = (name: string) => (caseInsensitive ? name.toLowerCase() : name);
 	const byName = new Map(entries.map((entry) => [nameKey(entry), entry]));
 	const separator = platform === "win32" ? "\\" : "/";
+	const repair = (name: string) => {
+		if (!repairUserDataSessionHeaders(join(piSessionsRoot, name), oldRoot, newRoot, platform)) failures.push(`Session headers incomplete: ${name}`);
+	};
+	const visited = new Set<string>();
 	for (const childPath of legacyChildren) {
 		const exact = encodeSessionDirName(childPath);
+		// 登记路径与磁盘路径可能混用分隔符；同一 encoded 目录只能处理一次。
+		const key = nameKey(exact);
+		if (visited.has(key)) continue;
+		visited.add(key);
 		const newName = encodeSessionDirName(`${newRoot}${childPath.slice(oldRoot.length).replace(/^[\\/]/, separator)}`);
 		const matched = byName.get(nameKey(exact));
 		const existingNew = byName.get(nameKey(newName));
 		if (!matched) {
-			// #298：encoded 目录已经迁过，但 JSONL 首行仍是旧 cwd；不能直接跳过。
+			// 中断后目录已改名，仍需补修 header，并重建映射以修正尚未写入的 catalog。
 			if (existingNew) {
-				repairUserDataSessionHeaders(join(piSessionsRoot, existingNew), oldRoot, newRoot, platform);
+				repair(existingNew);
 				renamed.set(exact, existingNew);
 			}
 			continue;
 		}
 		if (nameKey(newName) !== nameKey(matched)) {
-			const source = join(piSessionsRoot, matched);
-			const target = join(piSessionsRoot, newName);
-			try {
-				if (safeIsDirectory(target)) {
-					// 罕见：两代 encoded 目录并存。合并文件（target 优先），源目录改名留底。
-					mergeSessionDirs(source, target);
-					renameSync(source, `${source}.merged-legacy`);
-				} else {
-					renameSync(source, target);
+			if (!allowRename) {
+				// 并存的旧根目录保留原样；已存在于新名下的目录仍要补修 header（只改了目录名的情况）。
+				if (existingNew && nameKey(existingNew) !== nameKey(matched)) {
+					repair(existingNew);
+					renamed.set(matched, existingNew);
 				}
+				continue;
+			}
+			try {
+				const target = join(piSessionsRoot, newName);
+				// 两份历史不可按文件名猜测合并；保留两边与旧引用，且绝不能记完成。
+				if (safeIsDirectory(target)) {
+					failures.push(`Session directory collision: ${matched}`);
+					continue;
+				}
+				renameSync(join(piSessionsRoot, matched), target);
 			} catch {
-				// 单目录失败不阻断：catalog 仍按旧路径可读，下次启动重试
+				failures.push(`Cannot rename session directory: ${matched}`);
 				continue;
 			}
 		}
-		// 目录本就与新名一致（如仅大小写差异）：不改磁盘名，但 token 替换仍要做（引用大小写混杂）
-		const targetName = nameKey(newName) === nameKey(matched) ? matched : (existingNew ?? newName);
-		repairUserDataSessionHeaders(join(piSessionsRoot, targetName), oldRoot, newRoot, platform);
+		const targetName = nameKey(newName) === nameKey(matched) ? matched : newName;
+		repair(targetName);
 		renamed.set(matched, targetName);
 	}
 	return renamed;
@@ -206,8 +240,9 @@ function listChildDirs(root: string): string[] {
 		return readdirSync(root, { withFileTypes: true })
 			.filter((entry) => entry.isDirectory())
 			.map((entry) => join(root, entry.name));
-	} catch {
-		return [];
+	} catch (error) {
+		if (isMissingMigrationPath(error)) return [];
+		throw error;
 	}
 }
 
@@ -221,8 +256,9 @@ function readRecordedChatDir(chatPathFile: string, oldRoot: string): string | nu
 	let raw: string;
 	try {
 		raw = readFileSync(chatPathFile, "utf8");
-	} catch {
-		return null;
+	} catch (error) {
+		if (isMissingMigrationPath(error)) return null;
+		throw error;
 	}
 	const match = raw.match(/"path"\s*:\s*"((?:[^"\\]|\\.)*)"/);
 	if (!match) return null;
@@ -237,110 +273,93 @@ function readRecordedChatDir(chatPathFile: string, oldRoot: string): string | nu
 	return normalized === root || normalized.startsWith(`${root}/`) ? decoded : null;
 }
 
-function mergeSessionDirs(source: string, target: string): void {
-	let entries: string[];
-	try {
-		entries = readdirSync(source);
-	} catch {
-		return;
-	}
-	for (const entry of entries) {
-		const from = join(source, entry);
-		const to = join(target, entry);
-		if (safeExists(to)) continue;
-		try {
-			renameSync(from, to);
-		} catch {
-			// 移不过去的留在源目录，随 .merged-legacy 留底
-		}
-	}
-}
-
-/** 打包版启动装配入口：便携 / 显式 --user-data-dir 由调用方以 portableOrExplicit 传入。 */
+/** 启动装配入口：只有全链路核验成功才能记完成，之后启动跳过配置/会话扫描。 */
 export function runUserDataNameMigration(input: UserDataNameMigrationInput): UserDataNameMigration {
 	const platform = input.platform ?? process.platform;
-	const oldRoot = resolve(join(input.appDataDir, LEGACY_PACKAGED_USER_DATA_NAME));
+	const oldRoot = resolve(join(input.appDataDir, input.legacyUserDataName ?? LEGACY_PACKAGED_USER_DATA_NAME));
 	const newRoot = resolve(input.userDataPathOverride ?? join(input.appDataDir, PACKAGED_USER_DATA_NAME_NEW));
-
-	if (input.portableOrExplicit) {
-		return { kind: "skipped", reason: "explicit-user-data-dir", userDataPath: newRoot };
-	}
-	const oldExists = safeIsDirectory(oldRoot);
-	const newExists = safeIsDirectory(newRoot);
-	if (!oldExists && !newExists) {
-		return { kind: "skipped", reason: "new-install", userDataPath: newRoot };
-	}
-	if (oldExists && newExists) {
-		return { kind: "skipped", reason: "collision", userDataPath: newRoot };
-	}
-
-	if (oldExists) {
-		try {
+	const context = { oldRoot, newRoot, sessionsRoot: resolve(join(input.homeDir, ".pi", "agent", "sessions")), platform };
+	if (input.portableOrExplicit) return { kind: "skipped", reason: "explicit-user-data-dir", userDataPath: newRoot };
+	let userDataPath = oldRoot;
+	try {
+		const oldExists = safeIsDirectory(oldRoot);
+		const newExists = safeIsDirectory(newRoot);
+		if (!oldExists && !newExists) return { kind: "skipped", reason: "new-install", userDataPath: newRoot };
+		// 两代目录并存：旧根那份数据可能仍被旧版本使用，本次只补修新根自己，绝不合并或删除。
+		const legacyPresent = oldExists && newExists;
+		const renamedThisRun = oldExists && !newExists;
+		if (!oldExists && isUserDataMigrationComplete(context)) return { kind: "skipped", reason: "already-migrated", userDataPath: newRoot };
+		if (renamedThisRun) {
 			mkdirSync(dirname(newRoot), { recursive: true });
 			renameSync(oldRoot, newRoot);
-		} catch (error) {
-			// 改名失败回退旧目录：应用照常启动，下次启动重试（此时新旧目录状态未变）
-			return { kind: "failed", reason: error instanceof Error ? error.message : String(error), userDataPath: oldRoot };
 		}
-	}
+		userDataPath = newRoot;
 
-	const caseInsensitive = isCaseInsensitive(platform);
-	// 目录已整体迁到新根，子目录名不变：以新根子目录生成「旧根内路径」候选集匹配编码目录。
-	const legacyChildren = [oldRoot, ...listChildDirs(newRoot).map((child) => `${oldRoot}${child.slice(newRoot.length)}`)];
-	// 改写前先读登记路径；beta 已迁移时登记的可能是新根下的嵌套目录，同样要生成旧编码候选。
-	const chatPathFile = join(newRoot, "chat-path.json");
-	const recordedOld = readRecordedChatDir(chatPathFile, oldRoot);
-	const recordedNew = readRecordedChatDir(chatPathFile, newRoot);
-	const recordedChatDir = recordedOld ?? (recordedNew ? `${oldRoot}${recordedNew.slice(newRoot.length)}` : null);
-	if (recordedChatDir && !legacyChildren.includes(recordedChatDir)) legacyChildren.push(recordedChatDir);
-	const migratedSessionDirs = migratePiSessionDirs(resolve(join(input.homeDir, ".pi", "agent", "sessions")), legacyChildren, oldRoot, newRoot, platform);
-	const encodedPairs = [...migratedSessionDirs.entries()];
-
-	for (const fileName of REWRITTEN_FILES) {
-		try {
-			rewriteFileInPlace(join(newRoot, fileName), oldRoot, newRoot, encodedPairs, caseInsensitive);
-		} catch {
-			// 单文件失败：判据幂等，下次启动重跑
-		}
-	}
-	try {
-		const draftsRoot = join(newRoot, "drafts");
-		for (const dir of readdirSync(draftsRoot)) {
-			for (const fileName of REWRITTEN_DRAFT_FILE_NAMES) {
-				const candidate = join(draftsRoot, dir, fileName);
-				if (safeIsFile(candidate)) rewriteFileInPlace(candidate, oldRoot, newRoot, encodedPairs, caseInsensitive);
+		const failures: string[] = [];
+		const caseInsensitive = isCaseInsensitive(platform);
+		const legacyChildren = [oldRoot, ...listChildDirs(newRoot).map((child) => `${oldRoot}${child.slice(newRoot.length)}`)];
+		const chatPathFile = join(newRoot, "chat-path.json");
+		const recordedOld = readRecordedChatDir(chatPathFile, oldRoot);
+		const recordedNew = readRecordedChatDir(chatPathFile, newRoot);
+		const recordedChatDir = recordedOld ?? (recordedNew ? `${oldRoot}${recordedNew.slice(newRoot.length)}` : null);
+		if (recordedChatDir && !legacyChildren.includes(recordedChatDir)) legacyChildren.push(recordedChatDir);
+		const migratedSessionDirs = migratePiSessionDirs(context.sessionsRoot, legacyChildren, oldRoot, newRoot, platform, failures, !legacyPresent);
+		const encodedPairs = [...migratedSessionDirs.entries()];
+		const rewrite = (path: string) => {
+			try {
+				rewriteFileInPlace(path, oldRoot, newRoot, encodedPairs, caseInsensitive);
+			} catch {
+				failures.push(`Cannot rewrite persisted path: ${path}`);
+			}
+		};
+		for (const fileName of REWRITTEN_FILES) rewrite(join(newRoot, fileName));
+		for (const directory of ["feishu", "pi-desktop"]) {
+			try {
+				for (const entry of readdirSync(join(newRoot, directory))) {
+					const path = join(newRoot, directory, entry);
+					if (entry.startsWith("feishu") && entry.endsWith(".json") && safeIsFile(path)) rewrite(path);
+				}
+			} catch (error) {
+				if (!isMissingMigrationPath(error)) failures.push(`Cannot inspect configuration directory: ${directory}`);
 			}
 		}
-	} catch {
-		// 无 drafts 目录
+		try {
+			const draftsRoot = join(newRoot, "drafts");
+			for (const dir of readdirSync(draftsRoot)) {
+				for (const fileName of REWRITTEN_DRAFT_FILE_NAMES) {
+					const candidate = join(draftsRoot, dir, fileName);
+					if (safeIsFile(candidate)) rewrite(candidate);
+				}
+			}
+		} catch (error) {
+			if (!isMissingMigrationPath(error)) failures.push("Cannot inspect drafts");
+		}
+		if (failures.length) return { kind: "failed", reason: failures.join("; "), userDataPath: newRoot };
+		// 旧根仍在时不能记完成：那份数据还没处理，下次启动必须继续核验。
+		if (legacyPresent) return { kind: "skipped", reason: "collision", userDataPath: newRoot };
+		recordUserDataMigrationComplete(context);
+		// 已改根的存量补修不再重复展示整目录迁移提示。
+		return renamedThisRun ? { kind: "migrated", oldPath: oldRoot, userDataPath: newRoot, migratedSessionDirs: [...migratedSessionDirs.keys()] } : { kind: "skipped", reason: "already-migrated", userDataPath: newRoot };
+	} catch (error) {
+		return { kind: "failed", reason: error instanceof Error ? error.message : String(error), userDataPath };
 	}
-
-	// 保留原有返回契约：存量补修不重复展示整目录迁移提示。
-	return oldExists ? { kind: "migrated", oldPath: oldRoot, userDataPath: newRoot, migratedSessionDirs: [...migratedSessionDirs.keys()] } : { kind: "skipped", reason: "already-migrated", userDataPath: newRoot };
 }
 
 function safeIsDirectory(path: string): boolean {
 	try {
 		return statSync(path).isDirectory();
-	} catch {
-		return false;
+	} catch (error) {
+		if (isMissingMigrationPath(error)) return false;
+		throw error;
 	}
 }
 
 function safeIsFile(path: string): boolean {
 	try {
 		return statSync(path).isFile();
-	} catch {
-		return false;
-	}
-}
-
-function safeExists(path: string): boolean {
-	try {
-		statSync(path);
-		return true;
-	} catch {
-		return false;
+	} catch (error) {
+		if (isMissingMigrationPath(error)) return false;
+		throw error;
 	}
 }
 

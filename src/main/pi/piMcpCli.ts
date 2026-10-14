@@ -128,7 +128,9 @@ export function parseMcpListOutput(raw: string): McpCliListResult | null {
 			state: typeof entry.state === "string" ? entry.state : "disconnected",
 			tools: asStringArray(entry.tools),
 			toolExposure: isRecord(entry.toolExposure) ? Object.fromEntries(Object.entries(entry.toolExposure).filter((entry2): entry2 is [string, string] => typeof entry2[1] === "string")) : undefined,
-			resources: typeof entry.resources === "number" ? entry.resources : undefined,
+			// pi 1.1 给资源数量（number），pi 1.2 起改成 `resources: true`（见上游 CHANGELOG 1.2.0），
+			// 两种形态都收，否则新 pi 下会静默丢字段。
+			resources: typeof entry.resources === "number" || typeof entry.resources === "boolean" ? entry.resources : undefined,
 			resourceTemplates: typeof entry.resourceTemplates === "number" ? entry.resourceTemplates : undefined,
 			error: typeof entry.error === "string" ? entry.error : undefined,
 		});

@@ -66,3 +66,18 @@ test("当前模型缺 provider 或 modelId：视为无当前模型", () => {
 	);
 	assertEqual(run({ current: { provider: "", modelId: "gpt-5" } }), ["provider:anthropic"]);
 });
+
+test("expandAll：收藏栏与所有供应商分组都展开（外部连接挑模型场景）", () => {
+	assertEqual(
+		run({
+			favorites: [{ provider: "openai", id: "gpt-5" }],
+			current: { provider: "deepseek", modelId: "chat" },
+			expandAll: true,
+		}),
+		["favorites", "provider:anthropic", "provider:deepseek", "provider:openai"],
+	);
+	// 无收藏时只展开供应商分组，不加空的收藏栏
+	assertEqual(run({ expandAll: true }), ["provider:anthropic", "provider:deepseek", "provider:openai"]);
+	// 空目录（模型列表未到达）不产生任何分组，避免误展开不存在的分组
+	assertEqual(run({ providers: [], expandAll: true }), []);
+});

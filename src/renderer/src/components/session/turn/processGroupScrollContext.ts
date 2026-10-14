@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, type RefObject } from "react";
 
 /**
  * 「外层已自带滚轮」标记（过程组组体）。
@@ -12,6 +12,16 @@ import { createContext, useContext } from "react";
  * 组外（扁平路径 / 最终回答里的工具卡）保持原有限高，行为不变。
  */
 export const ProcessGroupBodyScrollContext = createContext(false);
+
+/** 组体自己的几何通知与阅读位置入口，不向外层时间线传播跟随状态。 */
+export type ProcessGroupScrollControls = {
+	scrollRef: RefObject<HTMLElement | null>;
+	restoreAt: (scrollTop: number) => void;
+	subscribeGeometry: (listener: () => void) => () => void;
+};
+
+/** 与旧布尔语境分开：组外组件保留原布局，也不订阅组内几何。 */
+export const ProcessGroupScrollControlsContext = createContext<ProcessGroupScrollControls | null>(null);
 
 /** 当前是否挂在过程组组体内（外层已有一条滚轮）。 */
 export function useInsideProcessGroupBody(): boolean {

@@ -39,7 +39,9 @@ import { extractPiToolTruncation } from "../../shared/formatToolDetail";
 import { COMPACT_CANCELLED_BY_OWNER, COMPACT_CANCELLED_BY_USER_ABORT, COMPACT_HOOK_REJECT_MAX_MS, COMPACT_OBSERVATION_MAX_AGE_MS, COMPACT_ROUTED_TO_OWNER, COMPACT_USER_ABORT_WINDOW_MS, COMPACT_WAIT_TIMEOUT } from "../../shared/compactFeedback";
 import { PiProcess } from "./PiProcess";
 import { createBridgeServiceHandler } from "./bridge/bridgeServices";
-import { APP_DEEP_LINK_SCHEME } from "../utils/deepLinkScheme";
+import { APP_DISPLAY_NAME } from "../utils/appBrand";
+import { isMainWindowFocused, shouldAlertNow } from "../notifications/alertFocusGate";
+import { buildToastXml, notificationLaunchUrl, resolveNotificationLogoUri } from "../notifications/notificationToast";
 import { createCompactRpcRequest } from "./compactRpc";
 import { readPiCompactionOwnership, type PiCompactionOwnership } from "./compactionOwner";
 import { mergeSubagentSources } from "./derivedSubagents";
@@ -984,6 +986,23 @@ export class AgentManager {
 	}
 
 	/**
+	 * 丢弃指定项目未被认领的 standby 进程（回收，不是消费）：草稿会话切到非 pi 后端
+	 * （生图/生视频/DSH/ACP）时调用——该进程已经服务不了这个会话，继续挂着只能等
+	 * 10min TTL 自然到期（用户反馈的「没用到的预加载进程占着内存」）。
+	 * 只丢项目匹配的条目：池是单槽位，同项目另一个新草稿仍可能认领它。
+	 * 返回是否真的丢掉了条目（调用方无需关心失败：没池子/项目不符都当无事发生）。
+	 */
+	releaseStandbyAgent(projectId: string): boolean {
+		if (this.standbyPool.status()?.projectId !== projectId) return false;
+		const agentId = this.standbyPool.clear();
+		if (!agentId) return false;
+		// 与 TTL 到期同一条回收路径（stop 会顺带从 agents map 移除，standby 标记进程对 UI 本就不可见）
+		void this.stop(agentId);
+		void this.appLogger?.info("agent", "Standby agent released", { agentId, projectId });
+		return true;
+	}
+
+	/**
 	 * 认领 standby：命中（项目一致 + spawn 指纹一致 + 进程仍 idle）则转正返回已握手 tab，
 	 * 调用方跳过 createAgent 直接绑定会话；任何不满足都返回 null 回退正常创建。
 	 * 会话级代理覆盖（on/off）与飞书绑定是 spawn 时注入的 env，池化进程按全局/未绑定 spawn，
@@ -1324,10 +1343,18 @@ export class AgentManager {
 		const t0 = Date.now();
 		const runtime = this.requireRuntime(agentId);
 		const process = runtime.process;
-		const { deckSessionId, runtimeGeneration, sessionPath } = runtime.tab;
+		const { deckSessionId, sessionPath } = runtime.tab;
+		// create() 起步的后台历史加载先于协调器 bind 启动：捕获到的 runtimeGeneration 是
+		// undefined，随后首次 bind 才写入具体代际。「未绑定 → 首次绑定」是同一运行时的绑定
+		// 动作，不是「换了运行时」——按值比较会把新 runtime 的首次历史加载全部误取消，
+		// 窗口永远为空（Issue #350：重启后历史加载被取消 → 渲染层只拿到未初始化的空窗口）。
+		// 因此首次观察到具体代际时记下它，之后仍严格比较：重新绑定后的迟到结果照常取消。
+		let expectedGeneration = runtime.tab.runtimeGeneration;
 		const assertCurrentRuntime = () => {
 			// 历史读取跨多个 await；发布消息、分页游标和压缩计数前必须仍属于原运行时。
-			if (this.agents.get(agentId) !== runtime || runtime.process !== process || runtime.tab.deckSessionId !== deckSessionId || runtime.tab.runtimeGeneration !== runtimeGeneration || runtime.tab.sessionPath !== sessionPath) throw new Error("History load cancelled: runtime changed");
+			if (this.agents.get(agentId) !== runtime || runtime.process !== process || runtime.tab.deckSessionId !== deckSessionId || runtime.tab.sessionPath !== sessionPath) throw new Error("History load cancelled: runtime changed");
+			if (expectedGeneration === undefined) expectedGeneration = runtime.tab.runtimeGeneration;
+			else if (runtime.tab.runtimeGeneration !== expectedGeneration) throw new Error("History load cancelled: runtime changed");
 		};
 
 		// 有会话文件时禁止再发 get_messages：pi 会把整段历史打成单行 JSON，
@@ -2762,6 +2789,7 @@ export class AgentManager {
 	 * 全部 assistant 消息的平均值（average，即「当前会话平均缓存率」）。
 	 * 口径与 pi CLI footer 的 latestCacheHitRate 一致：
 	 * cacheRead / (input + cacheRead + cacheWrite) * 100
+	 * 同一次扫描还顺带产出提示词装载（系统提示词/工具声明）与对话估算，见 cacheHitStats。
 	 */
 	private getSessionCacheHitStats(sessionPath: string): Promise<CacheHitStats> {
 		return this.cacheHitStatsReader(this.toSessionHostPath(sessionPath));
@@ -2779,11 +2807,11 @@ export class AgentManager {
 			process.client.request({ type: "get_session_stats" }).catch(() => ({ data: undefined })),
 			sessionPath
 				? this.getSessionCacheHitStats(sessionPath)
-				: Promise.resolve({
-						latest: undefined as number | undefined,
-						average: undefined as number | undefined,
+				: Promise.resolve<CacheHitStats>({
+						latest: undefined,
+						average: undefined,
 						sampleCount: 0,
-						conversationTokens: undefined as number | undefined,
+						conversationTokens: undefined,
 					}),
 		]);
 		// 不能把旧进程的模型/用量与新绑定的本地状态拼成一份有效快照。
@@ -2810,6 +2838,19 @@ export class AgentManager {
 		const cacheHitPercent = clampPercent(directCacheHitPercent ?? fileHitStats.latest);
 		const cacheHitAveragePercent = clampPercent(fileHitStats.average);
 		const perf = this.messagePerf.getLast(agentId);
+		const contextTokens = pickNumber(contextUsage?.tokens);
+		/**
+		 * 上下文构成三段：
+		 * - 系统 / 工具：从会话文件重放出的提示词装载直接测量（promptLoadout），
+		 *   不再用「总占用 − 对话估算」反推——反推值会被估算误差与各供应商 usage 口径
+		 *   差异打到 0（用户看到「系统 + 工具 ~0」）或反向放大；
+		 * - 对话：有总占用与两段测量值时取差值（提供商上报的 prompt 就是这三段之和，
+		 *   差值自动包含 thinking/图片/末尾回答等没被文本估算覆盖的部分），
+		 *   差值不可用（无 usage / 装载缺失 / 差为负）时回退到消息文本估算。
+		 */
+		const loadoutMeasured = fileHitStats.systemTokens != null && fileHitStats.toolsTokens != null;
+		const conversationResidual = loadoutMeasured && contextTokens != null && contextTokens > 0 ? Math.round(contextTokens - (fileHitStats.systemTokens ?? 0) - (fileHitStats.toolsTokens ?? 0)) : undefined;
+		const contextMessageTokens = conversationResidual != null && conversationResidual > 0 ? conversationResidual : fileHitStats.conversationTokens;
 		return {
 			modelName: normalizedRuntimeName(model?.name) ?? normalizedRuntimeName(model?.id),
 			provider: normalizedRuntimeName(model?.provider),
@@ -2822,12 +2863,13 @@ export class AgentManager {
 			isExecutingTool: !!this.toolExecutingByAgent.get(agentId),
 			executingToolName: this.toolExecutingByAgent.get(agentId) ?? undefined,
 			toolStateSequence: this.toolStateSequenceByAgent.get(agentId) ?? 0,
-			contextTokens: pickNumber(contextUsage?.tokens),
+			contextTokens,
 			contextWindow: pickNumber(contextUsage?.contextWindow) ?? pickNumber(model?.contextWindow),
 			contextPercent: pickNumber(contextUsage?.percent),
 			contextOverflow: this.contextOverflowByAgent.get(agentId) === true,
-			/** 对话消息估算 token：CJK 加权估算（中文 1.5 字/token、其余 4 字符/token），含工具调用/结果文本，遇压缩重置 */
-			contextMessageTokens: fileHitStats.conversationTokens,
+			/** 对话段 token：优先「总占用 − 系统 − 工具」差值，否则消息文本估算（CJK 加权，含工具调用/结果文本，遇压缩重置） */
+			contextMessageTokens,
+			...(loadoutMeasured ? { contextSystemTokens: fileHitStats.systemTokens, contextToolsTokens: fileHitStats.toolsTokens } : {}),
 			inputTokens,
 			outputTokens,
 			cacheRead,
@@ -3689,9 +3731,10 @@ export class AgentManager {
 
 	async getCommands(agentId: string) {
 		const runtime = this.requireRuntime(agentId);
-		const response = await runtime.process.client.request({
-			type: "get_commands",
-		});
+		// 元数据查询用固定短超时（与本文件其他 get_commands 调用点同一约定）：
+		// 卡死的 pi 进程不能把活会话的斜杠菜单拖到 rpcTimeout（默认 600s）；
+		// 超时 reject → Coordinator 转 SESSION_COMMAND_FAILED → 渲染层回退静态建议。
+		const response = await runtime.process.client.request({ type: "get_commands" }, 10_000);
 		return (response.data as { commands?: unknown[] } | undefined)?.commands ?? [];
 	}
 
@@ -4468,7 +4511,6 @@ export class AgentManager {
 		// 无条件写 sessionRuntimeByIdAtom → timeline 等订阅者 100/s 全量重渲染
 		// （O(消息数) + V8 committed 只涨不缩，GB 级内存爬升的核心驱动）。
 		// web SSE/飞书等内部订阅走上方 localEventListeners，不受影响。
-		// this.emit(ipcChannels.agentsEvent, { agentId, event });
 
 		if (!isRecord(event)) return;
 		const typed = event;
@@ -4775,9 +4817,10 @@ export class AgentManager {
 			// 若 settled 前已有 agent_start（用户立刻重发），此处才真正解封；
 			// 若还没有新 start，则保持封印，防止 settled 后残留 delta 复活旧气泡。
 			// abort 的 settled（或 abort 后重发时迟到的旧 settled）不算成功完成：
+			// pi 1.1+ 的 aborted 标记也覆盖扩展发起的取消；旧版或迟到事件仍由本地状态兜底。
 			// recentlyAborted 被 agent_start 清除，但 settled 兜底定时器保留到 settled，
-			// 两者任一命中都说明本轮被用户中止，不得触发「已完成」提醒。
-			const isAbortSettled = this.recentlyAborted.has(agentId) || this.abortGate.hasSettledFallback(agentId);
+			// 任一取消信号命中都不得触发「已完成」提醒。
+			const isAbortSettled = typed.aborted === true || this.recentlyAborted.has(agentId) || this.abortGate.hasSettledFallback(agentId);
 			this.noteAgentAbortSettled(agentId);
 			this.recentlyAborted.delete(agentId);
 			if (runtime && runtime.tab.status !== "error" && runtime.tab.status !== "closed") {
@@ -5134,6 +5177,12 @@ export class AgentManager {
 		// 否则 message_end 缺 stopReason 时消息永远停 in pending，渲染层回退启发式失效。
 		const extractedStopReason = partialMessage && typeof partialMessage === "object" ? (nonEmptyString(asRecord(partialMessage)?.stopReason) ?? "") : "";
 		const finalStopReason = extractedStopReason && extractedStopReason !== "pending" ? extractedStopReason : undefined;
+		// 本条消息用的模型：message_end 的完整消息带 provider/model（message_start 骨架也有）。
+		// 缺省不覆盖旧值——delta 路径的消息对象可能不带这两个字段。
+		const messageRecord = partialMessage && typeof partialMessage === "object" ? asRecord(partialMessage) : undefined;
+		const modelProvider = nonEmptyString(messageRecord?.provider);
+		const modelId = nonEmptyString(messageRecord?.model);
+		const extractedModel = modelProvider && modelId ? { provider: modelProvider, modelId } : undefined;
 
 		if (existing) {
 			// 已有骨架：有抽出文本才覆盖；fallbackDelta 仅作追加兜底（终态路径）。
@@ -5144,6 +5193,9 @@ export class AgentManager {
 			// 终态（message_end）带真实 stopReason 时更新；骨架占位值（pending）不覆盖旧值。
 			if (finalStopReason) {
 				existing.stopReason = finalStopReason;
+			}
+			if (extractedModel) {
+				existing.model = extractedModel;
 			}
 			// 保留原始时间戳，不随 delta 刷新。
 			this.markMessagesDirtyFrom(agentId, existingIndex);
@@ -5158,6 +5210,7 @@ export class AgentManager {
 				text: text || "",
 				timestamp: Date.now(),
 				...(finalStopReason ? { stopReason: finalStopReason } : {}),
+				...(extractedModel ? { model: extractedModel } : {}),
 			});
 			this.markMessagesDirtyFrom(agentId, list.length - 1);
 		}
@@ -5689,11 +5742,13 @@ export class AgentManager {
 		try {
 			const settings = this.settingsStore.get();
 			if (!settings.askNotificationEnabled) return;
+			// 仅失焦提醒：窗口在前台时用户就在看，不再弹系统通知（设置默认关闭时不生效）
+			if (!shouldAlertNow(settings.alertOnlyWhenUnfocused, isMainWindowFocused(this.getWindow()))) return;
 			if (!Notification.isSupported()) return;
 			if (this.notifiedAskAgents.has(agentId)) return;
 			this.notifiedAskAgents.add(agentId);
 
-			const appName = app.getName();
+			const appName = APP_DISPLAY_NAME;
 			const title = sessionTitle || appName;
 			// 有具体提问内容时展示问题，否则退回通用文案（批量提问等无 title 场景）
 			const questionText = question.length > 60 ? `${question.slice(0, 60)}…` : question;
@@ -5703,7 +5758,7 @@ export class AgentManager {
 				body,
 				silent: false,
 				// 自定义 toast XML：launch 携带 sessionId，点击后经 pideck:// 协议唤起应用并跳转对应会话
-				toastXml: this.buildToastXml(appName, body, sessionId),
+				toastXml: buildToastXml({ title: appName, body, launch: notificationLaunchUrl(sessionId), logoUri: this.notificationLogoUri() }),
 			});
 			// 点击通知：聚焦主窗口并切换到对应会话（session-first，跳转按 SessionRecord.id）
 			notification.on("click", () => {
@@ -5729,10 +5784,13 @@ export class AgentManager {
 		try {
 			const settings = this.settingsStore.get();
 			if (!settings.enableNotifications) return;
+			// 仅失焦提醒：窗口在前台时不弹系统通知（设置默认关闭时不生效）
+			if (!shouldAlertNow(settings.alertOnlyWhenUnfocused, isMainWindowFocused(this.getWindow()))) return;
 			if (!Notification.isSupported()) return;
 
-			// 使用应用名称作为通知标题，在 Windows/macOS 通知中心中显示为应用标识
-			const appName = app.getName();
+			// 使用品牌常量而非 app.getName()：asar 内 package.json 只有 name=pi-desktop，
+			// 安装版通知标题会显示 pi-desktop（用户反馈），品牌名固定走 APP_DISPLAY_NAME。
+			const appName = APP_DISPLAY_NAME;
 			const body = this.translate("mainNotification.sessionDone", { title: sessionTitle });
 			// 会话结束时 runtime 一定已绑定会话；跳转目标用 record.id（renderer 按它索引会话），
 			// tab.sessionId 是 pi 侧会话 id 只能兜底（见 resolveNotificationSessionId 注释）。
@@ -5743,7 +5801,7 @@ export class AgentManager {
 				body,
 				silent: false,
 				// 自定义 toast XML：launch 携带 sessionId，点击后经 pideck:// 协议唤起应用并跳转对应会话
-				toastXml: this.buildToastXml(appName, body, sessionId),
+				toastXml: buildToastXml({ title: appName, body, launch: notificationLaunchUrl(sessionId), logoUri: this.notificationLogoUri() }),
 			});
 			notification.on("click", () => {
 				this.focusMainWindowForSession(sessionId);
@@ -5783,25 +5841,11 @@ export class AgentManager {
 	}
 
 	/**
-	 * 生成带会话跳转参数的 Windows toast XML。
-	 * 使用 activationType="protocol" + 本构建 deep link scheme（stable：pideck://，dev 通道：pideck-dev://）：
-	 * 点击通知时 Windows 通过注册表协议关联唤起应用（不依赖 ToastActivatorCLSID / 快捷方式匹配，更可靠），
-	 * 被唤起实例的 argv 携带协议 URL，主实例据此识别要跳转的会话。
-	 * 两通道 scheme 不同，保证 dev 包的通知不会唤起 stable（反之亦然）。
-	 * sessionId 缺省时 launch 回退为 scheme 根地址（点击仅聚焦窗口）。
+	 * 通知字标（透明底品牌字标）的 file:// URI；资源缺失时为 null（通知退回系统默认图标）。
+	 * Windows toast XML 见 notifications/notificationToast.ts（branding 与 launch 收口在那里）。
 	 */
-	private buildToastXml(title: string, body: string, sessionId?: string): string {
-		const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-		const launch = sessionId ? `${APP_DEEP_LINK_SCHEME}://session/${sessionId}` : `${APP_DEEP_LINK_SCHEME}://`;
-		return `<toast activationType="protocol" launch="${launch}">
-  <visual>
-    <binding template="ToastGeneric">
-      <text>${esc(title)}</text>
-      <text>${esc(body)}</text>
-    </binding>
-  </visual>
-  <audio src="ms-winsoundevent:Notification.Default" />
-</toast>`;
+	private notificationLogoUri(): string | null {
+		return resolveNotificationLogoUri({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() });
 	}
 
 	// abort 流闸与升级收口在 AbortStreamGateController；以下薄包装保持事件路径调用点与契约测试形态。

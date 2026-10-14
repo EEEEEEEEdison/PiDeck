@@ -116,9 +116,9 @@ export function useSessionPromptDispatch({ store, setSessionDraft, currentSessio
 			templateDescription?: string,
 		) => {
 			// 非队列入口：当前选中 agent 忙碌时按「忙碌时投递行为」设置决定投递语义
-			//（pi/dsh 统一）；空闲直发（undefined）。客户端队列 drain 直接调用
-			// dispatchPromptSnapshot，并显式指定其投递语义。
-			const behavior = streamingBehavior ?? resolveBusySendDelivery(sessionId === currentSessionId && isAgentCurrentlyBusy(), store.get(busySendDeliveryAtom));
+			//（pi/dsh 统一；ACP 协议无 steer，resolve 内部恒收敛为 followUp）；空闲直发（undefined）。
+			// 客户端队列 drain 直接调用 dispatchPromptSnapshot，并显式指定其投递语义。
+			const behavior = streamingBehavior ?? resolveBusySendDelivery(sessionId === currentSessionId && isAgentCurrentlyBusy(), store.get(busySendDeliveryAtom), store.get(sessionRecordByIdAtomFamily(sessionId))?.backend);
 			try {
 				await dispatchPromptSnapshot(sessionId, message, images, behavior, agentMode, templateDescription);
 				return true;

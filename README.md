@@ -11,7 +11,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.9.0-blue)
+![Version](https://img.shields.io/badge/version-0.9.1-blue)
 
 国内 AtomGit 托管：https://atomgit.com/ayuayue/PiDeck
 <!-- 预留 AtomGit G-Star 徽章位（替换占位链接后启用）
@@ -101,25 +101,10 @@
 
 ## 📋 更新日志
 
-> **最新版本 v0.9.0 (2026-10-10)**（2026-10-10）
+> **最新版本 v0.9.1 (2026-10-14)**（2026-10-14）
 
-### v0.9.0 (2026-10-10) 更新亮点
-- 🚀 **ACP 协议后端：接入更多 AI 编程工具**
-- 🚀 **独立 PiDeck 宿主插件系统**
-- 🚀 **内置外网访问与访问令牌**
-- 🚀 **Web 实时事件推送与计划模式**
-- 🚀 **终端设置、WebGL 与快照回放**
-- 🚀 **对齐 pi 1.0.4 原生会话与模型目录**
-- 🚀 **MCP 服务目录与 AI 配置助手**
-- 🚀 **会话分支面板**
-- 🚀 **项目置顶与列表管理**
-- 🚀 **繁体中文界面**
-- 🚀 **通知历史可跨重启查看**
-- 🚀 **输入框功能按需显示**
-- ✨ **草稿会话可预览扩展命令**
-- ✨ **资源开关反馈更及时**
-- ✨ **远程与移动端体验完善**
-- ✨ **安全与长运行稳定性加固**
+### v0.9.1 (2026-10-14) 更新亮点
+- ✨ **macOS 安装包在 Apple Silicon 上无法启动**
 
 [查看完整更新日志 →](CHANGELOG.zh-CN.md)
 
@@ -168,7 +153,7 @@
 |---|---|
 | **可视化配置管理** | 编辑器管理 pi 的 `models.json`、`auth.json`、`settings.json`：Provider 卡片 + 模型网格 + 类型感知键值编辑 + 源文件原始 JSON，保存后按需重启 Agent 生效。 |
 | **连接测试** | Provider 卡片一键测试连接，模型验证不再把配置回退误判为成功。 |
-| **模型能力自适应** | 兼容 pi 0.84.3：上下文窗口 / maxTokens / 思考档位按端点返回自适应，模型目录支持手动刷新，新模型不再不可见。 |
+| **模型能力自适应** | 兼容 pi 0.84.3：上下文窗口 / maxTokens / 思考档位按端点返回自适应，模型目录自动刷新（后台检测到新版本即拉取，设置里可关闭，也可手动检查），新模型不再不可见。 |
 | **用量查询** | 供应商余额/额度查询（内置 OpenRouter、Moonshot-Kimi、通用 OpenAI 兼容网关模板，支持多账号与独立端点），卡片直接显示用量，支持自定义探针配置。 |
 | **用量统计** | 基于用量统计插件的本地统计：累计概览、活跃热力图、每日用量、模型与项目维度。 |
 | **代理设置** | pi agent 子进程代理与桌面端代理独立配置，模型拉取与连接测试可走桌面端代理。 |
@@ -190,7 +175,7 @@
 | **系统托盘** | 关闭窗口默认最小化到托盘，托盘右键菜单，双击恢复窗口。 |
 | **桌面宠物** | 把多 Agent 的运行状态化作桌面上的一只小精灵：状态聚合、置顶、缩放，支持 petdex 社区宠物。 |
 | **主题与外观** | 浅色 / 暗色 / 跟随系统一键循环切换（侧栏底栏），语义化设计 token，暗色模式自然适配。 |
-| **通知** | 全局通知升级为卡片 toast，Ask 并行问询有独立系统通知开关，后台问题可保持静默。 |
+| **通知** | 全局通知升级为卡片 toast，Ask 并行问询有独立系统通知开关，后台问题可保持静默；可开启「仅失焦时提醒」，窗口在前台时不弹通知、不响铃。 |
 | **主动更新** | 应用更新始终后台检查，`autoDownloadUpdates` 默认开启；下载完成后由用户在设置页确认「重启并安装」。Windows/Linux 使用包内 updater，macOS 打开 GitHub Release 手动安装；Pi CLI 检查独立运行。 |
 | **飞书机器人** | 会话可绑定飞书机器人，在飞书群里同步消息与状态。 |
 | **局域网 Web 服务** | 设置中启动本机 Web 服务，局域网设备通过 IP + 端口访问网页版，支持双后端会话浏览与 DSH 工具面板。 |
@@ -430,8 +415,6 @@ src/
 <p align="center">
   <a href="docs/images/gpt-recharge-price.png"><img src="docs/images/gpt-recharge-price.png" alt="GPT 充值价目表" width="420" /></a>
 </p>
-
-价格跟着时价波动，以最新这张图为准（点开看大图）。改价 / 重新出图：`cd video-series/poster && node price.mjs`，说明见 [video-series/poster/README.md](video-series/poster/README.md)。
 
 ---
 

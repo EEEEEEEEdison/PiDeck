@@ -16,12 +16,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
-import type { AgentBackend, AvailableModel } from "../../../shared/types";
+import type { AgentBackend, AvailableModel, SessionRuntimeTarget } from "../../../shared/types";
 import { createSessionModelPreference } from "../../../shared/modelDisplayName";
 import { t } from "@/i18n";
 import { WebSidebar, type WebSessionRowAction } from "./WebSidebar";
 import { WebHeader, type WebHeaderStatus } from "./WebHeader";
-import { WebTimeline } from "./WebTimeline";
+import { WebTimeline, uiMessageImages, uiMessageText } from "./WebTimeline";
+import { forkPromptText, isLastUserMessageIn, resolveWebForkEntryId } from "./webForkMutation";
 import { WebComposer } from "./WebComposer";
 import { WebDshToolsPanel } from "./WebDshToolsPanel";
 import { WebBranchBar } from "./WebBranchBar";
@@ -32,7 +33,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Button } from "@/components/ui-shadcn/button";
 import { Input } from "@/components/ui-shadcn/input";
 import { chatMessagesToUiMessages, createProject, createSession, deleteProject, fetchMessagePage, fetchModels, fetchState, getWebAuthHeaders, respondToUi, setRuntimeModel, setRuntimeThinking, updateSessionRecord } from "./webApi";
-import { abortRuntime, cloneRuntime, compactRuntime, copySession, deleteSession, downloadSessionHtml, editRuntimeMessage, deleteRuntimeMessage, prepareResend, renameSession, restartRuntime } from "./webApi";
+import { abortRuntime, cloneRuntime, compactRuntime, copySession, deleteSession, downloadSessionHtml, editRuntimeMessage, deleteRuntimeMessage, prepareResend, renameSession, restartRuntime, activateRuntime, forkRuntimeSession, getForkMessages } from "./webApi";
 import { fetchRuntimeContextUsage, setRuntimePermission } from "./webApi";
 import { sessionUiMessagesToMarkdown } from "./webMarkdown";
 import { removeMessageOptimistic, replaceMessageTextOptimistic } from "./webMessageOptimistic";
@@ -97,7 +98,7 @@ export function WebChatApp() {
 	const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
 	// 消息编辑/删除乐观更新：进行中操作（气泡转状态指示）、删除退场动画目标、编辑成功闪环目标。
 	// runtime 编辑/删除要走「停 agent → 改文件 → pi 重载」全链路（数秒），先本地落地再静默对齐服务端。
-	const [pendingMessageAction, setPendingMessageAction] = useState<{ kind: "edit" | "delete"; id: string } | null>(null);
+	const [pendingMessageAction, setPendingMessageAction] = useState<{ kind: "edit" | "delete" | "resend"; id: string } | null>(null);
 	const [exitingMessageIds, setExitingMessageIds] = useState<ReadonlySet<string>>(new Set());
 	const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
 	const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -137,6 +138,14 @@ export function WebChatApp() {
 	const [searchOpen, setSearchOpen] = useState(false);
 	const [assetsOpen, setAssetsOpen] = useState(false);
 	const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
+	// 令牌失效兑底：服务端轮换 token 后所有请求 401，轮询层只会默默 setConnected(false)，
+	// 用户看到的是「一直断线」；这里显式提示需从桌面端重新扫码/打开新链接。
+	const [authExpired, setAuthExpired] = useState(false);
+	useEffect(() => {
+		const onAuthFailed = () => setAuthExpired(true);
+		window.addEventListener("pideck-web-auth-failed", onAuthFailed);
+		return () => window.removeEventListener("pideck-web-auth-failed", onAuthFailed);
+	}, []);
 	const recoveryLastAttemptRef = useRef(0);
 	const statusRef = useRef(status);
 	statusRef.current = status;
@@ -794,7 +803,7 @@ export function WebChatApp() {
 				await compactRuntime(activeTarget.sessionId, activeTarget);
 			} else {
 				const cloned = await cloneRuntime(activeTarget.sessionId, activeTarget);
-				const newId = cloned.session?.id;
+				const newId = typeof cloned.targetSessionId === "string" ? cloned.targetSessionId : "";
 				if (newId) markSessionLoaded(newId);
 				await refreshNow();
 				if (newId) setActiveSessionId(newId);
@@ -817,8 +826,75 @@ export function WebChatApp() {
 		}
 	};
 
+	/** fork 化重试（与桌面 runForkMutation 同构）：fork 到该消息 entry → 子会话以原文（重发）
+	 * 或新文本（编辑）重发；旧会话打 supersededBy 从列表隐藏（文件保留，与桌面语义一致）。
+	 * 策略（锚点解析/尾部判定/重投文本）在 webForkMutation.ts 纯函数层，此处只做接线与状态反馈。
+	 * 失败时旧会话无恙（fork 前任何一步失败直接回滚 UI）；发送投递交给 pendingSendRef 机制
+	 * （切到子会话空闲后自动 sendMessage，复用首页直发链路）。 */
+	const runForkMutation = async (kind: "edit" | "resend", message: UIMessage, newText?: string) => {
+		const sessionId = activeSessionIdRef.current;
+		if (!sessionId || pendingMessageAction) return;
+		setCommandError(null);
+		setPendingMessageAction({ kind, id: message.id });
+		try {
+			// 冷会话：fork 是 runtime 命令，先激活（与桌面 activateRuntime 同源）；
+			// 激活可能耗时数秒（pi 进程握手），期间气泡操作行显示进行中状态。
+			let target = activeTarget;
+			if (!target) target = await activateRuntime(sessionId);
+			const entryId = await resolveWebForkEntryId(message, target, (t) => getForkMessages(sessionId, t));
+			if (!entryId) {
+				setCommandError(t("web.forkMissingEntryId"));
+				return;
+			}
+			const result = await forkRuntimeSession(sessionId, target, entryId, {
+				mutationFork: true,
+				// 锚点不是最后一条用户消息 → 旧会话还有独属后续轮次，分支模式不隐藏（带 (fork) 后缀并存）
+				branchMode: !isLastUserMessageIn(messagesBySessionRef.current[sessionId] ?? [], message.id),
+			});
+			if (result.cancelled) {
+				setCommandError(t("web.forkCancelled"));
+				return;
+			}
+			const newId = typeof result.targetSessionId === "string" ? result.targetSessionId : "";
+			if (!newId) {
+				setCommandError(t("web.forkMissingEntryId"));
+				return;
+			}
+			const promptText = forkPromptText(kind, result, message, newText);
+			const images = uiMessageImages(message);
+			// 先切到子会话再排队投递：pendingSendRef 消费 effect 在会话就绪且空闲后自动 sendMessage
+			markSessionLoaded(newId);
+			await refreshNow();
+			setActiveSessionId(newId);
+			pendingSendRef.current = { sessionId: newId, text: promptText, images: images.length > 0 ? images : undefined };
+		} catch (error) {
+			// fork 前/中失败：旧会话无恙，刷新回服务端真相 + toast
+			await reloadActiveHistory();
+			setCommandError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setPendingMessageAction(null);
+		}
+	};
+
+	/** 查找消息（优先活跃 useChat 列表，回退历史缓存）——编辑/重发回调只常 messageId。 */
+	const findActiveMessage = (messageId: string): UIMessage | undefined => {
+		const live = messages.find((item) => item.id === messageId);
+		if (live) return live;
+		const cached = messagesBySessionRef.current[activeSessionIdRef.current];
+		return cached?.find((item) => item.id === messageId);
+	};
+
 	const handleEditMessage = async (messageId: string, newText: string) => {
-		if (!activeTarget || pendingMessageAction) return;
+		if (pendingMessageAction) return;
+		const message = findActiveMessage(messageId);
+		if (!message) return;
+		// pi 会话：fork 化（与桌面同语义，冷会话也可用——自动激活）；
+		// DSH：保留原地编辑命令（runtime 必须存活）。
+		if (activeSession?.backend !== "dsh") {
+			await runForkMutation("edit", message, newText);
+			return;
+		}
+		if (!activeTarget) return;
 		setCommandError(null);
 		setPendingMessageAction({ kind: "edit", id: messageId });
 		// 乐观替换文本 + 确认色环：不等服务端回包（runtime 编辑要走 pi 重载，耗时数秒，干等旧文本就是本入口要修的问题）。
@@ -861,6 +937,15 @@ export function WebChatApp() {
 	};
 
 	const handleResendMessage = async (messageId: string) => {
+		if (pendingMessageAction) return;
+		const message = findActiveMessage(messageId);
+		if (!message) return;
+		// pi 会话：fork 化重发（与桌面同语义；旧会话隐藏、子会话自动重投，冷会话也可用）；
+		// DSH：保留 prepare-resend 填回 composer（DSH 无 fork 化命令）。
+		if (activeSession?.backend !== "dsh") {
+			await runForkMutation("resend", message);
+			return;
+		}
 		if (!activeTarget) return;
 		setCommandError(null);
 		try {
@@ -980,6 +1065,15 @@ export function WebChatApp() {
 				<WebBranchBar sessions={state.sessions} activeSessionId={activeSessionId} onSelect={(sessionId) => setActiveSessionId(sessionId)} />
 				{/* 第二批：断线恢复提示（几秒后自动消失） */}
 				{recoveryNotice ? <div className="border-b border-border bg-primary/10 px-3 py-1 text-center text-xs text-primary">{recoveryNotice}</div> : null}
+				{/* 令牌失效提示：不会自愈，需用户从桌面端重新分享；重试仅覆盖「服务端已恢复同 token」的场景 */}
+				{authExpired ? (
+					<div className="flex items-center justify-center gap-2 border-b border-border bg-destructive/10 px-3 py-1.5 text-center text-xs text-destructive">
+						<span>{t("web.authExpired")}</span>
+						<Button variant="outline" size="sm" className="h-6 px-2 text-micro" onClick={() => window.location.reload()}>
+							{t("web.authExpiredRetry")}
+						</Button>
+					</div>
+				) : null}
 				<WebTimeline
 					messages={timelineMessages}
 					hasActiveSession={Boolean(activeSession)}
@@ -992,7 +1086,8 @@ export function WebChatApp() {
 					uiResponding={uiResponding}
 					onRespondUi={(response) => void handleRespondUi(response)}
 					onLoadMore={() => void handleLoadMore()}
-					canManageMessages={Boolean(activeTarget)}
+					canManageMessages={activeSession?.backend !== "dsh" || Boolean(activeTarget)}
+					canDeleteMessage={Boolean(activeTarget)}
 					pendingMessageAction={pendingMessageAction}
 					exitingMessageIds={exitingMessageIds}
 					flashMessageId={flashMessageId}

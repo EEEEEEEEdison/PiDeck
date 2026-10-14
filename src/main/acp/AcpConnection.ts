@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { StringDecoder } from "node:string_decoder";
-import type { AcpIncomingRequest, AcpJsonRpcMessage, AcpRpcNotification, AcpRpcRequest } from "./acpProtocol";
+import type { AcpIncomingRequest, AcpJsonRpcMessage, AcpRpcId, AcpRpcNotification, AcpRpcRequest } from "./acpProtocol";
+import { LARGE_NDJSON_LINE_PARSE_CHARS, MAX_NDJSON_LINE_BYTES } from "../ndjsonLineGuards";
 
 /** JSON-RPC 调用被 agent 拒绝（响应带 error 对象）。 */
 export class AcpRpcError extends Error {
@@ -14,6 +15,16 @@ export class AcpRpcError extends Error {
 	}
 }
 
+/** 请求超时(agent 未在期限内应答)。typed:上层需区分「回合还在 agent 侧跑,应补发
+ *  session/cancel」的超时与普通失败——不取消的话,下一个 session/prompt 会一直
+ *  排队在旧回合之后反复超时(opencode 卡死实测)。 */
+export class AcpTimeoutError extends Error {
+	constructor(method: string, timeoutMs: number) {
+		super(`ACP request timed out after ${timeoutMs}ms: ${method}`);
+		this.name = "AcpTimeoutError";
+	}
+}
+
 /** handler 返回本哨兵时连接层不自动 respond（请求将由调用方经 respond() 异步应答）。 */
 export const ACP_DEFER_RESPONSE: unique symbol = Symbol("ACP_DEFER_RESPONSE");
 
@@ -24,17 +35,16 @@ type PendingRequest = {
 };
 
 /** agent → client 请求的处理器注册；返回值作为 result，抛错按 JSON-RPC error 回给 agent。
- *  rpcId 供需要延迟应答的请求（如 permission/request 的异步审批）直接 respond。 */
-export type AcpRequestHandler = (params: Record<string, unknown> | undefined, rpcId: number) => Promise<unknown> | unknown;
+ *  rpcId 供需要延迟应答的请求（如 session/request_permission 的异步审批）直接 respond。 */
+export type AcpRequestHandler = (params: Record<string, unknown> | undefined, rpcId: AcpRpcId) => Promise<unknown> | unknown;
 
 /**
- * 超过该长度的 NDJSON 行延后到 setImmediate 再 JSON.parse（与 PiRpcClient 同因：
- * 大响应不该堵住主进程事件循环）。数值对齐 PiRpcClient 便于统一心智。
+ * 超过该长度的 NDJSON 行延后到 setImmediate 再 JSON.parse（共享护栏见 ndjsonLineGuards）。
  */
-export const LARGE_ACP_LINE_PARSE_CHARS = 256 * 1024;
+export const LARGE_ACP_LINE_PARSE_CHARS = LARGE_NDJSON_LINE_PARSE_CHARS;
 
-/** 单行缓冲硬上限：无 LF 的失控输出会让行缓冲无界增长（对齐 PiRpcClient）。 */
-export const MAX_ACP_LINE_BYTES = 8 * 1024 * 1024;
+/** 单行缓冲硬上限（共享护栏见 ndjsonLineGuards）。 */
+export const MAX_ACP_LINE_BYTES = MAX_NDJSON_LINE_BYTES;
 
 const JSON_RPC_INTERNAL_ERROR = -32603;
 
@@ -42,7 +52,7 @@ const JSON_RPC_INTERNAL_ERROR = -32603;
  * ACP stdio transport：NDJSON 上的 JSON-RPC 2.0 双向连接。
  *
  * 与 PiRpcClient 的差异：JSON-RPC 标准信封（method/result/error 字段），
- * 且双向——agent 也会向 client 发请求（permission/request 等），
+ * 且双向——agent 也会向 client 发请求（session/request_permission 等），
  * 这类请求经 handleRequest 注册的处理器应答。
  *
  * 行缓冲护栏与大行延迟解析沿用 PiRpcClient 的实测结论（见该类注释）。
@@ -54,7 +64,10 @@ export class AcpConnection extends EventEmitter {
 	private readonly pending = new Map<number, PendingRequest>();
 	private readonly requestHandlers = new Map<string, AcpRequestHandler>();
 	private parseQueue: Promise<void> = Promise.resolve();
+	/** 大帧在途时后续小帧也排队；否则 prompt 响应会超车，先结算再收到正文。 */
+	private queuedLines = 0;
 	private closed = false;
+	private finishing = false;
 	private closeReason: Error | null = null;
 
 	constructor(
@@ -62,10 +75,8 @@ export class AcpConnection extends EventEmitter {
 		stdout: NodeJS.ReadableStream,
 	) {
 		super();
-		// 断管兑底（同 PiRpcClient）：agent 死亡与 close() 之间的异步窗口里，
-		// 并发 write 会打到断管道上（POSIX 报 EPIPE、Windows 报 EOF），未监听的
-		// stdin error 会炸主进程；请求结账由 pending 超时与 close() 负责。
-		this.stdin.on("error", () => {});
+		// 断管是连接终态，立即结算请求；不能让用户再等完整的 prompt 超时。
+		this.stdin.on("error", (error) => this.close(error));
 		stdout.on("data", (chunk) => this.consumeChunk(chunk));
 		stdout.on("end", () => this.consumeEnd());
 		stdout.on("error", (error) => this.close(error));
@@ -91,7 +102,7 @@ export class AcpConnection extends EventEmitter {
 		const promise = new Promise<unknown>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
-				reject(new Error(`ACP request timed out after ${timeoutMs}ms: ${method}`));
+				reject(new AcpTimeoutError(method, timeoutMs));
 			}, timeoutMs);
 			this.pending.set(id, { resolve, reject, timer });
 		});
@@ -108,12 +119,12 @@ export class AcpConnection extends EventEmitter {
 	}
 
 	/** agent → client 请求的直接应答通道（供连接层之外的审批应答使用）。 */
-	respond(id: number, result: unknown): void {
+	respond(id: AcpRpcId, result: unknown): void {
 		if (this.closed) return;
 		this.write({ jsonrpc: "2.0", id, result } as Record<string, unknown>);
 	}
 
-	respondError(id: number, code: number, message: string): void {
+	respondError(id: AcpRpcId, code: number, message: string): void {
 		if (this.closed) return;
 		this.write({ jsonrpc: "2.0", id, error: { code, message } } as Record<string, unknown>);
 	}
@@ -121,6 +132,7 @@ export class AcpConnection extends EventEmitter {
 	close(error?: Error): void {
 		if (this.closed) return;
 		this.closed = true;
+		this.buffer = "";
 		this.closeReason = error ?? null;
 		for (const [, pending] of this.pending) {
 			clearTimeout(pending.timer);
@@ -130,6 +142,19 @@ export class AcpConnection extends EventEmitter {
 		this.emit("closed", error ?? null);
 	}
 
+	/** 正常管道/进程结束先排空大帧队列；显式 stop 或传输失败仍用 close 立即取消。 */
+	finish(error = new Error("ACP agent stdout ended")): void {
+		if (this.closed || this.finishing) return;
+		this.finishing = true;
+		this.buffer += this.decoder.end();
+		if (this.buffer.length > 0) {
+			this.handleLine(this.buffer.endsWith("\r") ? this.buffer.slice(0, -1) : this.buffer);
+			this.buffer = "";
+		}
+		if (this.queuedLines === 0) this.close(error);
+		else void this.parseQueue.then(() => this.close(error));
+	}
+
 	isClosed(): boolean {
 		return this.closed;
 	}
@@ -137,33 +162,34 @@ export class AcpConnection extends EventEmitter {
 	private write(payload: Record<string, unknown>): void {
 		if (this.closed) return;
 		this.emit("log", { direction: "send", data: payload });
-		this.stdin.write(`${JSON.stringify(payload)}\n`);
+		try {
+			this.stdin.write(`${JSON.stringify(payload)}\n`);
+		} catch (error) {
+			this.close(error instanceof Error ? error : new Error(String(error)));
+		}
 	}
 
 	private consumeChunk(chunk: Buffer | string): void {
+		if (this.closed || this.finishing) return;
 		this.buffer += typeof chunk === "string" ? chunk : this.decoder.write(chunk);
-		if (this.buffer.length > MAX_ACP_LINE_BYTES) {
-			const droppedBytes = this.buffer.length;
-			this.buffer = "";
-			this.emit("protocol-error", `ACP line buffer overflow: dropped ${droppedBytes} bytes without newline`);
-			return;
-		}
+		// 一个 chunk 可以含很多合法行；先分帧，再限制剩余未完成行，不能整批丢弃。
 		this.drainLines();
+		const bytes = Buffer.byteLength(this.buffer, "utf8");
+		if (!this.closed && bytes > MAX_ACP_LINE_BYTES) this.lineOverflow(bytes);
 	}
 
 	private consumeEnd(): void {
-		this.buffer += this.decoder.end();
-		if (this.buffer.length > 0) {
-			this.handleLine(this.buffer.endsWith("\r") ? this.buffer.slice(0, -1) : this.buffer);
-			this.buffer = "";
-		}
-		// stdout 结束 = agent 进程退出/关管道：必须收口连接，否则挂起请求
-		// 只能等各自超时（真实场景：CLI 崩溃后 session/prompt 吊到 60s）。
-		this.close(new Error("ACP agent stdout ended"));
+		this.finish();
+	}
+
+	private lineOverflow(bytes: number): void {
+		const error = new Error(`ACP line buffer overflow: ${bytes} bytes exceeds ${MAX_ACP_LINE_BYTES} byte limit`);
+		this.emit("protocol-error", error.message);
+		this.close(error);
 	}
 
 	private drainLines(): void {
-		while (true) {
+		while (!this.closed) {
 			const newlineIndex = this.buffer.indexOf("\n");
 			if (newlineIndex === -1) return;
 			let line = this.buffer.slice(0, newlineIndex);
@@ -174,20 +200,29 @@ export class AcpConnection extends EventEmitter {
 	}
 
 	private handleLine(line: string): void {
-		if (!line.trim()) return;
-		if (line.length > LARGE_ACP_LINE_PARSE_CHARS) {
-			this.parseQueue = this.parseQueue.then(
-				() =>
-					new Promise<void>((resolve) => {
-						setImmediate(() => {
-							this.dispatchLine(line);
-							resolve();
-						});
-					}),
-			);
+		if (this.closed) return;
+		const bytes = Buffer.byteLength(line, "utf8");
+		if (bytes > MAX_ACP_LINE_BYTES) {
+			this.lineOverflow(bytes);
 			return;
 		}
-		this.dispatchLine(line);
+		if (!line.trim()) return;
+		const large = line.length > LARGE_ACP_LINE_PARSE_CHARS;
+		if (!large && this.queuedLines === 0) {
+			this.dispatchLine(line);
+			return;
+		}
+		this.queuedLines += 1;
+		this.parseQueue = this.parseQueue
+			.then(async () => {
+				if (large) await new Promise<void>((resolve) => setImmediate(resolve));
+				// stop()/进程失败显式 close 后，不再投递排队中的迟到通知。
+				if (!this.closed) this.dispatchLine(line);
+			})
+			.catch((error: unknown) => this.close(error instanceof Error ? error : new Error(String(error))))
+			.finally(() => {
+				this.queuedLines -= 1;
+			});
 	}
 
 	private dispatchLine(line: string): void {
@@ -219,6 +254,7 @@ export class AcpConnection extends EventEmitter {
 
 		// agent → client 请求（有 id 有 method）：分发给注册的处理器。
 		if ("id" in message) {
+			if (typeof message.id !== "number" && typeof message.id !== "string") return;
 			void this.dispatchAgentRequest(message as AcpIncomingRequest);
 			return;
 		}

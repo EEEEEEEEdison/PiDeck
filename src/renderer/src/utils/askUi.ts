@@ -82,12 +82,12 @@ export function resolveActiveAskRequest(runtime: AskRuntimeBinding | undefined, 
  * - multi_select 要多次勾选，不能跳；
  * - editor 的 onChange 每次击键都会写入答案，绝不能自动前进（否则打第一个字就跳题）；
  * - input（点提交/回车）与 select 的自定义文本提交也算「一次提交完成本题」，同样自动；
- * - 单题批次（total <= 1）不自动：卡片本身就是确认卡，点选项即提交等于删掉确认步骤，
- *   误触后无法反悔；未题（total > 1）也自动，去向由调用方决定：
+ * - 单题批次（total === 1）同样自动：末题即直接提交全部（2026-01 用户反馈「点击了答案
+ *   还要再点一次提交」——confirm 卡与多题批次早已是一步提交，单题反向要求二次确认
+ *   既不一致也无必要；防误触由划选守卫与应答 rollback 兜底）。末题去向由调用方决定：
  *   非末题 → 下一题；末题 → 审阅页（review）或直接提交全部。
  */
 export function shouldAutoAdvanceBatchAnswer(input: { type: AgentUiBatchQuestion["type"]; total: number }): boolean {
-	if (input.total <= 1) return false;
 	return input.type === "select" || input.type === "confirm" || input.type === "input";
 }
 
@@ -392,7 +392,8 @@ export type AskDirectEnterAction =
 
 /**
  * 单问题卡直接回车策略。
- * - select 已选中：任意非输入框位置回车即提交（含焦点在选项按钮上——「选了再回车」主路径）；
+ * - select 已选中（应答失败 rollback 后的残留态）：任意非输入框位置回车即重发
+ *   （含焦点在选项按钮上）；正常路径下点击选项即提交，不再停留在此分支。
  *   未选中：选项按钮回车交给原生 click 完成选中；自定义输入的「提交」按钮交原生 click，
  *   避免把自定义文本提交误判为提交旧选项。
  * - confirm：是/否按钮交原生 click（取消按钮回车 = 拒绝），其余位置直接回车默认「确认」。
@@ -427,11 +428,16 @@ export function resolveSingleAskDirectEnter(state: {
 
 /**
  * 批量题卡直接回车策略（与「下一题」按钮同语义，但要求当前题已作答，防误触丢题）：
+ * - multi_select 一律不推进：勾一个选项就算「已作答」（isBatchAnswered 视非空数组为已作答），
+ *   回车会把它当成本题完成——末题无审阅时直接提交整卡，而本题通常还有多个待勾项。
+ *   与点击路径同口径（shouldAutoAdvanceBatchAnswer 同样排除 multi_select）：选项按钮上的
+ *   回车交原生 click 切换勾选，空白处回车不动作，完成走显式的「下一题/提交全部」按钮。
  * - 选项按钮：未作答回车 = 原生 click 选中/切换；已作答回车 = 提交当前答案并推进；
  * - 其他按钮（上一步/下一步/提交自定义/提交全部）：交原生 click，不拦截；
  * - 卡片空白处：已作答且「下一题」可用才推进；nextDisabled（末题未全部作答）时不动作。
  */
 export function resolveBatchAskDirectEnter(state: {
+	type: AgentUiBatchQuestion["type"];
 	fromField: boolean;
 	fromButton: boolean;
 	fromOptionButton: boolean;
@@ -439,6 +445,7 @@ export function resolveBatchAskDirectEnter(state: {
 	nextDisabled: boolean; // 与「下一题」按钮禁用态一致
 }): AskDirectEnterAction {
 	if (state.fromField) return { kind: "none" };
+	if (state.type === "multi_select") return { kind: "none" };
 	if (state.fromOptionButton) {
 		return state.answered && !state.nextDisabled ? { kind: "advance" } : { kind: "none" };
 	}

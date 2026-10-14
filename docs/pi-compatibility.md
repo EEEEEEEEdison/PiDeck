@@ -6,7 +6,8 @@
 
 ## 当前基线
 
-- 最近核对版本：`pi 1.0.2`（1.0.1/1.0.2 于 2026-10-03/04 发布；依据：npm 包 CHANGELOG + dist 与 1.0.0 逐文件 diff；未运行真实供应商 OAuth）
+- 最近核对版本：`pi 1.2.0`（2026-10-12 发布；依据：npm 包 CHANGELOG + `npm pack` 完整包与本机 `1.1.0` 的 `dist` 逐文件 diff）
+- 核对方式：静态 diff + 源码核对。`dist/modes/rpc/rpc-types.js`、`dist/modes/rpc/rpc-mode.js`、`dist/index.js` 与 1.1.0 **逐字节相同**。**1.2.0 未在真实会话上跑回归**（本机仍是 1.1.0），扩展 API 触发范围变化的真实验收待做（见 1.2.0 矩阵第 6 行）
 - PiDeck 通信方式：`pi --mode rpc`，stdio JSON-RPC
 - 本记录范围：Pi 后端（`src/main/pi/`）以及 PiDeck 对 Pi 配置/事件的适配
 - 不包含：DSH 的 `pwsh_persistent`、Electron 自带终端、PiDeck 自己的应用更新器
@@ -32,6 +33,29 @@
 真实冒烟证据（`scripts/smoke-pi-native-resources.mjs`，对 pi 0.99.2 与 1.0.0 各 19/19）：
 无白名单启动下，原生 `+/-` 规则真实控制技能/扩展加载、`-builtin:mcp` 生效、项目层覆盖生效、
 未信任项目不读项目配置、旧禁用记录迁移后 pi 真的不加载该资源。
+
+## 1.2.0 审计矩阵（2026-10-13，npm 包完整 dist 与本机 1.1.0 逐文件 diff）
+
+核对方式：`npm pack @earendil-works/pi-coding-agent@1.2.0`，与用户机器上已装的 1.1.0 比对；关键文件用 `cmp`/`diff` 判定，非逐行人工阅读。
+
+| 上游变化 | PiDeck 处理 | 状态 | 代码/验证 | 移除条件 |
+|---|---|---|---|---|
+| RPC 命令面与事件面 | `rpc-types.js`、`rpc-mode.js` 与 1.1.0 逐字节相同 → 会话/模型/思考档/压缩/命令列表等边界无变化 | **已核对无变化** | 逐文件 `cmp` | — |
+| `dist/index.js`（`ModelRuntime`） | 逐字节相同 → `pi-auth-host.mjs` / `pi-enhance-host.mjs` 的 SDK 入口安全 | **已核对无变化** | 逐文件 `cmp` | — |
+| `settings-manager.js` 92 行 diff | 全部是把字面量抽成 `SETTINGS_DEFAULTS` 常量的重构，默认值逐个一致（16384 / 20000 / 3 / 2000 / `one-at-a-time` / `auto` …）；`defaultTools` 合并、`RESOURCE_TYPES`、`isEnabledByOverrides`、`applyPackageFilter` 未出现在 diff | **已核对无变化** | `diff` + `dist/core/settings-defaults.js` 值比对 | — |
+| `package-manager.js` 新增 `normalizePath()` 包装（#10765：资源过滤条目支持 `~`） | 投影求值同步补 `~`（含 Windows `~\`）与 `file://` 归一，与 pi 的 `normalizePath` 同口径（通配分支不剥 `./`、精确分支先剥） | **本轮已适配** | `src/main/config/piResourceRules.ts` 的 `expandRulePath`、`tests/piResourceRules.test.mjs` | 无 |
+| `pi mcp list --json` 的 `resources` 由数量改为 `true`，且不再输出 `resourceTemplates` | 类型改 `number \| boolean`，解析两种形态都收（1.1 数字 / 1.2 布尔），避免新 pi 下静默丢字段 | **本轮已适配** | `src/shared/types/mcp.ts`、`src/main/pi/piMcpCli.ts`、`tests/piMcpCli.test.mjs` | 无 |
+| **扩展 API 破坏性变更**：`before_agent_start` 变成按 `messageType` 的联合；`pi.sendMessage(..., { triggerTurn: true })` 触发的 custom run 也会触发；起始阶段 `ctx.isIdle()` 为 false、`pi.sendMessage()` 改为排队进本轮、`pi.sendUserMessage()` 必须传 `deliverAs` | PiDeck 的 4 个处理函数都忽略事件参数 → 联合类型不会解构出错；`isIdle()`/`sendUserMessage()` 均未使用。但 goal/plan 模式自己用 `triggerTurn: true` 发消息，这些 run 现在会多注入一次 `[GOAL MODE ACTIVE]` / `[PLAN MODE ACTIVE]` / `[EXECUTING PI_DECK PLAN]`；同时 1.2 修好了「custom run 首次工具调用后丢掉 `before_agent_start` 的 systemPrompt 段」，对安全档位提示是改善 | **待真实回归**（静态判定兼容） | `pi-deck-goal-mode.ts:224`、`pi-deck-plan-mode.ts:333`、`pi-deck-security-gate.ts:327`、`pi-deck-todo.ts:369`；回归项：goal/plan 各一轮、安全档位提示、todo 压缩后补注 | 无 |
+| 发布配置 schema（`schemas/{settings,models,keybindings,theme}.schema.json`），主题 schema 收紧且启动即校验 | `settings-schema.js`/`keybindings-schema.js` 在 dist 内**没有任何 import 方**（只用于生成给编辑器用的 schema）；运行时校验只在 TUI 主题（`dist/main.js` 的 `setThemeJsonValidator`）。PiDeck 走 RPC，主题是自有的 `userData/custom-themes/`，不写 pi 主题也不写 `$schema` | 无需改动 | 源码核对 | — |
+| 移除 experimental server/client/plugin 栈与 `./client`、`./experimental/plugin` 导出，删除 `pi-client` / `pi-protocol` / `pi-server` / `@earendil-works/chord` | PiDeck 不依赖（package.json 与 lock 无引用）；`.` 与 `./rpc-entry` 导出保留 | 已核对无变化 | package.json / lock 核对 | — |
+| OSC 7501 程序状态上报（1.1.0） | 只存在于 `dist/modes/interactive/`，`bundle/rpc-entry.js` 引用数为 0 → 不会污染 PiDeck 的 stdio JSON-RPC | 已核对无变化 | `grep -c 7501` | — |
+| `agent_settled` 新增 `aborted`（1.1.0） | `AgentManager` 用 `aborted === true` 抑制成功完成通知；保留本地停止记录与 settled 超时状态作为旧版/迟到事件兜底。取消仍收敛为 idle，不覆盖已有 error 状态 | 已适配（本轮） | `AgentManager.ts`、`tests/agentSettledAbortLifecycle.test.mjs`、`tests/agentSettledContract.test.mjs` | 最低支持 pi 提升到 1.1 后仍保留本地迟到事件保护 |
+| PiDeck 静态模型目录来源更新 | 构建期 `pi-ai` 精确锁定从 1.0.4 更新到 1.2.0；42 个 provider、1649 条模型（chat 1554 / image 61 / classifier 34），相较原目录新增 60、移除 31、字段变更 232。仅更新静态资源，不改 OpenRouter 联网刷新或 DSH 独立依赖 | 已更新（本轮） | `package.json` / lock、`resources/pi-ai-catalog*.json`、目录生成/读取/打包与能力补全测试 | 无 |
+| OpenRouter 按 key 列模型（1.2.0） | 只影响 `pi --list-models` 的条目数；PiDeck 的能力字段仍来自 catalog artifact + endpoint `/models` | 无需改动（行为变化） | — | — |
+| codemode 输出格式（`==> text N/M <==`、`<console_output>`）、`reachesTools`、工具声明 `@` 约束 | 时间线只渲染文本，无解析依赖 | 无需改动 | — | — |
+| `serializeConversation()` 不再带 thinking 块 | pi 内部行为；PiDeck 上下文圆环按会话条目 + 实测提示词装载计算 | 无需改动 | — | — |
+| `auth.json` 写入在 Windows 上遇 EPERM 短暂重试（1.2.0） | 对 `pi-auth` 是改善 | 无需改动 | — | — |
+| 剩余已知差异：pi 的 `normalizePath` 在 Windows 上还会做 `normalizeWindowsShellPath`（`/c/...`、`/mnt/c/...` → `C:\...`） | 投影未实现该归一 | 已知差异（未适配） | `piResourceRules.ts` | 出现 MSYS 形态条目导致投影与 pi 不一致的用户反馈时再补 |
 
 ## 1.0.1 / 1.0.2 审计矩阵（npm 包 dist 源码逐条核对）
 
@@ -222,6 +246,7 @@ PiDeck 的 `pwsh_persistent` 是 DSH 独立工具。其当前实现默认指向 
 
 ### P1 / 建议
 
+- [ ] 在真实 pi 1.2.0 上回归 goal/plan 模式、安全档位提示与 todo 压缩后补注（`before_agent_start` 触发范围扩大，见 1.2.0 矩阵第 6 行）。
 - [ ] `compaction_end` 失败形成用户可见提示。
 - [ ] 更新完成后失效 `PiProcess.versionCache` 和 `ExtensionManager.piVersion`，并提示已有 Agent 需重启。
 - [ ] 评估 `pi update --self`，必要时按 Pi 版本门控。

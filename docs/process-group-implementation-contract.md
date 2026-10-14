@@ -9,7 +9,7 @@
 
 ## 0. 全局硬性规则（违反即返工）
 
-1. **不改现有行组件**：`ThinkingBlock` / `ToolCard` / `TimelineMarker` / `InterimAnswer` / `FinalAnswer` / `RetryStep` / `ErrorStep` 一个字都不改，只能复用。
+1. **复用现有行组件**：`ThinkingBlock` / `ToolCard` 保留现有内容、状态与开合语义；允许通过共享 hook/图标入口接入 §4b 的组内标题吸顶。`TimelineMarker` / `InterimAnswer` / `FinalAnswer` / `RetryStep` / `ErrorStep` 不改。
 2. **样式只用 Tailwind utility**（AGENTS.md 硬性）：禁止新增手写 CSS class。语义 token 用现有变量（`--color-*` / `--radius-md` / `--font-size-caption` 等），不写死色值。
 3. **i18n 必须 zh-CN / en-US 同步**：JSX 里禁止硬编码中英文。
 4. **用户可见文案一律走 `t()`**；新键必须两个 locale 都加。
@@ -203,6 +203,14 @@ export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGro
 - **扩展输出成员（2026-10 新增）**：appendEntry 投影卡（`meta.type === "customEntry"`）按用户决策折进过程组、不再单独成块：`groupToolMessages` 吸为 run 内 `extension-entries` 组员（连续条目合并且不拆组，run 未开始时保持独立卡兑底），`groupTurnProcess` 里与思考/工具同层入组（不截断、不计入 toolCount），组节点新增 `extensionCount` 字段。组头已结束文案追加扩展段 `t("timeline.processGroup.extension", { count })`（与工具段用 `joinTwo` 连接；纯扩展组只报扩展段、图标用 Puzzle）；组员行渲染 `turn/ExtensionEntryStep.tsx`（折叠行 + 展开看 data 字段）。`customMessage`（子代理完成通知）不受影响：仍是回合边界 + 独立通知卡。
 - **组内挂载预算（必须做，否则会 OOM 回归）**：一个组可能有几百个成员，全挂进 DOM 就是当年 `turnMountBudget` 要治的事故（2026-08 渲染进程 OOM）。所以组体必须对 `group.members` 套 `boundMountedSteps(group.members, TIMELINE_MOUNTED_STEP_LIMIT)`（`timeline/turnMountBudget.ts`，limit=120，从尾部保留）；`hiddenCount > 0` 时在**组体顶部**渲染与 TurnRow 同款的 ghost 入口按钮，文案用现有键 `t("timeline.showEarlierSteps", { count })`；点击后本地 `showAll` 全量挂载（用 `useState`，随组 id 变化重置，写法参照 `TurnRow.tsx` 里 `expandedStepsRunId` 的既有模式）。
 - `aria-expanded` / `aria-controls` 必须有；组体 `id` 用 `useId()`。
+
+### 4b. 组内展开项标题吸顶
+
+- 仅对过程组内已展开、且总高度超过组体视口的工具/思考项生效；标题在本项范围内使用原生 `position: sticky`，离开本项后退场，不复制标题、不叠层、不固定到应用窗口。
+- 吸顶时只增加一个「回到本项开头」图标；无图钉/「吸顶」提示、无右侧收起按钮、无常驻文字。悬停或键盘聚焦时显示 Tooltip，图标保留可访问名称；标题行仍负责开合，思考正文已有的底部收起入口保留。
+- 回到开头与从吸顶标题收起都经组体既有跟底引擎的 `restoreAt` 定位，不直接写 `scrollTop`，以同时解除锁底并取消在途跟随动画；不改变外层时间线跟随态。
+- 组体统一拥有滚动/尺寸通知，组内行只订阅几何变化；listener、ResizeObserver、requestAnimationFrame 必须在组体关闭/卸载时配对清理。不新增滚动容器或持久化设置。
+- 工具组与思考项的祖先仅在组内让出 `overflow:hidden`，否则原生 sticky 会绑定到错误的滚动容器；组外保留原布局。扫光裁切下放标题行，不让动画外溢。
 
 ### `src/renderer/src/components/session/turn/ProcessFold.tsx`（Lead 负责）
 

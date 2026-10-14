@@ -326,6 +326,8 @@ export type UpdateChannel = "stable" | "dev";
 export interface UpdateChannelInfo {
 	channel: UpdateChannel;
 	currentVersion: string;
+	/** 开发构建（未打包 npm run dev 或 dev 通道安装包）：开发中功能（ACP）据此限定入口，stable 恒 false。 */
+	devBuild: boolean;
 }
 
 /** 跨通道切换的目标发布（GitHub Release 经 selectTargetRelease 归一化后的形状）。 */
@@ -345,8 +347,12 @@ export interface TargetChannelRelease {
 
 /** 通道切换全流程快照（query/download 状态机推送 + get-status 拉取，渲染层据此渲染切换向导）。 */
 export interface ChannelSwitchSnapshot {
-	phase: "idle" | "querying" | "available" | "downloading" | "ready" | "error";
+	phase: "idle" | "querying" | "available" | "up-to-date" | "downloading" | "ready" | "error";
 	target?: TargetChannelRelease;
+	/** up-to-date 阶段的目标通道（目标最新版不高于当前版本，无需切换）。 */
+	targetChannel?: UpdateChannel;
+	/** up-to-date 阶段的当前客户端版本（与 targetChannel 一起构成「已是最新版本」文案）。 */
+	currentVersion?: string;
 	/** 下载进度（0-100 整数，单调不减；无法取得 content-length 时只在开始/结束时出现）。 */
 	percent?: number;
 	/** ready 阶段的安装包落盘路径（仅限本服务临时目录内，launch 前缀校验用）。 */

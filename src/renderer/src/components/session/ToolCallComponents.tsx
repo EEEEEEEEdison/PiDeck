@@ -1,4 +1,7 @@
-import { memo, useState, type ReactNode } from "react";
+import { memo, useCallback, useState, type ReactNode } from "react";
+import { cn } from "../../lib/utils";
+import { ProcessEntryReturnToStart } from "./turn/ProcessEntryReturnToStart";
+import { useProcessEntryStickyHeader } from "./turn/useProcessEntryStickyHeader";
 import { Brain, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, FileText, Folder, Globe2, Loader2, MessageCircle, Network, Scissors, Search, Square, SquarePen, Terminal, Wrench } from "lucide-react";
 import { countTextLines, getToolEditDiff, getToolFilePath, parseToolArgs, type ToolGroupItem } from "../app/AppUtils";
 import { t } from "../../i18n";
@@ -177,6 +180,11 @@ export const ToolCard = memo(function ToolCard(props: {
 	// 组体内：外层组体已经限高并自带滚轮，这里的内层必须让位，否则是双层滚动条。
 	const insideProcessGroupBody = useInsideProcessGroupBody();
 	const [expanded, setExpanded] = useState(props.defaultOpen ?? false);
+	const sticky = useProcessEntryStickyHeader(expanded);
+	const toggleExpanded = useCallback(() => {
+		sticky.prepareCollapse();
+		setExpanded((value) => !value);
+	}, [sticky.prepareCollapse]);
 	const messageStatus = getToolStatus(props.message);
 	const status = props.stopped && messageStatus === "running" ? "stopped" : messageStatus;
 	const toolName = getToolName(props.message);
@@ -289,16 +297,26 @@ export const ToolCard = memo(function ToolCard(props: {
 				// 无框过程行（与 ThinkingBlock 同一语言）：边框/面板底由 timeline.css 的
 				// .tool-card 保证为 0/transparent，这里不再叠 border / bg-bg-panel。
 				className={`tool-card w-full min-w-0 tone-${tone}${isSkillRead ? " tool-card--skill" : ""}${isAskCard ? " tool-card--ask" : ""}${status === "running" ? " tool-card--running" : ""}`}
+				ref={sticky.entryRef}
 				data-status={status}
 				data-tool-kind={isSkillRead ? "skill" : getToolKind(toolName)}
 				data-message-id={props.message.id}
 			>
-				<div className="relative flex min-h-7 items-center rounded-md transition-colors duration-fast hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)]">
+				<div
+					ref={sticky.headerRef}
+					data-process-entry-header=""
+					data-process-entry-pinned={sticky.pinned}
+					className={cn(
+						"relative flex min-h-7 items-center overflow-hidden rounded-md transition-colors duration-fast hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,transparent)]",
+						sticky.sticky && "sticky top-0 z-10",
+						sticky.pinned && "rounded-none bg-bg-app shadow-[0_1px_0_var(--color-border-subtle)] hover:bg-[color:color-mix(in_srgb,var(--color-bg-hover)_50%,var(--color-bg-app))]",
+					)}
+				>
 					{/* 工具运行中整行扫光（dsh-web command-row-sweep 同款，与思考扫光同 keyframes）。
 				    status === "running" 才挂载：stopped/error/done 立即消失（stopped 由 props.stopped 短路）；
 				    pointer-events-none 不挡 trigger 点击展开 */}
 					{status === "running" && <span aria-hidden className="pointer-events-none absolute inset-y-0 left-[-300px] w-[300px] animate-tool-sweep motion-reduce:animate-none bg-[linear-gradient(90deg,transparent,color-mix(in_srgb,var(--color-bg-app)_55%,transparent),transparent)]" />}
-					<button type="button" className="flex min-h-7 min-w-0 flex-[1_1_auto] cursor-pointer items-center gap-2 border-0 bg-transparent py-1 pr-0.5 pl-1 text-left text-chat-row text-text-faint focus-visible:-outline-offset-2 focus-visible:outline-2" onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}>
+					<button type="button" className="flex min-h-7 min-w-0 flex-[1_1_auto] cursor-pointer items-center gap-2 border-0 bg-transparent py-1 pr-0.5 pl-1 text-left text-chat-row text-text-faint focus-visible:-outline-offset-2 focus-visible:outline-2" onClick={toggleExpanded} aria-expanded={expanded}>
 						<span className="tool-card-icon inline-flex shrink-0 items-center justify-center">{isSkillRead ? <Brain size={16} /> : isAskCard ? <MessageCircle size={16} /> : toolIcon(toolName)}</span>
 						{/* 文本段：工具名（14px）与耗时 / 命令·路径（12px 等宽）必须共基线，否则等宽详情
 						    比正文高约 3px、看起来「没纵向居中」（原理解释见 RowText）。
@@ -342,6 +360,7 @@ export const ToolCard = memo(function ToolCard(props: {
 							) : null}
 						</RowText>
 					</button>
+					{sticky.pinned && <ProcessEntryReturnToStart onClick={sticky.returnToStart} />}
 				</div>
 				{expanded && (
 					<div className="relative ml-5 mt-1 mb-2 rounded-b-sm border-l-2 border-border-subtle bg-transparent pl-3 animate-in fade-in duration-100 motion-reduce:animate-none">
@@ -451,8 +470,10 @@ export const ToolGroupCard = memo(function ToolGroupCard(props: {
 	/** 转交给每张工具卡的文件打开路由 */
 	onOpenFile?: (path: string) => void;
 }) {
+	// 组内标题要越过工具组裁切边界吸住组体；组外继续保留原裁切行为。
+	const insideProcessGroupBody = useInsideProcessGroupBody();
 	return (
-		<section className="tool-group-card w-full min-w-0 overflow-hidden rounded-none border-0 bg-transparent" data-message-id={props.group.id}>
+		<section className={cn("tool-group-card w-full min-w-0 rounded-none border-0 bg-transparent", insideProcessGroupBody ? "overflow-visible" : "overflow-hidden")} data-message-id={props.group.id}>
 			<div className="flex flex-col gap-0 p-0">
 				{props.group.messages.map((message) => (
 					<ToolCard key={message.id} message={message} stopped={props.stopped} sessionId={props.sessionId} onOpenFile={props.onOpenFile} />

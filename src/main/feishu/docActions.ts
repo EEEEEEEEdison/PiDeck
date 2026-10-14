@@ -36,7 +36,7 @@ export function wrapHostInstruction(instruction: string, userMessage: string): s
 
 /**
  * 剥离宿主注入的内部指令，只保留用户可见输入。
- * 兼容历史会话：未加标记时，按已知飞书指令前缀/特征行剥离。
+ * 兼容历史会话：未加标记时，按已知通道指令前缀/特征行剥离（飞书、微信）。
  */
 export function stripHostInstruction(text: string): string {
 	if (!text) return "";
@@ -66,6 +66,31 @@ export function stripHostInstruction(text: string): string {
 					if (t.includes("这是只读上下文，用于确认当前会话绑定")) return false;
 					if (t.includes("创建飞书文档时，先输出完整正文")) return false;
 					if (t === "这是飞书群聊消息。请直接回复用户。") return false;
+					return true;
+				})
+				.join("\n");
+		}
+	}
+
+	// 历史格式（微信）：WeChatBridge.buildAgentMessage 把通道指令拼在用户原文前。
+	// 必须匹配带通道签名的完整首行：用户真的问「当前会话已连接微信吗」时不能被当成指令剥空。
+	if (/^当前会话已连接微信[（(]iLink/.test(next)) {
+		const parts = next.split(/\n\n+/);
+		if (parts.length >= 2 && parts[0].includes("iLink")) {
+			next = parts.slice(1).join("\n\n");
+		} else {
+			// 单换行兜底（用户原文为空时只剩指令块）：去掉已知指令特征行
+			next = next
+				.split("\n")
+				.filter((line) => {
+					const t = line.trim();
+					if (!t) return true;
+					if (/^当前会话已连接微信[（(]iLink/.test(t)) return false;
+					if (t.includes("微信只支持纯文本")) return false;
+					if (t.includes("不要调用任何微信/IM 发送接口")) return false;
+					if (t.includes("该通道不支持发送文件、图片与引用消息")) return false;
+					if (t.includes("微信通道不能主动推送消息")) return false;
+					if (/^请用.{1,20}回答。$/.test(t)) return false;
 					return true;
 				})
 				.join("\n");

@@ -28,13 +28,18 @@ test("识别 /login 并接受可选供应商参数", () => {
 	assert.deepEqual(classifyComposerSlashCommand("/login anthropic extra"), { kind: "login", providerId: "anthropic" });
 });
 
+test("识别 /hotkeys：跳设置里的快捷键页，不发给 pi", () => {
+	assert.deepEqual(classifyComposerSlashCommand("/hotkeys"), { kind: "hotkeys" });
+	assert.deepEqual(classifyComposerSlashCommand("  /hotkeys  "), { kind: "hotkeys" });
+});
+
 test("不合法或带路径感的 id 退回手选，不把垃圾值传下去", () => {
 	assert.deepEqual(classifyComposerSlashCommand("/login ../etc/passwd"), { kind: "login" });
 	assert.deepEqual(classifyComposerSlashCommand("/login -x"), { kind: "login" });
 });
 
 test("名字相近的命令与普通文本仍然发给 pi", () => {
-	for (const text of ["/loginx", "/logins", "/newx", "/compactx", "/logout", "请帮我 /login 一下", ""]) {
+	for (const text of ["/loginx", "/logins", "/newx", "/compactx", "/logout", "/hotkeysx", "/hotkeys now", "请帮我 /login 一下", ""]) {
 		assert.deepEqual(classifyComposerSlashCommand(text), { kind: "text" }, text);
 	}
 });
@@ -49,6 +54,12 @@ test("useSessionSend 拦截 /login 且不再自写正则", () => {
 	assert.match(source, /classifyComposerSlashCommand\s*\(\s*trimmedMessage\s*\)/, "useSessionSend 应通过分类器判断接管命令");
 	assert.match(source, /slashCommand\.kind\s*===\s*"login"/, "useSessionSend 应有 /login 分支");
 	assert.doesNotMatch(source, /\/\^\\\/login/, "不要另写一份 /login 正则，避免两处判定漂移");
+});
+
+test("useSessionSend 拦截 /hotkeys 并落到设置快捷键页", () => {
+	const source = readFileSync(new URL("../src/renderer/src/hooks/useSessionSend.ts", import.meta.url), "utf8");
+	assert.match(source, /slashCommand\.kind\s*===\s*"hotkeys"/, "useSessionSend 应有 /hotkeys 分支");
+	assert.match(source, /openSettingsAtom,\s*\{\s*tab:\s*"shortcuts"\s*\}/, "/hotkeys 应打开设置里的快捷键页");
 });
 
 /** 契约守卫：`/login` 的入口接线（App → SessionPaneServices → ComposerArea → 控制器）不能断。 */

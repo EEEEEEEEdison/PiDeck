@@ -10,9 +10,15 @@ description: PiDeck 每个版本的发布记录：新功能、问题修复与体
 - [中文 CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.zh-CN.md)
 - [English CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.md)
 
-## v0.9.0 (2026-10-10)
+## v0.9.1 (2026-10-14)
 
-发布时间：2026-10-10
+发布时间：2026-10-14
+
+- ✨ **macOS 安装包在 Apple Silicon 上无法启动**
+
+## v0.9.0 (2026-10-14)
+
+发布时间：2026-10-14
 
 - 🚀 **ACP 协议后端：接入更多 AI 编程工具**
 - 🚀 **独立 PiDeck 宿主插件系统**
@@ -38,7 +44,7 @@ description: PiDeck 每个版本的发布记录：新功能、问题修复与体
 - 🚀 **MCP 配置页改版**
 - 🚀 **输入框提示词增强（✦）**
 - 🚀 **重发/编辑 fork 化**
-- 🚀 **Web 端会话路由 /s/<id>**
+- 🚀 **Web 端会话路由 `/s/<id>`**
 - ✨ **WSL 项目全部会话从侧栏消失（0.7.9 回归）**
 - ✨ **mcp.json 保存加乐观锁**
 - ✨ **未信任项目的资源面板降级为引导文案**

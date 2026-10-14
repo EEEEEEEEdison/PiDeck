@@ -1,6 +1,6 @@
 {
-  "name": "pi-desktop",
-  "version": "0.9.0",
+  "name": "pideck",
+  "version": "0.9.1",
   "dshRuntimeVersion": "0.2.0-rc.2",
   "packageManager": "npm@11.6.2",
   "engines": {
@@ -102,7 +102,7 @@
     "docs:dev": "vitepress dev docs-site",
     "docs:build": "vitepress build docs-site",
     "docs:preview": "vitepress preview docs-site",
-    "postinstall": "node scripts/fix-pty-permissions.js",
+    "postinstall": "node scripts/fix-pty-permissions.js && node scripts/patch-electron-builder-rename-retry.js",
     "prepare": "node scripts/install-git-hooks.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "sync:main": "node scripts/sync-main.mjs",
@@ -116,6 +116,7 @@
     "probe:dsh": "node scripts/dsh-embed-probe.mjs"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
     "@electron-toolkit/utils": "^4.0.0",
     "@larksuiteoapi/node-sdk": "^1.67.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
@@ -205,6 +206,13 @@
         ]
       },
       {
+        "from": "resources/host-plugins",
+        "to": "host-plugins",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "node_modules/undici",
         "to": "extensions/node_modules/undici"
       },
@@ -219,6 +227,10 @@
       {
         "from": "resources/reply-actions.default.json",
         "to": "reply-actions.default.json"
+      },
+      {
+        "from": "resources/notification-logo.png",
+        "to": "notification-logo.png"
       },
       {
         "from": "resources/pi-auth-host.mjs",
@@ -252,7 +264,8 @@
       }
     ],
     "extraMetadata": {
-      "main": "out/main/index.js"
+      "main": "out/main/index.js",
+      "productName": "PiDeck"
     },
     "win": {
       "icon": "build/icon.ico",
@@ -280,6 +293,7 @@
         "zip"
       ],
       "category": "public.app-category.developer-tools",
+      "identity": "-",
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "linux": {
@@ -290,7 +304,18 @@
         "tar.gz"
       ],
       "category": "Development",
-      "maintainer": "ayuayue <ayuayue@users.noreply.github.com>"
+      "maintainer": "ayuayue <ayuayue@users.noreply.github.com>",
+      "executableName": "pideck",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "deb": {
+      "packageName": "pideck",
+      "artifactName": "${productName}_${version}_${arch}.${ext}",
+      "fpm": [
+        "--replaces=pi-desktop",
+        "--conflicts=pi-desktop",
+        "--provides=pi-desktop"
+      ]
     },
     "appImage": {
       "artifactName": "${productName}-${arch}.${ext}"
@@ -353,7 +378,7 @@
     "@deepseek-ai/dsh-subprocess": "0.2.0-rc.2",
     "@deepseek-ai/dsh-timeout": "0.2.0-rc.2",
     "@deepseek-ai/dsh-workflow": "0.2.0-rc.2",
-    "@earendil-works/pi-ai": "1.0.4",
+    "@earendil-works/pi-ai": "1.2.0",
     "@fiahfy/icns": "^0.0.7",
     "@lezer/highlight": "^1.2.3",
     "@pierre/diffs": "^1.3.5",

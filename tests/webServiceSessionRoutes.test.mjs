@@ -768,8 +768,13 @@ test("SSE /stream endpoint forwards pi agent events as AI SDK UI message frames"
 			emitPiEvent("agent-1", { type: "agent_settled" });
 
 			const wire = await readUntil("data: [DONE]");
-			const afterDone = await reader.read();
-			assert.equal(afterDone.done, true, "the SSE response must close after [DONE]");
+			// keepAlive（W2）：/stream 是 EventSource 常驻订阅，一轮 [DONE] 后连接保留，
+			// 下一轮事件在同一连接上继续（旧语义「[DONE] 即关」导致 Ask 续答等后续轮次丢帧）。
+			// 验证法：直接发第二轮事件并读帧——若服务端已关连接，read 返回 done、读不到 Round2。
+			emitPiEvent("agent-1", { type: "message_start", message: { role: "assistant", id: "m2" } });
+			emitPiEvent("agent-1", { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Round2" } });
+			emitPiEvent("agent-1", { type: "agent_settled" });
+			const wire2 = await readUntil("Round2");
 			const frames = wire
 				.split("\n\n")
 				.filter((line) => line.startsWith("data: ") && line.slice(6).trim() !== "[DONE]")
@@ -786,6 +791,23 @@ test("SSE /stream endpoint forwards pi agent events as AI SDK UI message frames"
 			assert.equal(frames[3].id, frames[1].id);
 			assert.equal(frames[4].type, "text-end");
 			assert.equal(frames[5].type, "finish");
+			// 第二轮帧里必须出现新的 start（messageId=m2）：同连接跨轮重置生效。
+			const round2Start = wire2
+				.split("\n\n")
+				.filter((line) => line.startsWith("data: "))
+				.map((line) => line.slice(6))
+				.find(
+					(body) =>
+						body.startsWith("{") &&
+						(() => {
+							try {
+								return JSON.parse(body).type === "start" && JSON.parse(body).messageId === "m2";
+							} catch {
+								return false;
+							}
+						})(),
+				);
+			assert.ok(round2Start, "second turn must open with a fresh start frame (messageId m2) on the same connection");
 			controller.abort();
 		},
 		{

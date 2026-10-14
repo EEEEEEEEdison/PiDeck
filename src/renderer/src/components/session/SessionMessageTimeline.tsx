@@ -124,6 +124,9 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 	// DSH host 被用户手动停止：历史暂时读不了（main 侧降级成带原因的空页）。
 	// 与普通读盘失败分开渲染——DSH 会话没有 pi 会话文件，重试也永远不会自愈。
 	const dshHostStopped = messageLoadState?.status === "error" && messageLoadState.reason === "dsh-host-stopped";
+	// 会话文件还不存在（新建会话/外部连接建的会话，在发出第一条消息前 pi 不落盘）：
+	// 这不是故障，是「还没有内容」——给友好空态，不显示错误原因，也不落到起始页。
+	const sessionFileMissing = messageLoadState?.status === "error" && messageLoadState.reason === "file-missing";
 	const [startingDshHost, setStartingDshHost] = useState(false);
 	/** 专态主按钮：显式启动 host（唯一能解开手动停止标记的路径）+ 重载本会话历史。 */
 	const startDshHostAndRetry = useCallback(async () => {
@@ -797,7 +800,7 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
           也不裸显示起始页误导——明确错误文案 + 重试（2026-08 生图会话文件缺失）。
           DSH host 被手动停止走下面的专态分支：DSH 会话没有 pi 会话文件，说成
           「文件可能已被删除」会把用户引向错误方向，而且重试永远无效。 */}
-			{messageLoadState?.status === "error" && activeMessages.length === 0 && !dshHostStopped && (
+			{messageLoadState?.status === "error" && activeMessages.length === 0 && !dshHostStopped && !sessionFileMissing && (
 				<div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
 					<p className="text-sm font-medium">{t("timeline.loadFailed")}</p>
 					<p className="max-w-[560px] text-xs text-muted-foreground">{t("timeline.loadFailedHint")}</p>
@@ -828,9 +831,21 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 				</div>
 			)}
 
+			{/* 空会话（文件尚未创建）专态：只说「还没有内容」+ 怎么产生内容，不展示 ENOENT，
+			    也不渲染起始页——新建会话/外部连接会话打开时就应该是这一屏。 */}
+			{messageLoadState?.status === "error" && activeMessages.length === 0 && sessionFileMissing && (
+				<div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
+					<p className="text-sm font-medium">{t("timeline.emptySessionFile")}</p>
+					<p className="max-w-[560px] text-xs text-muted-foreground">{t("timeline.emptySessionFileHint")}</p>
+					<Button type="button" variant="outline" size="sm" onClick={() => void controller.reloadFromDisk()}>
+						{t("common.retry")}
+					</Button>
+				</div>
+			)}
+
 			{!hasActiveConversation && <EmptyState hasProject={props.hasProject} onCreate={props.onCreateSession} />}
 
-			{hasActiveConversation && !isConversationLoading && activeMessages.length === 0 && <SessionStartSurface sessionId={sessionId} />}
+			{hasActiveConversation && !isConversationLoading && activeMessages.length === 0 && !sessionFileMissing && <SessionStartSurface sessionId={sessionId} />}
 
 			{/* 长会话渲染治理：
           - 不再使用 content-visibility 估算高度（展开工具会抖）。
@@ -853,6 +868,8 @@ export function SessionMessageTimeline(props: SessionMessageTimelineProps) {
 									sessionId={sessionId}
 									// 行头署名与后端一致：DSH 会话的回复标 dsh，而非 pi
 									backend={session?.backend ?? "pi"}
+									// ACP 会话的回复行头用工具自己的品牌 logo（分不清是哪个 CLI 就失去署名意义）
+									acpToolId={session?.acpToolId}
 									fresh={freshMessageIds.has(item.id)}
 									topFresh={topFreshIds.has(item.id)}
 									onPreviewImage={props.onPreviewImage}

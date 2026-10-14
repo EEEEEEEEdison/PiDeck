@@ -20,15 +20,15 @@ function sha256(text) {
 	return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-/** 构造一份合法的 artifact 对（catalog + manifest），包版本可指定。 */
-function makeArtifact(packageVersion = "9.9.9-remote") {
+/** 构造一份合法的 artifact 对（catalog + manifest），包版本与 schemaVersion 可指定。 */
+function makeArtifact(packageVersion = "9.9.9-remote", schemaVersion = 2) {
 	const entries = [
 		{ id: "overlay-alpha", name: "Overlay Alpha", provider: "demo", contextWindow: 1000 },
 		{ id: "overlay-beta", name: "Overlay Beta", provider: "demo", contextWindow: 2000, reasoning: true },
 	];
-	const catalogRaw = JSON.stringify({ schemaVersion: 2, entries });
+	const catalogRaw = JSON.stringify({ schemaVersion, entries });
 	const manifestRaw = JSON.stringify({
-		schemaVersion: 2,
+		schemaVersion,
 		catalogSha256: sha256(catalogRaw),
 		entryCount: entries.length,
 		source: {
@@ -255,6 +255,42 @@ test("catalog:checkRemote 版本不同 = hasUpdate；相同 = 最新；网络失
 		const failed = await offline.checkRemote("main");
 		assert.equal(failed.ok, false);
 		assert.equal(failed.code, "network");
+	} finally {
+		cleanup(dir);
+	}
+});
+
+test("catalog:update 远端 schemaVersion 高于本地支持：返回 incompatible（不是 validation）且不写文件", async () => {
+	const dir = tempDir();
+	try {
+		// issue #343 回归：main 若先发了 v3 产物而读端还没放宽，必须提示「需先升级 PiDeck」，
+		// 不能共用 validation 报成误导性的「仓库文件可能异常」。
+		const artifact = makeArtifact("9.9.9-remote", 3);
+		const updater = new PiAiCatalogUpdater({ userDataDir: dir, fetchImpl: makeFetch(artifact), timeoutMs: 200 });
+		const result = await updater.update("main");
+		assert.equal(result.ok, false);
+		assert.equal(result.code, "incompatible");
+		assert.match(result.message, /schemaVersion 3/);
+		assert.equal(existsSync(join(dir, "pi-ai-catalog.json")), false);
+		assert.equal(existsSync(join(dir, "pi-ai-catalog.manifest.json")), false);
+	} finally {
+		cleanup(dir);
+	}
+});
+
+test("catalog:checkRemote 远端 schemaVersion 与本地不等（新或旧）：返回 incompatible", async () => {
+	const dir = tempDir();
+	try {
+		const newer = new PiAiCatalogUpdater({ userDataDir: dir, fetchImpl: makeFetch(makeArtifact("9.9.9-remote", 3)), timeoutMs: 200 });
+		const checked = await newer.checkRemote("main");
+		assert.equal(checked.ok, false);
+		assert.equal(checked.code, "incompatible");
+		assert.match(checked.message, /schemaVersion 3/);
+		// 远端更旧（v1）同样算不兼容：读端只接受等值
+		const older = new PiAiCatalogUpdater({ userDataDir: dir, fetchImpl: makeFetch(makeArtifact("9.9.9-remote", 1)), timeoutMs: 200 });
+		const olderChecked = await older.checkRemote("main");
+		assert.equal(olderChecked.ok, false);
+		assert.equal(olderChecked.code, "incompatible");
 	} finally {
 		cleanup(dir);
 	}

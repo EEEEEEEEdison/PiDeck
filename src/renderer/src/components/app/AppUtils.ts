@@ -243,6 +243,10 @@ export function sameChatMessageForRender(previous: ChatMessage, next: ChatMessag
 		// 空文本消息（纯工具回合骨架）的 stopReason 可能是唯一变化（pending→stop/toolUse），
 		// 漏比较会导致 reconcileRuns 复用旧引用、最终/中间分类不更新。
 		previous.stopReason !== next.stopReason ||
+		// 模型可能在同一消息上后补（思考骨架先建、message_end 才带 provider/model），
+		// 漏比较会让 reconcileRuns 复用旧引用，行头一直不显示模型。
+		previous.model?.provider !== next.model?.provider ||
+		previous.model?.modelId !== next.model?.modelId ||
 		!sameImageGenMetaForRender(previous.meta?.imageGen, next.meta?.imageGen)
 	) {
 		return false;
@@ -791,7 +795,14 @@ export type SuggestionItem = {
 const PINNED_COMMAND_NAMES = new Set<string>();
 // 桌面端已有独立 UI 的 pi 内置命令不进 `/` 菜单，避免点进去却落到 CLI 语义。
 // `/new` 例外：发送时由桌面拦截，走新建 Agent 会话（与侧栏 + 同源），不再藏起来。
-const HIDDEN_DESKTOP_BUILTIN_COMMAND_NAMES = new Set(["model", "resume", "fork", "name", "logout", "goal", "tree", "reload"]);
+//
+// copy/export/session/settings/clone 与 tree/reload 是两类不同原因，但都要藏：
+// pi 的 builtin 斜杠命令只在交互式 TUI 里处理（`dist/core/slash-commands.js` 只被
+// modes/interactive 引用，RPC 的 get_commands 只返回 extension/prompt/skill），发下去
+// 不会执行、只会被模型当成普通文本回答。这些命令桌面都已有等价入口（消息复制、
+// 会话菜单导出 HTML、圆环/打开会话文件、设置页、复制会话），所以直接不列；
+// `/hotkeys` 无等价按钮，靠 classifyComposerSlashCommand 接管到设置里的快捷键页。
+const HIDDEN_DESKTOP_BUILTIN_COMMAND_NAMES = new Set(["model", "resume", "fork", "name", "logout", "goal", "tree", "reload", "copy", "export", "share", "session", "settings", "clone"]);
 
 function isBuiltinDesktopCommand(command: PiCommand) {
 	return command.source == null || command.source === "builtin";

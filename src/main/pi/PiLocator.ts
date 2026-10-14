@@ -183,7 +183,7 @@ export function describeCmdShimFallback(resolution: CmdShimResolution, shimPath:
 		case "unreadable":
 			return `垫片文件读取失败（权限或占用）：${shimPath}`;
 		case "unrecognized":
-			return "垫片结构不是 npm 生成的 pi.cmd（没有可识别的 node_modules/JS 入口引用）";
+			return "垫片入口无法静态解析（npm 12+ 等变量式 shim：入口由 SET 变量间接引用），已回退 cmd.exe；功能不受影响";
 		case "entry-missing":
 			return `垫片引用的 JS 入口不存在：${resolution.candidate}（常见于 nvm/pnpm 切换版本后残留的旧垫片）`;
 		case "not-cmd":
@@ -1263,11 +1263,18 @@ export class PiLocator {
 			return { kind: "unreadable" };
 		}
 		const baseDir = dirname(shimPath);
+		// 只在**实际执行行**（含 `%*`）上找入口：新式垫片（npm 12+ 的 npm.cmd/npx.cmd）用
+		// `SET "NPM_CLI_JS=%~dp0\node_modules\npm\bin\npm-cli.js"` 变量间接引用，执行行形如
+		// `"%NODE_EXE%" "%NPM_CLI_JS%" %*`。若按全文取第一个 `node_modules\…js`，会抓到变量赋值里的
+		// `npm-prefix.js`——实测把「装包」跑成「打印前缀」，exit 0 却什么都没装（npm 12.0.2 的 npm.cmd 复现）；
+		// 入口变量还可能被 prefix 覆盖，静态解析给不出与 cmd 等价的目标，因此这类形态一律回退 cmd.exe。
+		const execLines = content.split(/\r?\n/).filter((line) => line.includes("%*"));
 
 		// ① %dp0% / %~dp0% 之后紧跟 `\<node_modules 相对路径>`；`\\(` 中的反斜杠是字面量，
 		// 其后的 `(` 即捕获组起点，整段相对路径由该组取回。
-		const match = content.match(/%~?dp0%?\\(node_modules[\\/][^"%\r\n]+\.(?:m?js|cjs))/i);
-		if (match) {
+		for (const line of execLines) {
+			const match = /%~?dp0%?\\(node_modules[\\/][^"%\r\n]+\.(?:m?js|cjs))/i.exec(line);
+			if (!match) continue;
 			// 垫片内一律是 Windows 反斜杠；归一成 `/` 使 path.resolve 在 POSIX 宿主上也能正确拼接
 			// （测试会以 Linux/macOS 宿主模拟 win32 跑这条分支）。
 			const entry = resolve(baseDir, match[1].replace(/\\/g, "/"));
@@ -1278,8 +1285,9 @@ export class PiLocator {
 		}
 
 		// ② 本地安装垫片：`"%dp0%\..\<包>\bin\<脚本>"`（可继续带 `..`，但必须留在 node_modules 内）
-		const shimRelative = content.match(/%~?dp0%?\\\.\.\\([^"%\r\n]+)/i);
-		if (shimRelative) {
+		for (const line of execLines) {
+			const shimRelative = /%~?dp0%?\\\.\.\\([^"%\r\n]+)/i.exec(line);
+			if (!shimRelative) continue;
 			const candidate = resolve(baseDir, `../${shimRelative[1].replace(/\\/g, "/")}`);
 			if (/[\\/]node_modules[\\/]/i.test(candidate) && isRunnableNodeEntry(candidate)) {
 				return { kind: "entry", entry: candidate, matchedBy: "shim-relative" };

@@ -129,6 +129,16 @@ features:
 
 ---
 
+## 🛒 作者的小店
+
+顺手打个广告：需要充值 ChatGPT Plus / Pro、Claude 的同学可以找我 —— 官网直充、保订阅，成品号质保订阅，可开发票（加 6% 税点）。
+
+<p class="shop-block">
+  <a href="/images/gpt-recharge-price.png"><img class="shop-price" src="/images/gpt-recharge-price.png" alt="GPT 充值价目表" /></a>
+</p>
+
+---
+
 ## 赞助
 
 如果 PiDeck 对你有帮助，欢迎请作者喝杯咖啡。微信扫码即可赞赏，感谢支持。

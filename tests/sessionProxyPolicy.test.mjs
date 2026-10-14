@@ -19,6 +19,9 @@ const {
 	buildPiProxyEnvPatch,
 } = loadTsCommonJs("src/main/sessions/sessionProxyPolicy.ts");
 
+// 名单启用判据与设置页共用（设置页据此置灰主开关）。
+const { hasPiProxyListFilter } = loadTsCommonJs("src/shared/piProxyList.ts");
+
 // 注：loadTsCommonJs 跨 vm realm 加载，对象原型与本地不同，deepEqual 会因 prototype
 // 不等而失败；统一用逐字段断言。
 
@@ -144,6 +147,28 @@ test("applyPiProxyModeWithProvider: 模型名单内即使全局关闭也强制�
 	// 名单都空 → 原样返回（跟随全局，不创建新对象）
 	const noList = { ...base, piProxyProviders: [], piProxyModels: [] };
 	assert.equal(applyPiProxyModeWithProvider(noList, "follow", "openai", "gpt-4o"), noList);
+});
+
+test("hasPiProxyListFilter: 为真 ⟺ 主开关不再参与决策（设置页置灰判据与策略同源）", () => {
+	const cases = [
+		{ providers: [], models: [] },
+		{ providers: [], models: ["openai/gpt-4o"] },
+		{ providers: ["openai"], models: [] },
+		{ providers: ["openai"], models: ["anthropic/claude-3-5-sonnet"] },
+	];
+	for (const { providers, models } of cases) {
+		const listActive = hasPiProxyListFilter(providers, models);
+		for (const provider of ["openai", "anthropic"]) {
+			for (const modelId of ["gpt-4o", "claude-3-5-sonnet"]) {
+				const base = { piProxyUrl: "http://127.0.0.1:7890", piProxyProviders: providers, piProxyModels: models };
+				const off = applyPiProxyModeWithProvider({ ...base, piProxyEnabled: false }, "follow", provider, modelId);
+				const on = applyPiProxyModeWithProvider({ ...base, piProxyEnabled: true }, "follow", provider, modelId);
+				const switchMatters = off.piProxyEnabled !== on.piProxyEnabled;
+				// 名单非空 → 开关彻底失效（置灰是诚实的）；名单为空 → 开关决定结果（不能误置灰）。
+				assert.equal(switchMatters, !listActive, `名单 ${JSON.stringify({ providers, models })} 在 ${provider}/${modelId} 上主开关应${listActive ? "失效" : "生效"}`);
+			}
+		}
+	}
 });
 
 test("computeGenProxyKey: 序列化实际生效的代理状态（含名单命中/绕过列表）", () => {

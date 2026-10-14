@@ -159,6 +159,18 @@ test("parseProviderModelsResponse: 空/非法声明不出现（不猜默认值�
 	assert.deepEqual(JSON.parse(JSON.stringify(models)), [{ id: "plain" }]);
 });
 
+test("parseProviderModelsResponse: 荒唐容量不回传给配置页（实测有中转回 32763840008）", () => {
+	const models = parseProviderModelsResponse({
+		data: [
+			// 超上限的输出上限与 max > ctx 都是坏数据；上下文窗口本身合法则保留
+			{ id: "junk-max", context_length: 1000000, max_output_tokens: 32763840008 },
+			{ id: "max-over-ctx", context_length: 1000000, max_output_tokens: 2000000 },
+			{ id: "junk-ctx", context_length: 999999999999 },
+		],
+	});
+	assert.deepEqual(JSON.parse(JSON.stringify(models)), [{ id: "junk-ctx" }, { id: "junk-max", contextWindow: 1000000 }, { id: "max-over-ctx", contextWindow: 1000000 }]);
+});
+
 test("parseProviderModelsResponse: Gemini models/ 前缀与 inputTokenLimit", () => {
 	const models = parseProviderModelsResponse(
 		{
@@ -307,7 +319,7 @@ test("同一 provider+id 同类重复：保留第一条", () => {
 	assert.equal(lookupPiAiCatalogEntry(index, "demo", "dup")?.contextWindow, 1000);
 });
 
-/** 官方 1.0.4 产物必须真的带类型与官方字段（不是“只是代码支持”）。 */
+/** 随包官方产物必须真的带类型与官方字段（不是“只是代码支持”）。 */
 test("真实生成 catalog：全部条目带 type，且官方字段未被裁剪", () => {
 	const entries = getPiAiCatalogIndex().entries;
 	assert.ok(entries.length > 1000, `目录条目异常：${entries.length}`);
@@ -316,7 +328,7 @@ test("真实生成 catalog：全部条目带 type，且官方字段未被裁剪"
 		const type = entry.type ?? "omitted";
 		typeCounts[type] = (typeCounts[type] ?? 0) + 1;
 	}
-	// pi-ai 1.0.4 的 1620 条全部显式带 type；缺省（undefined）数量为 0。
+	// pi-ai 1.2.0 的 1649 条全部显式带 type；缺省（undefined）数量为 0。
 	assert.equal(typeCounts.omitted, undefined, "官方条目应全部显式带 type");
 	assert.ok(typeCounts.chat > 1000, `chat 条目异常：${typeCounts.chat}`);
 	assert.ok(typeCounts.image > 0, "应包含 image 条目");
@@ -344,6 +356,21 @@ test("真实生成 catalog：0.85.0 的 qwen3.8-max 可供主进程读取", () =
 	assert.ok(entry, "qwen3.8-max 应命中 PiDeck 0.85.0 artifact");
 	assert.equal(entry.contextWindow, 1000000);
 	assert.equal(entry.maxTokens, 131072);
+});
+
+test("真实生成 catalog：1.2.0 的 Haiku 5.5 可供聊天能力补全", () => {
+	const entry = lookupPiAiCatalogEntry(getPiAiCatalogIndex(), "anthropic", "claude-haiku-5-5");
+	assert.ok(entry, "新版目录应包含 claude-haiku-5-5");
+	assert.equal(entry.type, "chat");
+	assert.equal(entry.reasoning, true);
+	assert.ok(entry.contextWindow > 0);
+	assert.ok(entry.maxTokens > 0);
+});
+
+test("真实生成 catalog：1.2.0 的 GPT-6 Luna 保留分类模型身份", () => {
+	const entry = getPiAiCatalogIndex().entries.find((model) => model.provider === "openai" && model.id === "gpt-6-luna");
+	assert.ok(entry, "新版目录应包含 gpt-6-luna");
+	assert.equal(entry.type, "classifier", "不能把分类模型伪装成聊天模型");
 });
 
 test("readBuiltinPiAiCatalogVersion：仓库内置 manifest 返回 pi-ai 包版本", () => {

@@ -32,6 +32,7 @@ import type {
 	AgentUiBatchQuestion,
 } from "../../shared/types";
 import { buildSessionOriginKey } from "../../shared/sessionIdentity";
+import { descriptorFromThrownError } from "../../shared/errorI18n";
 import { createSessionModelPreference } from "../../shared/modelDisplayName";
 import { isRewindCheckpointId, isRewindRestoreScope } from "../../shared/types";
 import type { BridgeEvent } from "../../shared/types/bridge";
@@ -191,6 +192,13 @@ export type SessionRuntimeBinding = {
 	runtimeGeneration: number;
 };
 
+/**
+ * coordinator 自己发起的解绑必须让渲染层知道（主进程注入 `emitSessionRuntimeDetach`）。
+ * 只服务「终态惰性解绑」：stop/restart/删除/fork 换绑的解绑由调用方推送 detach，
+ * 这里重复推会打乱渲染层的代际判定（`SessionRuntimeEvent` 的 detach 分支）。
+ */
+export type SessionRuntimeDetachNotifier = (binding: SessionRuntimeBinding) => void;
+
 type RuntimeReplacement = SessionRuntimeBinding & {
 	replacementId: number;
 };
@@ -288,6 +296,7 @@ export class SessionRuntimeCoordinator {
 	/** Serializes model/effort changes so a slower earlier get_state cannot overwrite a newer choice. */
 	private readonly preferenceMutationTails = new Map<string, Promise<void>>();
 	private readonly lastRequestedThinkingBySession = new Map<string, { agentId: string; level: string }>();
+	private detachedNotifier: SessionRuntimeDetachNotifier | undefined;
 
 	constructor(
 		private readonly catalog: SessionCatalogGateway,
@@ -369,8 +378,35 @@ export class SessionRuntimeCoordinator {
 		// A terminal process cannot safely receive a delayed prompt result. Remove
 		// the binding even if its dispatch lease has not unwound yet, which makes
 		// that result fail closed instead of reviving a dead runtime association.
+		//
+		// 这条解绑发生在查询路径里（读历史/翻页、空闲释放器的聚焦探针都会走到），
+		// 必须把解绑推送出去：之前静默丢绑定，渲染层快照就永远停在 error——红点常亮、
+		// 「关闭 Agent」对着一个已不存在的运行实例反复失败（2026-10 实测日志的根因）。
+		const binding = this.getRuntimeBinding(agentId);
 		this.unbindTerminalAgent(agentId);
+		// getRuntimeBinding 只回 sessionId/generation（不包含 agentId），解绑通知要把身份补全。
+		if (binding) this.notifyRuntimeDetached({ ...binding, agentId });
 		return undefined;
+	}
+
+	/**
+	 * 注入 detach 通知（主进程 `emitSessionRuntimeDetach`）。见 `SessionRuntimeDetachNotifier`。
+	 */
+	setDetachedNotifier(notifier: SessionRuntimeDetachNotifier | undefined): void {
+		this.detachedNotifier = notifier;
+	}
+
+	/**
+	 * 推送解绑通知。这里吞异常并留 warn：解绑发生在查询路径中（历史读取等 IPC 会走到），
+	 * 推送失败不能连带让用户的读盘请求失败——渲染层下次激活时仍会用新绑定自然收敛。
+	 */
+	private notifyRuntimeDetached(binding: SessionRuntimeBinding): void {
+		if (!this.detachedNotifier) return;
+		try {
+			this.detachedNotifier(binding);
+		} catch (error) {
+			void this.logger?.warn("session-runtime", "Runtime detach notification failed", { ...binding, error: errorMessage(error) });
+		}
 	}
 
 	getSessionId(agentId: string): string | undefined {
@@ -765,6 +801,10 @@ export class SessionRuntimeCoordinator {
 					modelName: appliedModel.modelName,
 					thinkingLevel: effectiveThinkingLevel,
 				});
+				// 模型名称写回 catalog 不会更新圆环使用的 runtime 用量快照；切换确认后
+				// 立即推送新窗口与占用率。刷新失败不撤销已生效的选择，迟到快照由网关丢弃。
+				this.requireBoundTarget(target);
+				await this.agents.publishRuntimeState(agentId).catch(() => undefined);
 				return result;
 			}),
 		);
@@ -835,10 +875,12 @@ export class SessionRuntimeCoordinator {
 			// 仍持有旧 sessionId/generation。只要 agentId 仍有 live 绑定，就用 live 绑定
 			// 规范化目标，别让陈旧身份挡住停止（此前用户只能靠重启停掉后台 Agent）。
 			const stopTarget = this.resolveStopTarget(target);
-			// 与在途 prompt dispatch 并发时先等 lease 释放（毫秒级窗口），不直接报
-			// 「dispatch is in progress」；超时后 reserveBoundRuntime 照旧硬失败。
-			await this.waitForNoDispatchLease(stopTarget.sessionId, stopTarget.agentId);
-			reservation = this.reserveBoundRuntime(stopTarget.sessionId, stopTarget.agentId);
+			// 停止必须永远可行：在途 prompt 回合的 dispatch lease 覆盖整个回合（ACP 长任务或
+			// 卡死的 agent 会让 lease 挂到超时甚至永不释放），不该挡住杀进程——那正是用户唯一
+			// 的恢复出口。跳过 lease 等待与断言，直接占 replacement 槽（新 dispatch 会被
+			// acquireDispatchLease 的 replacement 检查拒绝），dispatch 侧对「stop 期间回合死亡」
+			// 已有 unknownDelivery 收尾路径。
+			reservation = this.reserveBoundRuntime(stopTarget.sessionId, stopTarget.agentId, { ignoreDispatchLease: true });
 			await this.agents.stop(stopTarget.agentId);
 			this.requireCurrentReservation(reservation);
 			this.releaseRuntimeReplacement(reservation);
@@ -1244,7 +1286,9 @@ export class SessionRuntimeCoordinator {
 				activationMs: Date.now() - pipelineStartedAt,
 			});
 		} catch (error) {
-			return this.rejected(input, errorMessage(error));
+			// 网关可给 thrown error 挂 I18nDescriptor（如 ACP AUTH_REQUIRED 登录引导）：
+			// 透传给渲染层 toast；未挂载时回落通用「发送失败 + 原文」描述符。
+			return this.rejected(input, errorMessage(error), descriptorFromThrownError(error));
 		}
 
 		let lease: DispatchLease;
@@ -1783,12 +1827,14 @@ export class SessionRuntimeCoordinator {
 		}
 	}
 
-	private reserveBoundRuntime(sessionId: string, agentId: string): RuntimeReplacement {
+	private reserveBoundRuntime(sessionId: string, agentId: string, opts: { ignoreDispatchLease?: boolean } = {}): RuntimeReplacement {
 		const binding = this.getRuntimeBinding(agentId);
 		if (!binding || binding.sessionId !== sessionId || this.agentIdBySession.get(sessionId) !== agentId) {
 			throw new Error("Session runtime changed before reservation");
 		}
-		this.assertNoDispatchLease(sessionId, agentId);
+		// stop 路径传 ignoreDispatchLease：停止杀进程是卡死回合的唯一恢复出口，必须越过
+		// 在途 dispatch lease（其余 replacement 路径保持原断言，避免重配与 dispatch 竞态）。
+		if (!opts.ignoreDispatchLease) this.assertNoDispatchLease(sessionId, agentId);
 		if (this.replacementByAgent.has(agentId)) {
 			throw new Error(`Session runtime replacement already in progress: ${agentId}`);
 		}

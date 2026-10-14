@@ -627,7 +627,6 @@ export const ipcChannels = {
 	projectsListModelsReport: "projects:list-models-report",
 	/** 模型规格查询：pi-ai 内置目录按模型 id 精确匹配，中转站通用 */
 	projectsGetModelSpec: "projects:get-model-spec",
-	agentsEvent: "agents:event",
 	agentsMessage: "agents:message",
 	agentsLog: "agents:log",
 
@@ -826,6 +825,27 @@ export const ipcChannels = {
 	/** 飞书 /whoami 结果推回前端 */
 	feishuWhoamiResult: "feishu:whoami-result",
 
+	// ===== 微信 iLink 桥接 =====
+	wechatGetSettings: "wechat:get-settings",
+	wechatSetEnabled: "wechat:set-enabled",
+	wechatUpdateSettings: "wechat:update-settings",
+	wechatRenameAccount: "wechat:rename-account",
+	wechatLogout: "wechat:logout",
+	/** 取二维码并开始轮询；返回的状态已带 qrcodeContent */
+	wechatBeginLogin: "wechat:begin-login",
+	wechatCancelLogin: "wechat:cancel-login",
+	wechatSubmitVerifyCode: "wechat:submit-verify-code",
+	wechatGetLoginState: "wechat:get-login-state",
+	wechatGetStatus: "wechat:get-status",
+	wechatGetBindings: "wechat:get-bindings",
+	wechatUnbindChat: "wechat:unbind-chat",
+	/** 主进程 → 渲染层：桥接连接状态变化 */
+	wechatStatus: "wechat:status",
+	/** 主进程 → 渲染层：扫码登录阶段变化（含二维码内容） */
+	wechatLoginState: "wechat:login-state",
+	/** 主进程 → 渲染层：聊天绑定变化 */
+	wechatBindingsChanged: "wechat:bindings-changed",
+
 	// ===== 桌面宠物（全局聚合单宠） =====
 	/** 主进程 → 宠物窗：推送聚合状态 */
 	petState: "pet:state",
@@ -909,6 +929,9 @@ export const ipcChannels = {
 	// ===== 插件开发（~/.pi/agent/extensions/ 目录） =====
 	/** 插件开发支持状态：目录路径 + demo/指南是否已就位 */
 	// Independent desktop plugins use their own capability broker, never pi RPC.
+	piDeckMcpState: "pideck-mcp:state",
+	piDeckMcpSetAccess: "pideck-mcp:set-access",
+	piDeckMcpConnection: "pideck-mcp:connection",
 	hostPluginsList: "host-plugins:list",
 	hostPluginsRescan: "host-plugins:rescan",
 	hostPluginsInstall: "host-plugins:install",
@@ -925,11 +948,15 @@ export const ipcChannels = {
 	hostPluginsMount: "host-plugins:mount",
 	hostPluginsUpdate: "host-plugins:update",
 	hostPluginsUnmount: "host-plugins:unmount",
+	/** 卸载：删掉 userData 里的插件目录并清掉授权（内置示例不可卸载，见 HostPluginManager.remove）。 */
+	hostPluginsRemove: "host-plugins:remove",
 	hostPluginsChanged: "host-plugins:changed",
 	hostPluginRequest: "host-plugin:request",
 	hostPluginEvent: "host-plugin:event",
 	/** 插件发起的会话导航：broker 校验后推给桌面渲染层执行，插件页自身无权打开会话 */
 	hostPluginNavigate: "host-plugin:navigate",
+	/** 插件要求打开本地服务的 Web UI：地址由主进程适配器给，渲染层只负责开内置浏览器 */
+	hostPluginOpenBrowser: "host-plugin:open-browser",
 	pluginDevStatus: "plugin-dev:status",
 	/** 把 AI 插件开发指南写入用户扩展目录并在资源管理器定位 */
 	pluginDevWriteGuide: "plugin-dev:write-guide",
@@ -956,6 +983,20 @@ export const ipcChannels = {
 	 * 展示走 pideck-img:// 协议流式加载，这个通道只服务「复制 / 保存 / 重发带回参考图」。
 	 */
 	imagegenReadImageBlob: "imagegen:read-image-blob",
+
+	// ===== 生视频（VideoGen）：提交-轮询-下载异步协议 =====
+	/** 提交生视频任务：受理后返回 jobId，产物经轮询事件推送 */
+	videogenSubmit: "videogen:submit",
+	/** 取消进行中的任务（停止轮询并标记 cancelled；上游可能继续执行与计费） */
+	videogenCancel: "videogen:cancel",
+	/** 读取独立生视频配置（userData/videogen.json） */
+	videogenGetConfig: "videogen:get-config",
+	/** 保存独立生视频配置（白名单校验后落盘） */
+	videogenSaveConfig: "videogen:save-config",
+	/** 某会话的全部任务快照（重启后渲染层恢复进行中占位用） */
+	videogenListJobs: "videogen:list-jobs",
+	/** 任务状态事件（主进程 → 渲染层单通道推送，按 sessionId 过滤消费） */
+	videogenEvent: "videogen:event",
 
 	// ===== 提示词增强（输入框草稿 → 模型改写 → 回填） =====
 	/** 发起增强：受理后流式事件经 enhance:event 推送（按 runId 配对） */

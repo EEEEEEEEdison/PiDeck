@@ -115,7 +115,7 @@ export function WebSkillsExtensionsDialog({ open, onOpenChange }: { open: boolea
 												<p className="truncate text-sm font-medium">
 													{extension.source}
 													{extension.currentVersion ? <span className="ml-1.5 text-[10px] font-normal text-text-muted">v{extension.currentVersion}</span> : null}
-													{extension.builtIn ? <span className="ml-1.5 rounded bg-primary/10 px-1 text-[10px] text-primary">built-in</span> : null}
+													{extension.builtIn ? <span className="ml-1.5 rounded bg-primary/10 px-1 text-[10px] text-primary">{t("common.builtIn")}</span> : null}
 												</p>
 												{state.conflicts.some((conflict) => conflict.thirdParty === extension.source) ? <p className="mt-0.5 text-micro text-amber-500">{t("web.extensionConflict", { name: state.conflicts.find((conflict) => conflict.thirdParty === extension.source)?.builtIn ?? "" })}</p> : null}
 											</div>

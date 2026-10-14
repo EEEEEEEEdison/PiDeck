@@ -14,7 +14,8 @@ import { ThinkingStep } from "./ThinkingStep";
 import { ToolStep } from "./ToolStep";
 import { ExtensionEntryStep } from "./ExtensionEntryStep";
 import { useStickToBottom } from "../../../lib/stick-to-bottom";
-import { ProcessGroupBodyScrollContext } from "./processGroupScrollContext";
+import { ProcessGroupBodyScrollContext, ProcessGroupScrollControlsContext } from "./processGroupScrollContext";
+import { useProcessGroupScrollGeometry } from "./useProcessGroupScrollGeometry";
 
 /**
  * 过程组（组头 + 可折叠组体）。
@@ -29,7 +30,7 @@ import { ProcessGroupBodyScrollContext } from "./processGroupScrollContext";
  *    事故（见 `timeline/turnMountBudget.ts` 注释），故对 `group.members` 套
  *    `boundMountedSteps`，超出部分给「显示更早的 N 条步骤」入口。
  *
- * 行内容一律复用既有组件（`ThinkingStep` / `ToolStep`），本组件不改任何行样。
+ * 行内容仍复用既有组件（`ThinkingStep` / `ToolStep`）；仅共享组内标题吸顶与阅读定位入口。
  */
 
 export type ProcessGroupStepProps = {
@@ -149,6 +150,7 @@ export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGro
 	const stickScrollToBottom = stick.scrollToBottom;
 	const stickRestoreAt = stick.restoreAt;
 	const stickNoteWheel = stick.noteWheel;
+	const scrollControls = useProcessGroupScrollGeometry(props.open, stickScrollRef, stickContentRef, stickRestoreAt);
 	// 展开（含首次挂载）后的定位按「本次展开来自哪条通道」分流（2026 用户反馈：点开组体
 	// 想从头看执行的命令，展开即拽到底反而要再滚回最前面）：
 	// - 自动通道（流式最新组）：落底并跟随——组体在长、滚珠不能停在上面（既有契约，e2e 钉住）；
@@ -212,7 +214,7 @@ export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGro
 			    自重规则（2026-08 用户反馈「组头喧宾夺主」修正）：降权只能走**颜色 / 填充 / 字重**，
 			    **不得再靠缩小字号**（那会退回上面的倒置）。
 			      ① 不填色：类别图标方块去掉底色，只留图标；运行中保留工具身份色作为「正在跑」信号。
-			      ④ 静止降色：标签 text-tertiary（#6b7280，对白底 4.82:1，过 WCAG AA），hover 回 secondary。
+			      ④ 静止降色：标签 text-tertiary（#636b79，对白底 5.37:1，过 WCAG AA），hover 回 secondary。
 			         **不用 opacity**——text-secondary 压到 60% 实测只有约 2.87:1，不过 AA。
 			      ② 降字重：标签 600 → 500（font-medium）。降之前组头是**整轮唯一的 600**：
 			         大折叠栏胶囊与「显示更早」都是 500，过程行与正文都是 400 —— 也就是说它是
@@ -263,40 +265,42 @@ export const ProcessGroupStep = memo(function ProcessGroupStep(props: ProcessGro
 				// 组体内层限高交给 ProcessGroupBodyScrollContext：组内工具卡展开后不再自带滚轮，
 				// 整组只有这一条滚轮（否则是双层滚动条，内层到边就滚不动了）。
 				<ProcessGroupBodyScrollContext.Provider value={true}>
-					<div id={bodyId} data-process-group-body="" className="ml-5 mt-1 border-l-2 border-border-subtle pl-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
-						<div
-							ref={stickScrollRef}
-							data-process-group-scroller=""
-							// 滚轮交给引擎才能产生「上滚逃逸 / 回底重锁」：引擎的 wheel 意图是从外部路由进来的
-							// （noteWheel），不注册自己的 wheel 监听。虽然同一事件会冒泡到外层时间线，
-							// 但外层会先判定滚动链归属：组内有余量时由内层认领，到边后 contain 切断，
-							// 两种情况都不能改变外层跟随态。
-							onWheel={(event) => stickNoteWheel(event.deltaY, event.target)}
-							className="flex max-h-[min(320px,30vh)] flex-col overflow-y-auto overscroll-contain"
-						>
-							{/* 内容包装盒：引擎的 ResizeObserver 观察这一层才能感知「内容变高」——
+					<ProcessGroupScrollControlsContext.Provider value={scrollControls}>
+						<div id={bodyId} data-process-group-body="" className="ml-5 mt-1 border-l-2 border-border-subtle pl-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-fast">
+							<div
+								ref={stickScrollRef}
+								data-process-group-scroller=""
+								// 滚轮交给引擎才能产生「上滚逃逸 / 回底重锁」：引擎的 wheel 意图是从外部路由进来的
+								// （noteWheel），不注册自己的 wheel 监听。虽然同一事件会冒泡到外层时间线，
+								// 但外层会先判定滚动链归属：组内有余量时由内层认领，到边后 contain 切断，
+								// 两种情况都不能改变外层跟随态。
+								onWheel={(event) => stickNoteWheel(event.deltaY, event.target)}
+								className="flex max-h-[min(320px,30vh)] flex-col overflow-y-auto overscroll-contain"
+							>
+								{/* 内容包装盒：引擎的 ResizeObserver 观察这一层才能感知「内容变高」——
 						    外层 scroller 被 max-height 钳住、尺寸恒定，观察它收不到增长通知。 */}
-							<div ref={stickContentRef} className="flex shrink-0 flex-col">
-								{mounted.hiddenCount > 0 && (
-									// 超出挂载预算的早期成员入口：与 TurnRow 的「显示更早的 N 条步骤」同款观感。
-									<button
-										type="button"
-										className="mt-1 inline-flex h-[26px] shrink-0 items-center gap-2 self-start rounded-[var(--radius-md)] border border-border-subtle bg-[var(--color-chat-card-bg)] px-3 text-chat-detail font-medium text-text-secondary transition-colors hover:border-border-strong hover:bg-bg-hover hover:text-text-primary"
-										onClick={() => setExpandedGroupId(props.group.id)}
-										title={t("timeline.showEarlierSteps", { count: mounted.hiddenCount })}
-									>
-										<ChevronUp size={12} aria-hidden="true" />
-										<span>{t("timeline.showEarlierSteps", { count: mounted.hiddenCount })}</span>
-									</button>
-								)}
-								{mounted.items.map((entry) => (
-									<div key={entry.id} className="shrink-0">
-										{renderMember(entry)}
-									</div>
-								))}
+								<div ref={stickContentRef} className="flex shrink-0 flex-col">
+									{mounted.hiddenCount > 0 && (
+										// 超出挂载预算的早期成员入口：与 TurnRow 的「显示更早的 N 条步骤」同款观感。
+										<button
+											type="button"
+											className="mt-1 inline-flex h-[26px] shrink-0 items-center gap-2 self-start rounded-[var(--radius-md)] border border-border-subtle bg-[var(--color-chat-card-bg)] px-3 text-chat-detail font-medium text-text-secondary transition-colors hover:border-border-strong hover:bg-bg-hover hover:text-text-primary"
+											onClick={() => setExpandedGroupId(props.group.id)}
+											title={t("timeline.showEarlierSteps", { count: mounted.hiddenCount })}
+										>
+											<ChevronUp size={12} aria-hidden="true" />
+											<span>{t("timeline.showEarlierSteps", { count: mounted.hiddenCount })}</span>
+										</button>
+									)}
+									{mounted.items.map((entry) => (
+										<div key={entry.id} className="shrink-0">
+											{renderMember(entry)}
+										</div>
+									))}
+								</div>
 							</div>
 						</div>
-					</div>
+					</ProcessGroupScrollControlsContext.Provider>
 				</ProcessGroupBodyScrollContext.Provider>
 			)}
 		</div>

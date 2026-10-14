@@ -42,8 +42,12 @@ function loadAtoms() {
 	const liveTextHandoff = compileModule("src/renderer/src/utils/liveTextHandoff.ts");
 	const outlineRevision = compileModule("src/renderer/src/atoms/outlineRevision.ts");
 	const outlineProjectionCache = compileModule("src/renderer/src/atoms/outlineProjectionCache.ts");
+	// session-atoms ⇄ composer-atoms 是模块级循环：双方都只在惰性 action 体内用对方导出。
+	// 先给 session-atoms 一个可后填的桥对象，两模块都编译完后再回填真实导出。
+	const composerExports = {};
 	const sessions = compileModule("src/renderer/src/atoms/session-atoms.ts", {
 		"./recent-session-atoms": compileModule("src/renderer/src/atoms/recent-session-atoms.ts"),
+		"./composer-atoms": composerExports,
 		"../utils/agentRuntimeState": runtimeState,
 		"../utils/sessionRecordIdentity": sessionRecordIdentity,
 		"../utils/liveTextHandoff": liveTextHandoff,
@@ -53,6 +57,7 @@ function loadAtoms() {
 	const composer = compileModule("src/renderer/src/atoms/composer-atoms.ts", {
 		"./session-atoms": sessions,
 	});
+	Object.assign(composerExports, composer);
 	return { ...sessions, ...composer, outlineProjectionCache };
 }
 
@@ -339,6 +344,48 @@ test("anonymous session switch-back does not wipe runtime messages via empty dis
 	});
 	assert.equal(applied, false);
 	assert.deepEqual(store.get(atoms.sessionMessagesCacheAtom)["anon-42"].messages, [{ id: "m1", role: "user", text: "hi" }]);
+});
+
+test("runtime binding event advances an activating send state to sending (ACP first-turn fix)", () => {
+	const atoms = loadAtoms();
+	const store = createStore();
+	// 首条消息发送：sendState 先置 activating（此时 runtime 尚未绑定）。
+	store.set(atoms.sessionSendStateByIdAtom, { "session-a": { status: "activating", requestId: "req-1" } });
+	// ACP 首回合：激活完成时先推 idle（绑定事件），回合派发后推 running。
+	store.set(atoms.applySessionRuntimeEventAtom, {
+		sessionId: "session-a",
+		agentId: "agent-a",
+		runtimeGeneration: 1,
+		sourceChannel: "agents:state",
+		payload: { id: "agent-a", status: "idle" },
+	});
+	let sendState = store.get(atoms.sessionSendStateBySessionIdAtomFamily("session-a"));
+	assert.equal(sendState.status, "sending");
+	// requestId 必须保留：结算路径 isCurrentRequest() 靠它识别本次发送。
+	assert.equal(sendState.requestId, "req-1");
+	// running 事件不再重复改写（已不是 activating）。
+	store.set(atoms.applySessionRuntimeEventAtom, {
+		sessionId: "session-a",
+		agentId: "agent-a",
+		runtimeGeneration: 1,
+		sourceChannel: "agents:state",
+		payload: { id: "agent-a", status: "running" },
+	});
+	sendState = store.get(atoms.sessionSendStateBySessionIdAtomFamily("session-a"));
+	assert.equal(sendState.status, "sending");
+	assert.equal(sendState.requestId, "req-1");
+	// 终态事件（closed）不推进 activating（激活失败由 IPC 拒绝结果结算为 error）。
+	store.set(atoms.sessionSendStateByIdAtom, { "session-b": { status: "activating", requestId: "req-2" } });
+	store.set(atoms.applySessionRuntimeEventAtom, {
+		sessionId: "session-b",
+		agentId: "agent-b",
+		runtimeGeneration: 1,
+		sourceChannel: "agents:state",
+		payload: { id: "agent-b", status: "closed" },
+	});
+	assert.equal(store.get(atoms.sessionSendStateBySessionIdAtomFamily("session-b")).status, "activating");
+	// 无发送中的会话不受影响。
+	assert.equal(store.get(atoms.sessionSendStateBySessionIdAtomFamily("session-c")).status, "idle");
 });
 
 test("routes runtime payloads into session-keyed messages and state", () => {

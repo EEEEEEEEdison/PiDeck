@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { AgentBackend, AgentTab, SessionEnvironment, SessionModelPreference, SessionRecord, SessionSource, SessionSummary } from "../../shared/types";
+import type { AgentBackend, AgentTab, SessionChannel, SessionEnvironment, SessionModelPreference, SessionRecord, SessionSource, SessionSummary } from "../../shared/types";
 import type { SessionProxyOverride } from "../../shared/types/session";
 import { getAppLogger } from "../logging/sharedLogger";
 import { renameWithRetry } from "../utils/fsRetry";
-import { buildSessionOriginKey, buildSummaryOriginKey, canonicalizeSessionPath, collectSessionSubtreeIds, getImportedSessionSourceId, getSessionEnvironment, isInSubagentArtifactsDir, looksLikeCodexSessionFileStem, looksLikePiSessionFileStem } from "../../shared/sessionIdentity";
+import { buildSessionOriginKey, buildSummaryOriginKey, canonicalizeSessionPath, collectSessionSubtreeIds, getImportedSessionSourceId, getSessionEnvironment, isInSubagentArtifactsDir, looksLikeCodexSessionFileStem, looksLikePiSessionFileStem, looksLikeToolMarkerTitle } from "../../shared/sessionIdentity";
 import { looksLikeExpandedRefBlockTitle } from "../../shared/expandedRefBlocks";
 import { createSessionModelPreference } from "../../shared/modelDisplayName";
 
@@ -41,6 +41,8 @@ export type SessionCatalogEntry = {
 	noSession?: boolean;
 	source: SessionSource;
 	environment: SessionEnvironment;
+	/** 外部连接渠道（微信/飞书桥建的会话）；缺省 = 桌面端创建，列表据此显示渠道标志。 */
+	channel?: SessionChannel;
 	/** 运行时后端；缺省 "pi"（旧 catalog 数据兼容）。 */
 	backend?: AgentBackend;
 	filePath?: string;
@@ -164,7 +166,10 @@ function findExistingAncestorDir(filePath: string, maxDepth = 6): string | undef
 /** 侧栏/Tab 展示用：pi 文件名时间戳不是会话名。 */
 function catalogDisplayTitle(title: string | undefined): string | undefined {
 	if (!title) return undefined;
-	return looksLikePiSessionFileStem(title) ? undefined : title;
+	// 工具/上下文代理的确认标记行（`[ACP] acp_status result`）不是任何人起的名字：
+	// 展示层一律当没有名字（Untitled），等权威名/自动标题来替换。
+	if (looksLikePiSessionFileStem(title) || looksLikeToolMarkerTitle(title)) return undefined;
+	return title;
 }
 
 /** 占位标题判定：catalog 无真实名称时落成 Untitled（pi 时间戳 stem 加载时也被清成它），
@@ -172,6 +177,8 @@ function catalogDisplayTitle(title: string | undefined): string | undefined {
 function isPlaceholderCatalogTitle(title: string | undefined): boolean {
 	if (!title) return true;
 	if (looksLikePiSessionFileStem(title)) return true;
+	// 标记脏名同样是占位名：值得再读一次头部，让权威名/首句兜底把它换掉。
+	if (looksLikeToolMarkerTitle(title)) return true;
 	// 未折叠的块原文标题（`<prompt_template …>` 等历史脏数据）同样是占位名：
 	// 允许首次补名把它换成用户可识别的标题，否则它会一直留在侧栏。
 	if (looksLikeExpandedRefBlockTitle(title)) return true;
@@ -184,6 +191,11 @@ function isPlaceholderCatalogTitle(title: string | undefined): boolean {
  * 但保留一次指纹修复机会（#266 存量被误锁的首句兜底，见 repairedLegacyFallbackTitle）。
  */
 function resolveTitleOrigin(entry: Pick<SessionCatalogEntry, "title" | "titleLocked" | "titleOrigin">): SessionTitleOrigin | undefined {
+	// 标记形态的脏名永远不算所有权：现场（2026-10-14）是扩展的旁路补全被第三方上下文代理接管，
+	// 一段 `[ACP] acp_status result` 被当成权威 session_info 名锁成 manual 终态，此后自动命名再也
+	// 修不掉，用户看到的就是「标题老是被插件改掉」。放在最前面（覆盖已持久化的 origin），
+	// 一次性放开 claimAutomaticTitle / isTitleLocked / scannedTitleOrigin 三条判定。
+	if (looksLikeToolMarkerTitle(entry.title)) return undefined;
 	if (entry.titleOrigin === "fallback" || entry.titleOrigin === "auto" || entry.titleOrigin === "manual" || entry.titleOrigin === "legacy") return entry.titleOrigin;
 	if (entry.titleLocked === false) return undefined;
 	// 缺 titleOrigin 只有 locked=true：存量条目来源未知，标成 legacy 等一次指纹修复机会（#266）。
@@ -595,6 +607,13 @@ export class SessionCatalog {
 		wslUser?: string;
 		importedSourceId?: string;
 		piSessionId?: string;
+		/** 会话来源渠道（微信/飞书等外部连接）：由 IM 桥在注册会话时写入，落库后侧栏显示渠道标志。 */
+		channel?: SessionChannel;
+		/**
+		 * 命令层权威标题（fork/clone/copy 专用）：命令刚把 (fork) 后缀名物理写进会话文件，
+		 * 授权本次注册把标题当作权威名落库（见下方覆盖规则）。
+		 */
+		titleAuthority?: "command";
 		/** fork/clone 产物注册时直接标记（parentSession 链接已由 pi 写入文件头，此处同源标记）。 */
 		forked?: boolean;
 		/** fork/clone 产物继承源会话的模型偏好与思考档位：子会话 JSONL 里没有新的 model_change，扫描回读拿不到，重启后模型选择器会空。 */
@@ -643,6 +662,7 @@ export class SessionCatalog {
 					wslUser: input.wslUser,
 					importedSourceId: input.importedSourceId,
 					piSessionId: input.piSessionId,
+					channel: input.channel,
 					forked: input.forked,
 					model: cloneModelPreference(input.model),
 					thinkingLevel: input.thinkingLevel,
@@ -661,6 +681,25 @@ export class SessionCatalog {
 				entry.wslUser = input.wslUser;
 				entry.importedSourceId = input.importedSourceId;
 				entry.piSessionId = input.piSessionId;
+				// 渠道标志只增补不清空：同一文件后续被普通扫描命中时不带渠道信息，
+				// 直接覆盖会让微信/飞书会话的标志在下次扫描后消失。
+				if (input.channel) entry.channel = input.channel;
+				// 命令层标题覆盖规则（fork/clone/copy）：命令刚刚把 (fork) 名写进会话文件，但扫描
+				// 可能抢在改名落盘前先索引了新文件，用正文兜底（首条消息，或复制进来的父会话名）
+				// 把标题锁成 fallback —— 而大文件只读头/尾窗口，rename 追加的 session_info 很快被
+				// 后续消息推出尾窗，fallback→权威名的升级再也触发不了，侧栏就永久停在首条消息
+				// 正文上、也看不到 (fork)（2026-10-11 复现）。
+				// 写入范围：未确认（undefined）或内容派生的猜测（fallback）才允许覆盖；用户改名
+				// （manual）/扩展自动名（auto）/存量 legacy 一律不动；占位名（Untitled/时间戳
+				// stem）不往条目里写。
+				if (input.titleAuthority === "command") {
+					const commandTitle = catalogDisplayTitle(input.title);
+					const currentOrigin = resolveTitleOrigin(entry);
+					if (commandTitle && !isPlaceholderCatalogTitle(commandTitle) && commandTitle !== entry.title && (currentOrigin === undefined || currentOrigin === "fallback")) {
+						entry.title = commandTitle;
+						assignTitleOrigin(entry, "manual");
+					}
+				}
 				// fork 标记只增补不清空：同一文件可能先以普通扫描注册、后经 fork 注册逻辑走到这里。
 				if (input.forked) entry.forked = true;
 				entry.status = "active";
@@ -690,6 +729,11 @@ export class SessionCatalog {
 		agentPreset?: string;
 		/** ACP 工具预选（AcpToolConfig.id）：backend=acp 草稿期选哪个 CLI。 */
 		acpToolId?: string;
+		/**
+		 * 外部连接渠道（微信/飞书桥建的会话）。与 titleOrigin 独立：渠道只决定标志，
+		 * 标题所有权由 titleOrigin 决定（IM 桥想要自动命名就不要传 titleOrigin）。
+		 */
+		channel?: SessionChannel;
 		/** 外部（dsh-web 等）会话导入：host 会话已存在，条目直接置 active（重启不清理）。 */
 		dshSessionId?: string;
 		/**
@@ -753,6 +797,7 @@ export class SessionCatalog {
 				titleOrigin: input.titleOrigin ?? (input.dshSessionId ? "manual" : undefined),
 				source: input.source ?? "pi",
 				environment: input.environment,
+				channel: input.channel,
 				backend: input.backend,
 				wslDistro: input.environment === "wsl" ? this.identityContext.wslDistro : undefined,
 				wslUser: input.environment === "wsl" ? this.identityContext.wslUser : undefined,
@@ -1400,7 +1445,14 @@ export class SessionCatalog {
 				if (item.includeTitle && result.name) {
 					// fromSessionInfo=false 是首条消息弱回退（#266）：所有权只能算 fallback，
 					// 缺省（旧 fetcher/未标记）按权威名处理，保持既有行为。
-					titles.set(item.originKey, { name: result.name, fromSessionInfo: result.nameFromSessionInfo !== false, fallbackName: result.fallbackName });
+					// 权威名本身是标记脏行（第三方上下文代理把它写进了 session_info）时不采信：
+					// 有弱兜底就用弱兜底（侧栏显示首句而不是日志，所有权仍算 fallback，可被扩展升级）；
+					// 连弱兜底都没有就干脆不登记，让条目保持占位标题等后续命名。
+					const junkMarkerName = result.nameFromSessionInfo !== false && looksLikeToolMarkerTitle(result.name);
+					const scannedName = junkMarkerName ? result.fallbackName : result.name;
+					if (scannedName) {
+						titles.set(item.originKey, { name: scannedName, fromSessionInfo: junkMarkerName ? false : result.nameFromSessionInfo !== false, fallbackName: result.fallbackName });
+					}
 				}
 				if (item.legacyProbe) {
 					// 只有真读到 session_info 才算权威名：另一个弱兜底不能用来「修复」弱兜底。
@@ -1439,6 +1491,7 @@ export class SessionCatalog {
 			noSession: entry.noSession,
 			source: summary?.source ?? entry.source,
 			environment: summary ? getSessionEnvironment(summary) : entry.environment,
+			channel: entry.channel,
 			backend: entry.backend,
 			filePath: summary?.filePath ?? entry.filePath,
 			wslDistro: entry.wslDistro,
@@ -1569,6 +1622,11 @@ export class SessionCatalog {
 		const entries = parsed.sessions.filter((entry): entry is SessionCatalogEntry => typeof entry?.id === "string" && typeof entry.projectId === "string" && typeof entry.title === "string" && (entry.environment === "native" || entry.environment === "wsl") && (entry.status === "draft" || entry.status === "active"));
 		if (entries.length !== parsed.sessions.length) {
 			throw new Error(`Session catalog contains invalid records: ${filePath}`);
+		}
+		// 渠道标志是渲染层显示标志的依据：只认白名单值，手改/未来版本的未知值按「无渠道」
+		// 处理，不把未知字符串传给 UI（与 titleOrigin 等字段的读盘清洗同一口径）。
+		for (const entry of entries) {
+			if (entry.channel !== "wechat" && entry.channel !== "feishu") delete entry.channel;
 		}
 		const dismissed = Array.isArray(parsed.dismissedDshSessionIds) ? parsed.dismissedDshSessionIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0) : [];
 		return {

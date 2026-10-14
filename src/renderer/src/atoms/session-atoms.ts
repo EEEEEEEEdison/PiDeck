@@ -1,4 +1,5 @@
 import { touchRecentSessionAtom, forgetRecentSessionAtom } from "./recent-session-atoms";
+import { sessionSendStateByIdAtom, setSessionSendStateAtom } from "./composer-atoms";
 import { atom } from "jotai";
 import type { Getter, Setter } from "jotai";
 import { atomFamily, selectAtom } from "jotai/utils";
@@ -1297,8 +1298,20 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 				createdAt: typeof payload.createdAt === "number" ? payload.createdAt : nextRuntime.createdAt,
 				compactionCount: typeof payload.compactionCount === "number" ? payload.compactionCount : nextRuntime.compactionCount,
 				noSession: payload.noSession === true || nextRuntime.noSession,
-				backend: payload.backend === "dsh" ? "dsh" : (nextRuntime.backend ?? "pi"),
+				// backend 只在运行时事件里透传（dsh=DSH host 会话；acp=ACP CLI 会话，tab 侧栏徽章与配对依赖它），
+				// 其余一律回落本地状态，防止旧事件把已知后端冲掉。
+				backend: payload.backend === "dsh" || payload.backend === "acp" ? payload.backend : (nextRuntime.backend ?? "pi"),
 			};
+		}
+		// ACP 首回合：sessions:prompt IPC 要等整个回合结束才返回，而 sendState 的 activating→sending
+		// 转换原本只有「发送前 runtime 已存在」和 IPC 结算两处——首条消息会全程卡在 activating
+		//（时间线显示启动中、composer 禁用；CLI 回合挂死时表现为永久启动中）。
+		// runtime 绑定事件把会话推进到 starting/idle/running 即证明激活完成，立即推进发送态为
+		// sending；后续进度由 runtime 状态事件表达，最终结算仍由 useSessionSend 的 IPC 结果负责。
+		// requestId 必须保留：结算路径 isCurrentRequest() 靠它识别本次发送。
+		const pendingSend = get(sessionSendStateByIdAtom)[event.sessionId];
+		if (pendingSend?.status === "activating" && (status === "starting" || status === "idle" || status === "running")) {
+			set(setSessionSendStateAtom, { sessionId: event.sessionId, state: { status: "sending", requestId: pendingSend.requestId } });
 		}
 	} else if (event.sourceChannel === "agents:runtime-state" && payload?.state) {
 		// 终态之后主进程仍可能有迟到的 runtime-state 事件回填旧 state；

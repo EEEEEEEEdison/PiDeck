@@ -88,19 +88,24 @@ test("Web timeline keeps tool cards and thinking rows frameless with identity co
 // 回归（第五批：回合聚合/过程组）：连续 assistant 消息聚合成单回合，过程内容折叠进
 // 「执行过程」容器，操作行只挂回合尾；chevron 方向修正为折叠 ChevronRight / 展开 ChevronDown。
 test("Web timeline groups assistant messages into collapsible execution folds", () => {
-	// 回合聚合纯函数存在且被主循环使用（不再逐条消息渲染）。
-	assert.match(webTimeline, /export function groupTimelineEntries[\s\S]*?messages: UIMessage\[\]/);
-	assert.match(webTimeline, /timelineEntries = useMemo\(\(\) => groupTimelineEntries\(messages\)/);
+	// 回合聚合纯函数存在于叶子模块（vm 沙箱可单测）且被主循环使用（不再逐条消息渲染）；
+	// 提升门控（流式不提升 final、liveTextId 常显）的行为回归在 webTimelineGrouping.test.mjs。
+	const webGrouping = readFileSync("src/renderer/src/web/webTimelineGrouping.ts", "utf8");
+	assert.match(webGrouping, /export function groupTimelineEntries[\s\S]*?messages: UIMessage\[\], options: \{ isStreaming\?: boolean \}/);
+	assert.match(webTimeline, /timelineEntries = useMemo\(\(\) => groupTimelineEntries\(messages, \{ isStreaming: props\.streaming \}\)/);
+	// 流式末段正文不提升：挂 liveTextId 容器外常显，容器内不双显（桌面 isComplete 门控）。
+	assert.match(webTimeline, /liveTextString !== undefined/);
+	assert.match(webTimeline, /segment\.id === turn\.liveTextId\) return null/);
 	assert.doesNotMatch(webTimeline, /<WebAssistantMessage /, "per-message rendering must be replaced by the turn component");
 	assert.match(webTimeline, /<WebAssistantTurn turn=\{entry\.turn\}/);
 	// chevron 方向：折叠态指向右（ChevronRight），展开态向下（ChevronDown），不再用 rotate-180 翻转 ChevronDown。
 	assert.doesNotMatch(webTimeline, /rotate-180/, "rotate-180 on ChevronDown renders the collapsed state pointing the wrong way");
 	assert.match(webTimeline, /processOpen \? [\s\S]*?<ChevronDown[\s\S]*?: [\s\S]*?<ChevronRight/, "collapsed state must point right, expanded must point down");
 	// 思考块合并：回合内多段 reasoning 合成一个 thinking 段（texts.join），不再被拆成多块。
-	assert.match(webTimeline, /kind: "thinking"[\s\S]*?texts\.push\(/, "adjacent reasoning parts must merge into one thinking segment");
-	// 段级流式状态：合并块的 running 以最后一个 reasoning part 的 state 为准，不再用整轮流式标志，
-	// 避免「回复已出、思考还在转圈」的错序观感（m00717）。
-	assert.match(webTimeline, /state === "streaming"/, "thinking segment running must come from part state");
+	// 分组逻辑已抽到 webTimelineGrouping 叶子模块，行为断言见 webTimelineGrouping.test.mjs；这里只锁「合并发生在分组层」。
+	assert.match(webGrouping, /kind: "thinking"[\s\S]*?texts\.push\(/, "adjacent reasoning parts must merge into one thinking segment");
+	// 段级流式状态：合并块的 running 以最后一个 reasoning part 的 state 为准，不再用整轮流式标志。
+	assert.match(webGrouping, /state === "streaming"/, "thinking segment running must come from part state");
 	assert.match(webTimeline, /running=\{segment\.running \?\? false\}/, "WebThinkingBlock must render per-segment running");
 	assert.match(webTimeline, /segment\.texts\.join\("\\n\\n"\)/);
 	// 操作行只挂回合尾：助手侧 web.msgCopy 只允许出现在 WebAssistantTurn 内（用户气泡另有自己的复制）。
@@ -210,4 +215,28 @@ test("Web backend switcher stays draft-only; historical sessions are locked", ()
 	assert.match(webChatApp, /const backendSwitchLocked = \(sessionId: string\) =>/);
 	assert.match(webChatApp, /backendLocked=\{activeSession \? Boolean\(activeRuntime\) \|\| backendSwitchLocked\(activeSession\.id\) : false\}/);
 	assert.match(webChatApp, /if \(activeSession && \(activeRuntime \|\| backendSwitchLocked\(activeSession\.id\)\)\) return;/);
+});
+
+// 回归（W2 渲染修复）：外部流跨轮保活——一轮 [DONE] 后不关连接，下一轮 start 帧到达时
+// 客户端自行重置合并器；服务端 keepAlive 换新翻译器。旧实现 settle 即 closeStream 且
+// effect 依赖不变永不重开，导致 Ask 续答等后续轮次全部丢帧（用户反馈「Ask 回答之后看不到渲染」）。
+test("External stream stays alive across turns; visibility gates the connection", () => {
+	const webExternalStream = readFileSync("src/renderer/src/web/webExternalStream.ts", "utf8");
+	const webEventStream = readFileSync("src/main/web/WebEventStream.ts", "utf8");
+	// 客户端：收尾不再关流（连接留给下一轮），关流只发生在 enabled/sessionId/可见性变化。
+	const settleBody = webExternalStream.slice(webExternalStream.indexOf("const settle = (withReload: boolean) => {"));
+	const settleFn = settleBody.slice(0, settleBody.indexOf("\n\t};"));
+	assert.ok(settleFn.length > 0, "settle function must exist");
+	assert.doesNotMatch(settleFn, /closeStream\(\)/, "settle must not close the stream (keep-alive across turns)");
+	assert.match(settleFn, /不关流/, "settle documents the keep-alive decision");
+	// 客户端：同一连接上新一轮的 start 帧重置合并器。
+	assert.match(webExternalStream, /frame\.type === "start" && merger\.isFinished\(\)/);
+	// 客户端：可见性作为开流条件（后台关、回前台重开），不再只关不开。
+	assert.match(webExternalStream, /!visible\) \{/);
+	assert.match(webExternalStream, /setVisible\(document\.visibilityState === "visible"\)/);
+	// 服务端：keepAlive 选项存在并在 [DONE] 后保留连接。
+	assert.match(webEventStream, /keepAlive\?: boolean/);
+	assert.match(webEventStream, /if \(entry\.keepAlive\) \{/);
+	// 渲染层：流式标志贯通分组（末段正文挂 liveTextId 常显、不提升为 finalText）。
+	assert.match(webTimeline, /groupTimelineEntries\(messages, \{ isStreaming: props\.streaming \}\)/);
 });

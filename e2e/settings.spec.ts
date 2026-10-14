@@ -1,4 +1,5 @@
 import { test, expect } from "./fixtures";
+import { openSettings } from "./open-session";
 
 /**
  * 设置弹窗：能从侧栏打开，开发设置 tab 含 Web 服务配置区。
@@ -9,7 +10,7 @@ import { test, expect } from "./fixtures";
 test("settings modal opens with web service dev section", async ({ window }) => {
 	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
 
-	await window.locator(".settings-icon").click();
+	await openSettings(window);
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible();
 
@@ -37,7 +38,7 @@ test("appearance theme switch applies data-appearance and bundled accent", async
 	await expect(window.locator("html")).toHaveAttribute("data-accent", "default");
 	await expect(window.locator("html")).toHaveAttribute("data-appearance", "classic-green");
 
-	await window.locator(".settings-icon").click();
+	await openSettings(window);
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible();
 

@@ -9,7 +9,7 @@ import type { TranslationKey } from "../../../i18n";
  * 14 个 tab 平铺不易扫读，按「基础 → 扩展集成 → 开发者工具 → 开发与维护」四个簇
  * 重排并在簇边界渲染一条分割线：
  * - 基础：常用 / 快捷键 / 通知 / 外观 / 代理（打开应用必看的全局项）
- * - 扩展集成：飞书机器人 / 桌面宠物 / 视觉桥 / 生图（外部能力与增值功能）
+ * - 扩展集成：外部连接（飞书/微信）/ 桌面宠物 / 视觉桥 / 生图（外部能力与增值功能）
  * - 开发者工具：局域网 Web 服务 / 外部编辑器 / Git
  * - 开发与维护：开发设置 / 用量统计 / 进程监控 / 缓存与日志 / 配置备份
  *
@@ -33,6 +33,7 @@ export const SETTINGS_TAB_LAYOUT: readonly SettingsTabLayoutEntry[] = [
 	{ id: "pet" },
 	{ id: "vision" },
 	{ id: "imagegen" },
+	{ id: "videogen" },
 	{ id: "acp" },
 	{ id: "hostplugins" },
 	{ id: "web", dividerBefore: true },
@@ -75,6 +76,7 @@ export const SETTINGS_TAB_LABEL_KEYS: Record<SettingsTabId, TranslationKey> = {
 	process: "settings.tabs.process",
 	vision: "settings.tabs.vision",
 	imagegen: "settings.tabs.imagegen",
+	videogen: "settings.tabs.videogen",
 	acp: "settings.tabs.acp",
 	hostplugins: "settings.tabs.hostplugins",
 };
@@ -93,7 +95,7 @@ export const SETTINGS_TAB_KEYWORDS: Record<SettingsTabId, readonly string[]> = {
 	editors: ["外部编辑器", "vscode", "编辑器", "editor", "ide"],
 	git: ["git", "版本控制", "提交", "commit", "分支", "branch"],
 	dev: ["开发者", "调试", "dev", "developer", "debug"],
-	im: ["飞书", "机器人", "im", "feishu", "lark", "消息"],
+	im: ["外部连接", "飞书", "微信", "机器人", "im", "feishu", "lark", "wechat", "消息"],
 	pet: ["桌面宠物", "宠物", "pet", "桌宠"],
 	notification: ["通知", "提醒", "消息提示", "notification", "toast"],
 	storage: ["缓存", "日志", "存储", "清理", "cache", "log", "storage"],
@@ -102,6 +104,7 @@ export const SETTINGS_TAB_KEYWORDS: Record<SettingsTabId, readonly string[]> = {
 	process: ["进程", "监控", "内存", "process", "monitor"],
 	vision: ["视觉", "图片识别", "视觉桥", "vision", "multimodal"],
 	imagegen: ["生图", "画图", "图片生成", "imagegen", "image"],
+	videogen: ["生视频", "视频生成", "videogen", "video"],
 	acp: ["acp", "agent", "cli", "工具", "外部 agent", "gemini", "kimi", "claude code", "opencode"],
 	hostplugins: ["插件", "宿主插件", "工作台插件", "plugin", "host plugin", "扩展安装", "pideck 插件"],
 };

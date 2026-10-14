@@ -329,6 +329,35 @@ function stripMarkdownEmphasis(text: string): string {
 	return result;
 }
 
+/**
+ * 工具/上下文代理确认标记形态的标题（与 src/shared/sessionIdentity.ts 的
+ * looksLikeToolMarkerTitle 同语义，扩展由 pi 用 `-e` 独立加载、不能 import 应用源码，
+ * 所以自带一份；两侧一致性由 tests/piDeckSessionTitle.test.mjs 的对照用例锁定）。
+ *
+ * 现场（2026-10-14）：本扩展的旁路补全被第三方上下文代理接管，返回的是代理自己注入的
+ * 确认标记行（原文形如 `📦 [ACP] acp_status result: …`）。EMOJI_RE 剥掉前导 emoji、
+ * 尾部冒号被清掉后，整段标记就剩一个「看起来像标题」的字符串，于是被写进 session_info。
+ */
+const MARKER_PICTOGRAPH_PREFIX = /^[\p{Extended_Pictographic}\uFE0F\u200D]+[ \t]*/u;
+/**
+ * 工具/上下文代理确认标记行的标题形态：`[全大写标签]` + 紧随的 ASCII 正文，且这段正文里
+ * 带日志分隔符（`_` 或 `:`，如 acp_status / FAILED:）。三条同时成立才算，防止误伤正常标题——
+ * `[WIP] 重构商店页`（中文正文）、`[Bug] fix the API timeouts`（标签非全大写、正文无分隔符）都不是标记行。
+ */
+const MARKER_TAG_TITLE = /^\[[A-Z][A-Z0-9_-]{1,11}\][ \t]+[\x20-\x7E]*[:_]/;
+
+export function looksLikeToolMarkerTitle(title: string): boolean {
+	const trimmed = title.replace(/\s+/g, " ").trim().replace(MARKER_PICTOGRAPH_PREFIX, "");
+	return MARKER_TAG_TITLE.test(trimmed);
+}
+
+/**
+ * 源侧形态黑名单：`[全大写标签]` + 纯 ASCII 正文整行（如 `[ACP] Compressed 3 ranges, saved 12k tokens`）。
+ * 代理标记行不一定带 `:`/`_`，所以比宿主侧的窄判定多认这一种形态；代价只是本轮不命名，
+ * 不参与所有权判定，也不会把用户自己起的标题（中文正文、混合大小写标签）清成占位名。
+ */
+const TITLE_SOURCE_MARKER_HEAD = /^\[[A-Z][A-Z0-9_-]{1,11}\][ \t]+[\x20-\x7E]+$/;
+
 /** 清洗模型输出，确保写入 session_info 的标题短、一行且不带模型格式噪声。 */
 export function cleanTitle(raw: string): string | undefined {
 	const lines = raw
@@ -363,6 +392,10 @@ export function cleanTitle(raw: string): string | undefined {
 	if (Array.from(title).length < 2) return undefined;
 	if (GENERIC_TITLES.has(title.toLocaleLowerCase())) return undefined;
 	if (/^(?:title|session|conversation|untitled|new)\s*(?:title|session)?$/i.test(title)) return undefined;
+	// 上下文代理接管的旁路响应是一段工具日志而不是标题：收下它就会永久污染 session_info。
+	// 源侧可以比宿主侧严格：这里拒绝只是「本轮不命名」，宿主侧（shared 的 looksLikeToolMarkerTitle）
+	// 还要多一个日志分隔符才认，因为误伤会把用户自己起的标题当占位名清掉。
+	if (looksLikeToolMarkerTitle(title) || TITLE_SOURCE_MARKER_HEAD.test(title)) return undefined;
 	return title;
 }
 

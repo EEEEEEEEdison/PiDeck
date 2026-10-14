@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
+import { createBunLayout } from "./helpers/bunLayout.mjs";
 
 /** Exercise the real update/exec path without launching pi or accessing the network. */
 function makeManager({ version = "0.80.0", installedVersion = "1.0.0", latestVersion = "1.0.0", executionError, stdout = "updated", stderr = "", checkError, hangUntilAbort = false, command } = {}) {
@@ -16,10 +17,14 @@ function makeManager({ version = "0.80.0", installedVersion = "1.0.0", latestVer
 			"node:child_process": {
 				execFile: (command, args, options, callback) => {
 					commands.push({ command, args: Array.from(args), options });
-					queueMicrotask(() => callback(executionError ?? null, stdout, stderr));
+					// bun 代跑前会先探测 `bun --version`（年龄门开关只在 bun ≥ 1.3 才存在），
+					// 其余一律返回用例给定的 stdout。
+					const output = Array.from(args).includes("--version") ? "1.3.5\n" : stdout;
+					queueMicrotask(() => callback(executionError ?? null, output, stderr));
 				},
 			},
 			"../pi/PiProcess": { PiProcess: { invalidateVersionCache: () => invalidations++ } },
+			"./PiProcess": { PiProcess: { invalidateVersionCache: () => invalidations++ } },
 			"../fs/trash": { trashPath: async () => {} },
 			"../logging/sharedLogger": { getAppLogger: () => ({ error: (...args) => logs.push(args) }) },
 			// 旧前缀形态代跑 npm 时用它解析 npm 命令；固定回 npm，避免读到本机真实 settings。
@@ -108,22 +113,39 @@ test("a timed-out version check reports an explicit timeout instead of a bare ab
 	// hangUntilAbort 的 net.fetch 桩永不 resolve，只有 signal 中止才 reject；
 	// 实现必须把无 reason 的 abort（"This operation was aborted"）转成明确超时文案。
 	const fixture = makeManager({ hangUntilAbort: true });
-	await assert.rejects(fixture.manager.fetchPiLatestVersion("1.0.0", 5), /timed out/i);
+	await assert.rejects(fixture.manager.selfUpdate.fetchLatestVersion("1.0.0", 5), /timed out/i);
 });
 
 test("bun 全局安装的 pi：PiDeck 代跑 bun install -g，不再调 pi update --self", async () => {
-	// 回归（2026-10 用户报障）：pi 在 Windows 上不支持 bun 自更新，`pi update --self`
-	// 直接报错退出；分派器必须按可执行路径形状识别 bun 布局并代跑 bun。
-	const { dirname, join } = await import("node:path");
-	const bunPi = process.platform === "win32" ? String.raw`C:\Users\tester\.bun\bin\pi.exe` : "/home/tester/.bun/bin/pi";
-	const expectedBun = join(dirname(bunPi), process.platform === "win32" ? "bun.exe" : "bun");
-	const fixture = makeManager({ version: "1.0.0", latestVersion: "1.1.0", installedVersion: "1.1.0", command: bunPi });
-	const result = await fixture.manager.updatePi();
-	assert.equal(result.updated, true);
-	assert.equal(fixture.commands.length, 1, "只代跑 bun，不调 pi update --self");
-	assert.equal(fixture.commands[0].args[0], expectedBun);
-	assert.deepEqual(fixture.commands[0].args.slice(1), ["install", "-g", "@earendil-works/pi-coding-agent@1.1.0"]);
-	assert.match(result.command, /bun install -g @earendil-works\/pi-coding-agent@1\.1\.0/);
+	// 回归（2026-10 用户报障）：pi 在 Windows 上不支持 bun 自更新，`pi update --self` 直接报错退出；
+	// 分派器必须按可执行路径形状识别 bun 布局并代跑 bun。用真实目录 fixture：bun 本体存在时才走绝对路径
+	//（不存在则回退裸 bun，那条分支由 extensionManager.test.mjs 单独钉住）。
+	const layout = await createBunLayout({ withBun: true });
+
+	try {
+		const fixture = makeManager({ version: "1.0.0", latestVersion: "1.1.0", installedVersion: "1.1.0", command: layout.piPath });
+		const result = await fixture.manager.updatePi();
+		assert.equal(result.updated, true);
+		assert.ok(
+			fixture.commands.every((entry) => !entry.args.includes("--self")),
+			"不调 pi update --self",
+		);
+		const install = fixture.commands.find((entry) => entry.args.includes("install"));
+		assert.ok(install, "必须代跑 bun install");
+		assert.equal(install.args[0], layout.bunPath);
+		// 参数与 pi 自身 bun 分支一致（探测到 bun 1.3.5 → 带上年龄门开关）。
+		assert.deepEqual(install.args.slice(1), ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@earendil-works/pi-coding-agent@1.1.0"]);
+		// 年龄门开关的「条件」必须真的来自探测：探测用什么 bun、跑没跑、是不是只代跑一次，全部钉住。
+		const probe = fixture.commands.find((entry) => entry.args.includes("--version"));
+		assert.ok(probe, "判断 bun ≥ 1.3 前必须先探测 --version");
+		assert.equal(probe.args[0], layout.bunPath);
+		assert.equal(fixture.commands.length, 2, "一次探测 + 一次安装");
+		// 安装根要作为 BUN_INSTALL 传给子进程（GUI 启动读不到 shell rc，不传会装进默认 ~/.bun）。
+		assert.equal(install.options.env.BUN_INSTALL, layout.installRoot);
+		assert.match(result.command, /bun install -g .*@earendil-works\/pi-coding-agent@1\.1\.0/);
+	} finally {
+		await layout.cleanup();
+	}
 });
 
 test("旧引导前缀副本：PiDeck 带 --prefix 代跑 npm，不再让 pi 自更新落空", async () => {
@@ -137,8 +159,8 @@ test("旧引导前缀副本：PiDeck 带 --prefix 代跑 npm，不再让 pi 自�
 	assert.equal(result.updated, true);
 	assert.equal(fixture.commands.length, 1, "只代跑 npm，不调 pi update --self");
 	assert.equal(fixture.commands[0].args[0], "npm");
-	assert.deepEqual(fixture.commands[0].args.slice(1), ["install", "-g", "@earendil-works/pi-coding-agent@1.1.0", "--prefix", expectedPrefix]);
-	assert.match(result.command, /npm install -g @earendil-works\/pi-coding-agent@1\.1\.0 --prefix <pi-runtime>/);
+	assert.deepEqual(fixture.commands[0].args.slice(1), ["install", "-g", "--ignore-scripts", "--min-release-age=0", "@earendil-works/pi-coding-agent@1.1.0", "--prefix", expectedPrefix]);
+	assert.match(result.command, /npm install -g .*@earendil-works\/pi-coding-agent@1\.1\.0 --prefix <pi-runtime>/);
 });
 
 test("zero exit status does not count as a self-update when the selected pi remains outdated", async () => {
@@ -149,8 +171,8 @@ test("zero exit status does not count as a self-update when the selected pi rema
 
 test("self-update uses one settings snapshot for checking, execution and verification", async () => {
 	const fixture = makeManager();
-	const fetchVersion = fixture.manager.fetchPiLatestVersion.bind(fixture.manager);
-	fixture.manager.fetchPiLatestVersion = async (...args) => {
+	const fetchVersion = fixture.manager.selfUpdate.fetchLatestVersion.bind(fixture.manager.selfUpdate);
+	fixture.manager.selfUpdate.fetchLatestVersion = async (...args) => {
 		fixture.changeSettings({ customPiPath: "/other/pi", wslEnabled: false });
 		return fetchVersion(...args);
 	};

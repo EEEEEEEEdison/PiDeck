@@ -25,6 +25,9 @@ import { BUILT_IN_EXTENSIONS_OVERLAY_DIR_NAME, invalidateVerifiedArtifactFileHas
  * `ctx.ui.gui` 都可靠可用（见桥 `docs/extension-points.md` §2.1）。
  *
  * `pi-deck-ext-points`（扩展点面板）紧随其后：它要用桥挂出来的 `ctx.gui`。
+ *
+ * ⚠️ 头两项（桥 + 扩展点面板）现列入 `HIDDEN_BUILT_IN_EXTENSIONS`：留在本表里是为了白名单校验
+ * 与启动迁移清理历史部署副本，但**不再参与 `-e` 注入**，也不上扩展页。
  */
 export const BUILT_IN_EXTENSIONS = [
 	"pi-deck-gui-bridge.ts",
@@ -61,6 +64,22 @@ export const DEFAULT_DISABLED_BUILT_IN_EXTENSIONS = ["pi-deck-gui-bridge.ts", "p
 /** 是否为默认关闭的内置扩展（opt-in 集合成员）。 */
 export function isDefaultDisabledBuiltInExtension(name: string): boolean {
 	return (DEFAULT_DISABLED_BUILT_IN_EXTENSIONS as readonly string[]).includes(basename(name.trim()));
+}
+
+/**
+ * 已隐藏的内置扩展：源文件与 `extensions-manifest.json` 条目照旧随包分发（热更新覆盖层要整份快照，
+ * 缺文件会报模块找不到），但**既不通过 `-e` 注入，也不在扩展页列表里出现**——对用户完全不可见。
+ *
+ * 与 `DEFAULT_DISABLED_BUILT_IN_EXTENSIONS`（默认关、用户可自行 opt-in）的区别：这一组连 opt-in 都不认，
+ * `enabledBuiltInExtensions` 里的历史残留无法让它们复活。
+ * 刻意**不走** `removedBuiltInExtensions` 禁用机制：那条路径会把名字写进用户设置，并参与 argv 白名单
+ * 计算（`resolveLoadableExtensionPaths`）与「启动时少注入一个扩展」的命令行参数链路，属于本需求不需要的副作用。
+ */
+export const HIDDEN_BUILT_IN_EXTENSIONS = ["pi-deck-gui-bridge.ts", "pi-deck-ext-points.ts"] as const;
+
+/** 是否为已隐藏的内置扩展（不注入、不上扩展页）。 */
+export function isHiddenBuiltInExtension(name: string): boolean {
+	return (HIDDEN_BUILT_IN_EXTENSIONS as readonly string[]).includes(basename(name.trim()));
 }
 
 export type BuiltInExtensionName = (typeof BUILT_IN_EXTENSIONS | typeof INTERNAL_BUILT_IN_EXTENSIONS)[number];
@@ -172,6 +191,7 @@ export function resolveBuiltInExtensionPath(extensionName: string, roots: BuiltI
 /**
  * 返回当前应注入到 pi RPC 的内置扩展绝对路径列表。
  * - removedBuiltInExtensions 中的用户扩展跳过；内部适配器始终保留
+ * - HIDDEN_BUILT_IN_EXTENSIONS 成员无条件跳过（opt-in 也不能复活，且不写任何禁用状态）
  * - DEFAULT_DISABLED_BUILT_IN_EXTENSIONS 成员默认不注入，除非出现在
  *   optInBuiltInExtensions（settings.enabledBuiltInExtensions，用户在扩展页显式开启）
  * - 源文件缺失的跳过（打日志由调用方处理）
@@ -183,6 +203,8 @@ export function listActiveBuiltInExtensionPaths(roots: BuiltInExtensionPathRoots
 	const paths: string[] = [];
 	for (const name of ALL_BUILT_IN_EXTENSIONS) {
 		if (name !== "pi-deck-shell-proxy.ts" && removed.has(name)) continue;
+		// 已隐藏的内置扩展：先于 opt-in 判定跳过，保证历史 opt-in 残留也无法把它注回命令行
+		if (isHiddenBuiltInExtension(name)) continue;
 		// 默认关闭的内置扩展：不在显式 opt-in 列表里就不注入（内部适配器不在该集合，不受影响）
 		if (isDefaultDisabledBuiltInExtension(name) && !optIn.has(name)) continue;
 		const fullPath = resolveBuiltInExtensionPath(name, roots);

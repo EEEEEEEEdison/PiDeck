@@ -29,7 +29,10 @@ export function sessionRecordToSummary(session: SessionRecord): SessionSummary |
 		messageCount: session.messageCount,
 		source: session.source,
 		backend: session.backend,
+		// 外部连接渠道：侧栏/标题栏据此显示微信、飞书标志（catalog 记录写入，扫描摘要不带）
+		channel: session.channel,
 		dshSessionId: session.dshSessionId,
+		acpToolId: session.acpToolId,
 		wsl: session.environment === "wsl" || session.wsl || undefined,
 		codexSessionId: session.codexSessionId,
 		codexThreadSource: session.codexThreadSource,

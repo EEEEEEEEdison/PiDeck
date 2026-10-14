@@ -135,6 +135,11 @@ export class AgentMessageProjector {
 						// stopReason（provider 归一化）：历史 JSONL 已持久化，
 						// 渲染层据此精确区分中间/最终回复（与 live 路径同源）。
 						const stopReason = typeof typed.stopReason === "string" && typed.stopReason ? typed.stopReason : undefined;
+						// 本条消息用的模型：pi 会话文件每条 assistant 消息自带 provider/model。
+						// 同一会话里用户会频繁换模型，时间线按条展示需要这个字段。
+						const modelProvider = typeof typed.provider === "string" ? typed.provider : "";
+						const modelId = typeof typed.model === "string" ? typed.model : "";
+						const model = modelProvider && modelId ? { provider: modelProvider, modelId } : undefined;
 						return [
 							{
 								id: `${agentId}-history-${currentEntryId ?? index}`,
@@ -150,6 +155,7 @@ export class AgentMessageProjector {
 								...(thinking ? { thinking } : {}),
 								...(images.length > 0 ? { images } : {}),
 								...(stopReason ? { stopReason } : {}),
+								...(model ? { model } : {}),
 							},
 						];
 					}

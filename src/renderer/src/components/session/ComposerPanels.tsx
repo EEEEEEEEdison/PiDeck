@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowUp, ChevronDown, ChevronUp, Clock, Copy, FileText, FolderOpen, ListOrdered, LoaderCircle, Pencil, Split, Square, X, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowUp, ChevronDown, ChevronUp, Clock, Copy, FileText, FolderOpen, ListOrdered, LoaderCircle, Pause, Pencil, Split, Square, X, XCircle } from "lucide-react";
 import { useId, type RefObject } from "react";
 import { useAtomValue, useStore } from "jotai";
 import type { ImageContent } from "../../../../shared/types";
@@ -21,6 +21,7 @@ import { sessionRecordByIdAtomFamily } from "../../atoms";
 import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms/session-selectors";
 import { useAskPanel } from "../../hooks/useAskPanel";
 import { sessionMessageCacheBySessionIdAtomFamily } from "../../atoms/session-atoms";
+import { queueDrainSuppressedByIdAtom } from "../../atoms/composer-atoms";
 import { isSessionRuntimeBusy } from "../../hooks/useSessionTimelineController";
 import { ExtensionWidgetCard } from "./ComposerParts";
 import { ComposerWidgetFrame, useComposerWidgetCollapsed } from "./ComposerWidgetLayout";
@@ -148,6 +149,8 @@ function QueuedPromptRow(props: {
 	showQueueGlyph: boolean;
 	sessionId: string;
 	agentBusy: boolean;
+	/** ACP 协议无 steer 通道：该后端的会话不提供「插入当前回合」切换（禁用 + 原因提示）。 */
+	steerSupported: boolean;
 	onRetract: (sessionId: string, prompt: QueuedPromptSnapshot) => void;
 	onDiscard: (sessionId: string, promptId: string) => void;
 	onChangeBehavior: (sessionId: string, promptId: string, behavior: "steer" | "followUp") => void;
@@ -166,7 +169,7 @@ function QueuedPromptRow(props: {
 	const canAsk = canChangeBehavior && Boolean((props.prompt.message || props.prompt.displayText).trim()) && !props.prompt.images?.length;
 	const retractTitle = [t("app.retractToInput"), !retractHint.disabled ? "" : retractHint.reason === "unknown" ? t("app.queuedRetractDisabledUnknown") : t("app.queuedRetractDisabledSending")].filter(Boolean).join("\n");
 	const discardTitle = discardHint.disabled ? [t("app.retractDiscard"), t("app.queuedDiscardDisabledSending")].filter(Boolean).join("\n") : t("app.retractDiscard");
-	const steerTitle = canChangeBehavior ? (props.agentBusy ? t("app.sendSteerTitle") : t("app.queuedSteerUnavailable")) : t("app.queuedBehaviorLocked");
+	const steerTitle = !props.steerSupported ? t("app.queuedSteerBackendUnsupported") : canChangeBehavior ? (props.agentBusy ? t("app.sendSteerTitle") : t("app.queuedSteerUnavailable")) : t("app.queuedBehaviorLocked");
 	const followUpTitle = canChangeBehavior ? t("app.sendFollowUpTitle") : t("app.queuedBehaviorLocked");
 	const askTitle = !canChangeBehavior ? t("app.queuedBehaviorLocked") : props.prompt.images?.length ? t("app.queuedAskUnsupported") : t("app.sendAskTitle");
 	const rowTitle = [t("app.queuedOrder", { n: props.index + 1 }), isSteer ? t("app.sendSteerTitle") : t("app.sendFollowUpTitle"), previewText, props.prompt.error, status === "unknown" ? t("app.queuedUnknown") : ""].filter(Boolean).join("\n");
@@ -187,7 +190,15 @@ function QueuedPromptRow(props: {
 				<span className="shrink-0 font-mono text-micro leading-none text-text-tertiary">{isSteer ? t("app.queuedBehaviorSteerShort") : t("app.queuedBehaviorFollowUpShort")}</span>
 			)}
 			<div className="inline-flex shrink-0 items-center gap-0.5">
-				<Button variant="ghost" size="icon-xs" className={`${actionClass}${isSteer ? " text-foreground" : ""}`} aria-label={t("app.sendSteerTitle")} title={steerTitle} disabled={!canChangeBehavior || !props.agentBusy} onClick={() => props.onChangeBehavior(props.sessionId, props.prompt.id, "steer")}>
+				<Button
+					variant="ghost"
+					size="icon-xs"
+					className={`${actionClass}${isSteer ? " text-foreground" : ""}`}
+					aria-label={t("app.sendSteerTitle")}
+					title={steerTitle}
+					disabled={!canChangeBehavior || !props.agentBusy || !props.steerSupported}
+					onClick={() => props.onChangeBehavior(props.sessionId, props.prompt.id, "steer")}
+				>
 					<ArrowUp size={14} strokeWidth={2} aria-hidden="true" />
 				</Button>
 				<Button variant="ghost" size="icon-xs" className={`${actionClass}${isFollowUp ? " text-foreground" : ""}`} aria-label={t("app.sendFollowUpTitle")} title={followUpTitle} disabled={!canChangeBehavior} onClick={() => props.onChangeBehavior(props.sessionId, props.prompt.id, "followUp")}>
@@ -243,9 +254,13 @@ export function QueuedPromptPanel(props: {
 	const { collapsed, toggleCollapsed } = useComposerWidgetCollapsed(`queue:${sessionId ?? "unbound"}`, true);
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId ?? ""));
 	const sessionRecord = useAtomValue(sessionRecordByIdAtomFamily(sessionId ?? ""));
+	// 停止响应后的队列抑制（toast 瞬时易逝）：面板常驻提示用户队列不会自动发送，需再发一条消息恢复。
+	const drainSuspended = useAtomValue(queueDrainSuppressedByIdAtom)[sessionId ?? ""] === true;
 	const askPanel = useAskPanel();
 	const store = useStore();
 	const agentBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state);
+	// runtime 优先于 record（record 未及回写时 runtime 已生效）；ACP 无 steer 通道。
+	const steerSupported = (runtime?.backend ?? sessionRecord?.backend) !== "acp";
 	if (!sessionId || !props.prompts.length) return null;
 
 	const multiple = props.prompts.length > 1;
@@ -288,10 +303,18 @@ export function QueuedPromptPanel(props: {
 					</span>
 				</button>
 			) : null}
+			{drainSuspended ? (
+				<div className="flex h-8 shrink-0 items-center gap-2 px-3" data-testid="queue-drain-suspended">
+					<Pause size={12} aria-hidden="true" className="shrink-0 text-text-tertiary" />
+					<span className="min-w-0 flex-1 truncate text-control leading-5 text-text-tertiary" title={t("app.queuedDrainSuspendedAfterStop")}>
+						{t("app.queueDrainPausedBadge")}
+					</span>
+				</div>
+			) : null}
 			{listVisible ? (
 				<ul id={listId} className={multiple ? "mb-1 flex max-h-[180px] flex-col overflow-y-auto overscroll-contain [contain:layout_paint]" : "flex flex-col"}>
 					{props.prompts.map((prompt, index) => (
-						<QueuedPromptRow key={prompt.id} prompt={prompt} index={index} showQueueGlyph={!multiple} sessionId={sessionId} agentBusy={agentBusy} onRetract={props.onRetract} onDiscard={props.onDiscard} onChangeBehavior={props.onChangeBehavior} onSendAsk={sendAsk} />
+						<QueuedPromptRow key={prompt.id} prompt={prompt} index={index} showQueueGlyph={!multiple} sessionId={sessionId} agentBusy={agentBusy} steerSupported={steerSupported} onRetract={props.onRetract} onDiscard={props.onDiscard} onChangeBehavior={props.onChangeBehavior} onSendAsk={sendAsk} />
 					))}
 				</ul>
 			) : null}

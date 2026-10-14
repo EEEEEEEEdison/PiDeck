@@ -25,12 +25,16 @@ export function isSettingsTabHidden(hiddenModules: readonly string[], tab: Setti
  *
  * 分割线规则：簇首项被隐藏时分割线顺延到该簇下一个可见项（否则整簇视觉上并进上一簇）；
  * 首个可见项永远不带分割线（顶部悬空一条线）。
+ *
+ * unavailableTabs 是比 hiddenModules 更硬的一层：本构建不存在的功能（如 stable 通道的 ACP）
+ * 深链/记忆值/临时显示都救不回来，直接从布局里消失。
  */
-export function resolveVisibleSettingsTabs(hiddenModules: readonly string[], revealedTabs: ReadonlySet<SettingsTabId>, layout: readonly SettingsTabLayoutEntry[] = SETTINGS_TAB_LAYOUT): SettingsTabLayoutEntry[] {
+export function resolveVisibleSettingsTabs(hiddenModules: readonly string[], revealedTabs: ReadonlySet<SettingsTabId>, layout: readonly SettingsTabLayoutEntry[] = SETTINGS_TAB_LAYOUT, unavailableTabs?: ReadonlySet<string>): SettingsTabLayoutEntry[] {
 	const visible: SettingsTabLayoutEntry[] = [];
 	let pendingDivider = false;
 	for (const entry of layout) {
 		if (entry.dividerBefore) pendingDivider = true;
+		if (unavailableTabs?.has(entry.id)) continue;
 		if (isSettingsTabHidden(hiddenModules, entry.id) && !revealedTabs.has(entry.id)) continue;
 		visible.push(pendingDivider && visible.length > 0 ? { id: entry.id, dividerBefore: true } : { id: entry.id });
 		pendingDivider = false;
@@ -41,9 +45,11 @@ export function resolveVisibleSettingsTabs(hiddenModules: readonly string[], rev
 /**
  * 弹窗打开时的初始 tab：深链优先（即使指向隐藏 tab，由调用方临时显示）；
  * 否则恢复上次记忆的 tab，但记忆值已被隐藏时回退「常用」——不能让用户打开设置就停在
- * 一个侧栏里找不到的页面。
+ * 一个侧栏里找不到的页面。unavailableTabs 同理且更硬：指向本构建不存在的 tab
+ * （如 stable 的 ACP）时深链按无深链处理（回退记忆值），记忆值也不可用时回退「常用」。
  */
-export function resolveInitialSettingsTab(focusTab: SettingsTabId | undefined, lastTab: SettingsTabId, hiddenModules: readonly string[]): SettingsTabId {
-	if (focusTab) return focusTab;
+export function resolveInitialSettingsTab(focusTab: SettingsTabId | undefined, lastTab: SettingsTabId, hiddenModules: readonly string[], unavailableTabs?: ReadonlySet<string>): SettingsTabId {
+	if (focusTab && !unavailableTabs?.has(focusTab)) return focusTab;
+	if (unavailableTabs?.has(lastTab)) return "common";
 	return isSettingsTabHidden(hiddenModules, lastTab) ? "common" : lastTab;
 }

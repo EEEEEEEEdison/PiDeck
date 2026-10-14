@@ -19,6 +19,7 @@ import {
 	sessionScrollAnchorByIdAtom,
 	setSessionMessageLoadStateAtom,
 	touchSessionMessagesAtom,
+	type SessionLoadState,
 	type SessionScrollAnchor,
 } from "../atoms";
 import type { MessageScrollerScrollApi } from "../components/agents/message-scroller";
@@ -192,7 +193,8 @@ export function isKnownEmptySessionRecord(record: Pick<SessionRecord, "status" |
 	// imagegen 会话历史独立存 ImageSessionStore，不体现在 filePath/messageCount：
 	// 已 promote 为 active 的生图会话不能判为空，否则重启后打开会跳过历史加载显示空引导页。
 	// 新建生图草稿仍为 draft，已在上面 return true，不受影响。
-	if (record.backend === "imagegen") return false;
+	// videogen 同理（VideoSessionStore 独立存储，任务占位也不在 filePath/messageCount 里）。
+	if (record.backend === "imagegen" || record.backend === "videogen") return false;
 	return true;
 }
 
@@ -260,6 +262,32 @@ export function shouldSkipInitialDiskLoad(cachedEntry: { source: "disk" | "runti
 	if (cachedEntry.messages.length > 0) return true;
 	// 空条目只有磁盘亲自返回的才算终态；runtime 空投影必须读盘核实。
 	return cachedEntry.source === "disk";
+}
+
+/**
+ * 挂载 effect 是否跳过初始磁盘读取（在 shouldSkipInitialDiskLoad 之上叠加「本次挂载已经
+ * 发起或拿到读盘结论」的去重条件）。
+ *
+ * 为什么需要去重：runtime 节流 flush 每次都重建缓存条目对象（cacheSessionMessagesAtom
+ * 整体重建 entry），effect 依赖 cachedEntry 会随之重跑；不去重就会对同一会话反复读盘。
+ *
+ * 但「会话挂载过一次」不等于「已经读过盘」，两者必须分开：
+ *   - loadState 仍是 undefined（本次挂载从未发起/拿到读盘结论）→ 不得跳过。缓存里的空
+ *     runtime 投影不是终态：重启换代把旧窗口替换成空数组后，只有读盘能把它推到
+ *     ready（历史/空会话）或 error（错误卡片），否则骨架屏永驻（Issue #350）。
+ *   - loadState 已 settled 且缓存条目被 8-LRU 整体淘汰（undefined）→ 不得跳过，重读自愈
+ *     （2026-12 回归修复）；条目仍在时以已有磁盘结论为准，不因 runtime 重写条目重读。
+ */
+export function shouldSkipInitialDiskRead(input: { previouslyLoaded: boolean; cachedEntry: { source: "disk" | "runtime"; messages: readonly unknown[] } | undefined; knownEmpty: boolean; loadStateStatus: SessionLoadState["status"] | undefined }): boolean {
+	if (shouldSkipInitialDiskLoad(input.cachedEntry, input.knownEmpty)) return true;
+	// 首次挂载到本会话：是否读盘完全由缓存权威性决定（与旧行为一致）。
+	if (!input.previouslyLoaded) return false;
+	// 从未读盘：空 runtime 投影必须核实（Issue #350 的核心）。
+	if (input.loadStateStatus === undefined) return false;
+	// 读盘在途：等结果，不重复发起（缓存条目可能已被 runtime flush 重建）。
+	if (input.loadStateStatus === "loading") return true;
+	// 已 settled：条目消失（LRU 淘汰）→ 重读自愈；条目仍在 → 以磁盘结论为准。
+	return input.cachedEntry !== undefined;
 }
 
 export function isLatestTimelineRunBusy(isAgentBusy: boolean, index: number, runCount: number): boolean {
@@ -501,16 +529,14 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		// 切回时重读盘闪骨架（历史行为 155338e5 引入，缓存结构重建时丢失）。
 		if (cachedEntry) touchMessages(sessionId);
 		const previouslyLoaded = lastLoadedSessionRef.current === sessionId;
-		// 已加载且缓存条目仍在 → 跳过（正常运行路径）。
-		// 缓存条目被 8-LRU 淘汰（条目变 undefined）时重新走磁盘加载自愈——
-		// 否则已挂载会话永久卡骨架屏（2026-12 回归修复）。
-		if (previouslyLoaded && cachedEntry) return;
 		if (!previouslyLoaded) lastLoadedSessionRef.current = sessionId;
+		// 跳过初始读盘 = 缓存已是权威终态（草稿/非空内容/磁盘空应答），或本次挂载已经发起/
+		// 拿到读盘结论（runtime 节流 flush 会不断重建缓存条目，不能每次都重读）。
 		// 切会话复用同一 hook 实例（solo 栏无 sessionId key）：已有**真实内容**时不要把
-		// loadState 打成 loading。但空 runtime 投影（主进程读盘失败下发 0 条）不是内容——
-		// 必须继续读盘核实，否则 loadState 永远停在 undefined，骨架屏永驻
-		// （2026-10-08 fork/copy 现场）。
-		if (shouldSkipInitialDiskLoad(cachedEntry, knownEmpty)) return;
+		// loadState 打成 loading；但空 runtime 投影（主进程读盘失败/重启换代下发 0 条、
+		// 或历史加载被取消）覆盖旧窗口后必须读盘核实，否则骨架屏永驻
+		// （2026-10-08 fork/copy 现场、Issue #350）。
+		if (shouldSkipInitialDiskRead({ previouslyLoaded, cachedEntry, knownEmpty, loadStateStatus })) return;
 
 		const sequence = ++nextLoadSequence;
 		trackLatestLoad(sessionId, sequence);
@@ -547,7 +573,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 					},
 				});
 			});
-	}, [options.sessionId, cachedEntry, knownEmpty]);
+	}, [options.sessionId, cachedEntry, knownEmpty, loadStateStatus]);
 
 	const reloadFromDisk = useCallback(async () => {
 		const sessionId = options.sessionId;

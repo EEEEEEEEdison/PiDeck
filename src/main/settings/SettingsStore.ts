@@ -2,6 +2,8 @@ import { app, BrowserWindow, Menu } from "electron";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile, copyFile } from "node:fs/promises";
 import { join } from "node:path";
+import { ipcChannels } from "../../shared/ipc";
+import { APP_DISPLAY_NAME_MAX_LENGTH, CUSTOM_LOGO_DATA_URL_MAX_LENGTH } from "../../shared/types/settings";
 import { DEFAULT_IMAGE_GEN_OUTPUT_FORMAT, DEFAULT_IMAGE_GEN_SIZE, DEFAULT_IMAGE_GEN_WATERMARK, parseImageGenOutputFormat, parseImageGenSize, parseImageGenWatermark } from "../../shared/imageGenParams";
 import {
 	createDefaultExternalEditorSettings,
@@ -138,6 +140,9 @@ const defaultSettings: AppSettings = {
 	accent: "default",
 	themeSkin: "classic-green",
 	logoStyle: "pi-tui",
+	// 自定义 logo 图（data URL）与显示名称：默认空 = 未启用，旧 settings.json 缺这两个键也走这里
+	logoCustomImage: "",
+	appDisplayName: "",
 	customThemeOverrides: {},
 	backgroundImage: "",
 	backgroundImageOpacity: 0.8,
@@ -192,6 +197,8 @@ Gitmoji 对应关系：
 	soundAlert: createDefaultSoundAlertSettings(),
 	// Ask 提问系统通知默认关闭：与通用通知解耦，避免非聚焦会话每次提问都打扰
 	askNotificationEnabled: false,
+	// 仅失焦提醒默认关闭：窗口在前台时照常提醒（用户抱怨「明明一直在看还一直响铃」时可自行打开）
+	alertOnlyWhenUnfocused: false,
 	// 人文关怀提醒默认开启：用户可在设置中随时关闭
 	agentCountReminderEnabled: true,
 	// 公告通知默认开启：新公告弹 toast 提醒（弹出时机另有忙碌延迟控制）
@@ -232,8 +239,8 @@ Gitmoji 对应关系：
 	// 内容区宽度默认 80%：轻微留白兼顾阅读舒适（1826px 面板 → 内容 1461px）；
 	// 分屏窄栏时由容器查询自动收敛，详见 foundation.css --chat-content-pct。
 	chatContentWidthPct: 80,
-	// 会话状态默认显示在右侧边栏下半区（另一选项：输入框上方折叠条）
-	sessionStatusPlacement: "sidebar",
+	// 会话状态默认显示在输入框上方折叠条（另一选项：右侧边栏下半区）
+	sessionStatusPlacement: "composer",
 	// 会话 Tab 最大宽度默认 104px：与旧硬编码 max-w-[104px] 一致，迁移零回归。
 	navigationMode: "tabs",
 	sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
@@ -315,6 +322,9 @@ Gitmoji 对应关系：
 
 	// ── 更新检测：检查永远自动；自动下载默认开启（v0.7.4 起取代 disableUpdateCheck）──
 	autoDownloadUpdates: true,
+	// pi-ai 模型目录自动更新：后台检查（与应用更新同一轮，2h 一次）发现新版本即自动拉取覆盖层，
+	// 默认开；与设置页手动「更新到最新」同一链路（manifest 校验 + 上一版备份，可还原）。
+	catalogAutoUpdate: true,
 	// 更新源：默认国内 AtomGit 源（第一首选）；用户可切 GitHub 官方源（见 updateSources.ts）
 	updateSource: "atomgit",
 	// 自定义镜像前缀（保留向下兼容字段），空串 = 未填
@@ -463,6 +473,10 @@ export class SettingsStore {
 			// 公告通知开关同理：旧配置缺字段回落 true（默认开启），脏数据（字符串等）也回落。
 			if (typeof this.settings.announcementNotificationEnabled !== "boolean") {
 				this.settings.announcementNotificationEnabled = defaultSettings.announcementNotificationEnabled;
+			}
+			// 仅失焦提醒开关同理：旧配置缺字段回落 false（默认照常提醒），脏数据也回落，避免真值误静音全程。
+			if (typeof this.settings.alertOnlyWhenUnfocused !== "boolean") {
+				this.settings.alertOnlyWhenUnfocused = defaultSettings.alertOnlyWhenUnfocused;
 			}
 			// toast 展示时长：旧 settings.json 缺字段或脏值（0/负数/超大/字符串）钳回默认，
 			// 避免升级后 toast 永不再消失或瞬间消失。
@@ -724,9 +738,24 @@ export class SettingsStore {
 		if ("sessionStatusPlacement" in safePatch && parseSessionStatusPlacement(safePatch.sessionStatusPlacement) !== safePatch.sessionStatusPlacement) {
 			delete safePatch.sessionStatusPlacement;
 		}
-		// Logo 风格只接受已知枚举，非法值保持原设置（缺省 classic 由默认值完成）。
-		if ("logoStyle" in safePatch && safePatch.logoStyle !== "classic" && safePatch.logoStyle !== "pi-tui") {
+		// Logo 风格只接受已知枚举，非法值保持原设置（缺省 pi-tui 由默认值完成）。
+		if ("logoStyle" in safePatch && safePatch.logoStyle !== "classic" && safePatch.logoStyle !== "pi-tui" && safePatch.logoStyle !== "custom") {
 			delete safePatch.logoStyle;
+		}
+		// 自定义 logo 图：只收内联 data:image/*（挡住本地路径/远程 URL），并封顶长度——base64 图会直接进设置文件。
+		if ("logoCustomImage" in safePatch) {
+			const logoImage = safePatch.logoCustomImage;
+			const usable = typeof logoImage === "string" && (logoImage === "" || (logoImage.startsWith("data:image/") && logoImage.length <= CUSTOM_LOGO_DATA_URL_MAX_LENGTH));
+			if (!usable) delete safePatch.logoCustomImage;
+		}
+		// 显示名称：非字符串/超长丢弃（保持原设置），两端空白裁掉；裁完为空 = 回落默认 PiDeck。
+		if ("appDisplayName" in safePatch) {
+			const displayName = safePatch.appDisplayName;
+			if (typeof displayName !== "string" || displayName.trim().length > APP_DISPLAY_NAME_MAX_LENGTH) {
+				delete safePatch.appDisplayName;
+			} else {
+				safePatch.appDisplayName = displayName.trim();
+			}
 		}
 		// 会话 Tab 最大宽度：非有限数值直接丢弃（保持原设置），合法值钳到 80–400。
 		if ("sessionTabMaxWidth" in safePatch) {
@@ -983,7 +1012,8 @@ export class SettingsStore {
 	notifyTitleBarChange(window: BrowserWindow | null) {
 		if (!window || window.isDestroyed()) return;
 		// Electron 的 frame 不能运行时无刷新切换；设置页保存后提示用户重启生效。
-		window.webContents.send("settings:apply-window", this.get());
+		// 通道必须走 ipcChannels 常量（与 preload 订阅同名，防重命名漂移）——守卫见 tests/ipcThreeWaySync.test.mjs。
+		window.webContents.send(ipcChannels.settingsApplyWindow, this.get());
 	}
 
 	/**

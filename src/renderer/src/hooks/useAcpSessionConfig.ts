@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { desktopApi } from "../desktopApi";
 import type { AcpSessionConfigOption } from "../../../shared/types/acp";
 
@@ -12,43 +12,52 @@ import type { AcpSessionConfigOption } from "../../../shared/types/acp";
  * 失败静默为 undefined(切换/关闭瞬间的 IPC 失败不值得打扰用户)。
  */
 export function useAcpSessionConfig(agentId: string | undefined, backend: string | undefined) {
-	const [options, setOptions] = useState<AcpSessionConfigOption[] | undefined>(undefined);
-
+	type Scope = { agentId: string; revision: number };
+	const scopeRef = useRef<Scope | undefined>(undefined);
+	const [snapshot, setSnapshot] = useState<{ scope: Scope; options?: AcpSessionConfigOption[] } | undefined>(undefined);
 	const enabled = backend === "acp" && typeof agentId === "string" && agentId.length > 0;
 
 	useEffect(() => {
-		if (!enabled || !agentId) {
-			setOptions(undefined);
-			return;
-		}
-		let cancelled = false;
+		setSnapshot(undefined);
+		if (!enabled || !agentId) return;
+		const scope: Scope = { agentId, revision: 0 };
+		scopeRef.current = scope;
+		// 先订阅再读取；读取中的更新具有更高 revision，旧枚举不能覆盖新通知。
+		const unsubscribe = desktopApi.acp.onSessionConfigChanged((event) => {
+			if (scopeRef.current !== scope || event.agentId !== agentId) return;
+			scope.revision += 1;
+			setSnapshot({ scope, options: event.options });
+		});
+		const revision = scope.revision;
 		void desktopApi.acp
 			.getSessionConfig(agentId)
 			.then((result) => {
-				if (!cancelled) setOptions(result ?? undefined);
+				if (scopeRef.current === scope && scope.revision === revision) setSnapshot({ scope, options: result ?? undefined });
 			})
 			.catch(() => undefined);
-		const unsubscribe = desktopApi.acp.onSessionConfigChanged((event) => {
-			if (event.agentId === agentId) setOptions(event.options);
-		});
 		return () => {
-			cancelled = true;
+			if (scopeRef.current === scope) scopeRef.current = undefined;
 			unsubscribe();
 		};
 	}, [enabled, agentId]);
 
 	const setOption = useCallback(
 		async (optionId: string, value: string | boolean) => {
-			if (!agentId) return;
+			const scope = scopeRef.current;
+			if (!enabled || !agentId || scope?.agentId !== agentId) return;
+			const revision = ++scope.revision;
 			try {
-				// 响应即 agent 回传的完整整表,直接整表替换(与事件同构)
-				setOptions(await desktopApi.acp.setSessionConfig(agentId, optionId, value));
+				const options = await desktopApi.acp.setSessionConfig(agentId, optionId, value);
+				// 复用的 Composer、runtime 重启、连续选择都可能让应答迟到。
+				if (scopeRef.current === scope && scope.revision === revision) setSnapshot({ scope, options });
 			} catch {
-				// agent 拒绝该值(枚举漂移)等失败:保持现状,用户在下拉里仍能看到当前值
+				// agent 拒绝该值时保留当前选项；切换/关闭后的 IPC 失败无需打扰用户。
 			}
 		},
-		[agentId],
+		[enabled, agentId],
 	);
 
+	// effect 清理在 paint 后执行；首帧也必须屏蔽旧 scope，不能露出 A 枚举 + B setter。
+	const options = enabled && snapshot?.scope === scopeRef.current && snapshot?.scope.agentId === agentId ? snapshot.options : undefined;
 	return { options, setOption };
 }

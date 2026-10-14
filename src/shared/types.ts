@@ -8,6 +8,7 @@ export * from "./types/agent";
 export * from "./types/session";
 export * from "./types/terminal";
 export * from "./types/feishu";
+export * from "./types/wechat";
 export * from "./types/settings";
 export * from "./types/remoteAccess";
 export * from "./types/git";

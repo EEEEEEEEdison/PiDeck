@@ -15,7 +15,7 @@
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { PI_AI_CATALOG_FILE_NAME, PI_AI_CATALOG_MANIFEST_FILE_NAME, invalidatePiAiCatalogIndex, parsePiAiCatalogArtifact, resolveBuiltinPiAiCatalogArtifactPaths } from "./piAiBuiltinCatalog";
+import { PI_AI_CATALOG_FILE_NAME, PI_AI_CATALOG_MANIFEST_FILE_NAME, PI_AI_CATALOG_SCHEMA_VERSION, invalidatePiAiCatalogIndex, parsePiAiCatalogArtifact, resolveBuiltinPiAiCatalogArtifactPaths } from "./piAiBuiltinCatalog";
 import { compareSemver, generatePiAiCatalogFromFiles, type CatalogSourceFile } from "./piAiCatalogGenerate";
 import type { CatalogArtifactSourceStatus, CatalogCheckResult, CatalogUpdateResult, CatalogUpdateStatus } from "../../shared/types/catalog";
 import type { UpdateSourceId } from "../../shared/types/settings";
@@ -81,6 +81,35 @@ function manifestPackageVersion(manifestRaw: string): string | null {
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * 从 manifest/catalog 原始文本读取 schemaVersion；非整数或解析失败返回 null。
+ * 解析不出来时不在这里判定，交由 parsePiAiCatalogArtifact 走原有 validation 分支。
+ */
+function artifactSchemaVersion(raw: string): number | null {
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		if (isRecord(parsed) && typeof parsed.schemaVersion === "number" && Number.isInteger(parsed.schemaVersion)) return parsed.schemaVersion;
+		return null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * 远端产物声明的 schemaVersion 与本地支持版本不一致时返回远端版本号，否则 null。
+ *
+ * 与 parsePiAiCatalogArtifact 的等值校验同口径：远端比本地新（读端还没放宽）或更旧
+ * 都算不兼容。单独成码是为了把「格式不兼容，请先升级 PiDeck」与「内容被篡改」区分开——
+ * 两者此前共用 validation，导致用户看到误导性的「仓库文件可能异常」（issue #343）。
+ */
+function incompatibleSchemaVersion(...raws: string[]): number | null {
+	for (const raw of raws) {
+		const version = artifactSchemaVersion(raw);
+		if (version !== null && version !== PI_AI_CATALOG_SCHEMA_VERSION) return version;
+	}
+	return null;
 }
 
 /** 目录来源摘要：校验通过才有值，否则 null（未生效）。直接传 catalog/manifest 文件路径。 */
@@ -193,9 +222,10 @@ export class PiAiCatalogUpdater {
 		if (branchResult.ok) return branchResult;
 		const npmResult = await this.tryUpdateFromNpmLatest();
 		if (npmResult) return npmResult;
-		// 两个源都失败时，分支源的校验失败（数据被篡改/损坏）比 network 更有诊断价值：
-		// 用户需要知道是数据坏了而不是网络不通（UI 有 catalogFailValidation 文案分支）。
-		if (branchResult.code === "validation") return branchResult;
+		// 两个源都失败时，分支源的校验/格式失败比 network 更有诊断价值：
+		// validation = 数据被篡改或损坏；incompatible = 远端格式高于当前版本，需先升级 PiDeck
+		// （UI 分别有 catalogFailValidation / catalogFailIncompatible 文案分支）。
+		if (branchResult.code === "validation" || branchResult.code === "incompatible") return branchResult;
 		return {
 			ok: false,
 			code: "network",
@@ -241,6 +271,15 @@ export class PiAiCatalogUpdater {
 				ok: false,
 				code: "network",
 				message: `catalog download failed from all sources: ${error instanceof Error ? error.message : String(error)}`,
+			};
+		}
+		// 先分辨「格式不兼容」与「内容被篡改」：两者都会让 parse 返回空，但用户该做的事完全不同。
+		const incompatible = incompatibleSchemaVersion(pair.manifestRaw, pair.catalogRaw);
+		if (incompatible !== null) {
+			return {
+				ok: false,
+				code: "incompatible",
+				message: `remote catalog schemaVersion ${incompatible} is not supported (expected ${PI_AI_CATALOG_SCHEMA_VERSION})`,
 			};
 		}
 		const entries = parsePiAiCatalogArtifact(pair.catalogRaw, pair.manifestRaw);
@@ -388,6 +427,17 @@ export class PiAiCatalogUpdater {
 				ok: false,
 				code: "network",
 				message: `catalog manifest download failed from all sources: ${error instanceof Error ? error.message : String(error)}`,
+			};
+		}
+		// 远端 manifest 的 schemaVersion 与本地支持版本不一致时，本次检查给不出可用结论
+		// （更新必然失败），单独归码；调用方会继续尝试 npm 回退源——那条路径在本机现场生成，
+		// 天然与当前版本兼容，所以格式不兼容时仍可能自愈。
+		const incompatible = incompatibleSchemaVersion(manifestRaw);
+		if (incompatible !== null) {
+			return {
+				ok: false,
+				code: "incompatible",
+				message: `remote manifest schemaVersion ${incompatible} is not supported (expected ${PI_AI_CATALOG_SCHEMA_VERSION})`,
 			};
 		}
 		const remoteVersion = manifestPackageVersion(manifestRaw);

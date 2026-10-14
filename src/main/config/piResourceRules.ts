@@ -11,6 +11,9 @@
  * 那是 PiResourceConfigService 的职责。
  */
 
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { minimatch } from "minimatch";
 import type { PiBuiltinExtension, PiResourceKind } from "../../shared/types/piResources";
 import { builtinSpecifier } from "../../shared/types/piResources";
@@ -211,7 +214,30 @@ export function projectResourceEnabled(options: { baseEntries?: readonly string[
 }
 
 /**
- * 精确规则匹配，**逐条对齐 pi 的 matchesAnyExactPattern**（真实冒烟校准，2026-10-01）：
+ * 对齐 pi 1.2 `normalizePath()` 的条目归一：展开 `~`（含 Windows `~\`）、`file://` 转本地路径。
+ *
+ * pi 1.2 起 `!~/skills/pdf` 这类条目会真正参与匹配（此前是惰性死条目，见上游 #10765），
+ * 投影必须同口径，否则展示的已加载 / 已停用会与 pi 实际行为不一致。
+ * 不在此处剥 `./`：pi 的通配分支（`matchesAnyPattern`）不剥，只有精确分支剥。
+ */
+function expandRulePath(entry: string): string {
+	let value = entry;
+	const home = homedir();
+	if (value === "~") value = home;
+	else if (value.startsWith("~/") || (process.platform === "win32" && value.startsWith("~\\"))) value = join(home, value.slice(2));
+	if (/^file:\/\//.test(value)) {
+		try {
+			value = fileURLToPath(value);
+		} catch {
+			// 非法 file:// 保持原值：投影只做展示，不能让坏条目抛错（pi 自己会报错）。
+		}
+	}
+	return value;
+}
+
+/**
+ * 精确规则匹配，**逐条对齐 pi 的 matchesAnyExactPattern**（真实冒烟校准，2026-10-01；
+ * 2026-10-13 补 pi 1.2 的 `~` / `file://` 归一）：
  * - 非技能文件：条目 === 相对路径（相对 baseDir）或 === 绝对路径才命中；
  * - SKILL.md：额外命中父目录的相对路径 / 绝对路径；
  * - **不匹配裸文件名或裸目录名**——此前实现多加了 basename 匹配，导致投影把
@@ -220,9 +246,11 @@ export function projectResourceEnabled(options: { baseEntries?: readonly string[
  */
 function patternMatches(value: string, pattern: string, baseDir: string): boolean {
 	const valuePosix = value.replace(/\\/g, "/");
-	const patternPosix = pattern.replace(/\\/g, "/");
-	// normalizeExactPattern：剥掉 "./" 前缀后转 POSIX（pi 同款）。
-	const normalized = patternPosix.startsWith("./") ? patternPosix.slice(2) : patternPosix;
+	// 与 pi 1.2 同口径：通配分支走 normalizePath（展开 `~` / `file://`，不剥 `./`），
+	// 精确分支走 normalizeExactPattern（先剥 `./` 再归一）。
+	const patternPosix = expandRulePath(pattern).replace(/\\/g, "/");
+	const stripped = pattern.startsWith("./") || pattern.startsWith(".\\") ? pattern.slice(2) : pattern;
+	const normalized = expandRulePath(stripped).replace(/\\/g, "/");
 	const baseDirPosix = baseDir.replace(/\\/g, "/").replace(/\/$/, "");
 	const rel = baseDirPosix ? relativePosix(baseDirPosix, valuePosix) : valuePosix;
 	const isSkillFile = (valuePosix.split("/").pop() ?? "") === "SKILL.md";

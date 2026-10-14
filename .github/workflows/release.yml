@@ -36,6 +36,7 @@ on:
         default: auto
         options:
           - auto
+          - v0.9.1
           - v0.9.0
           - v0.8.0
           - v0.7.9
@@ -45,7 +46,6 @@ on:
           - v0.7.5
           - v0.7.4
           - v0.7.3
-          - v0.7.2
       tag_custom:
         description: "自定义 tag（填了则覆盖上面的下拉选择；用于列表外的旧版本，如 v0.5.2）"
         required: false
@@ -211,18 +211,24 @@ jobs:
           - platform: linux
             name: Linux x64
             os: ubuntu-latest
+            native_arch: x64
             command: npm run build && npx electron-builder --linux AppImage deb tar.gz --x64 --publish never
             command_dev: npm run dist:linux:dev -- --publish never
             electron_mirror: https://npmmirror.com/mirrors/electron/
             electron_builder_binaries_mirror: https://npmmirror.com/mirrors/electron-builder-binaries/
           # Linux arm64 用原生 arm64 runner（ubuntu-24.04-arm，GA）：node-pty 等原生模块
           # 在 npm ci 时按 arm64 编译，避免 x64 runner 交叉构建把 x64 二进制打进 arm64 包。
+          # 注意：原生 runner 解决的是「架构对不对」，不解决「glibc 基线」——两个 Linux 目标
+          # 都由下方 "Rebuild native modules on the glibc 2.28 baseline" 步骤在 Debian 10
+          # 容器里重建 node-pty，否则 ubuntu-24.04(-arm) 的 glibc 2.39 会把 openpty/forkpty
+          # 绑到 GLIBC_2.34，统信 UOS 20 / 麒麟 V10（glibc 2.28）上无法 dlopen（#257）。
           # skip_yml=true：不上传本 job 生成的 latest-linux.yml——它只含 arm64 文件，
           # 会覆盖 x64 job 的 yml，导致 x64 用户升级时按文件名匹配拉到 arm64 包。
           # arm64 用户暂以手动下载为主（多架构合并 yml 需要单 job 构建，后续可再优化）。
           - platform: linux
             name: Linux arm64
             os: ubuntu-24.04-arm
+            native_arch: arm64
             command: npm run build && npx electron-builder --linux AppImage deb tar.gz --arm64 --publish never
             command_dev: npm run dist:linux:dev:arm64 -- --publish never
             electron_mirror: https://npmmirror.com/mirrors/electron/
@@ -245,6 +251,16 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Linux 原生模块的 glibc 基线：runner 自带的 glibc 2.39 会把 openpty/forkpty 绑到
+      # GLIBC_2.34（2.34 起这两个符号从 libutil.so.1 并入 libc.so.6），而国产发行版
+      # （统信 UOS 20 / 麒麟 V10）仍是 glibc 2.28，dlopen 失败后 node-pty 的 loader 会把它
+      # 报成 "Cannot find module './prebuilds/linux-arm64//pty.node'"，看起来像打包漏了原生
+      # 模块（#257 用户反馈的实际根因）。在 Debian 10 容器里重建后产物只依赖 glibc 2.28。
+      # 判定标准与本地复现命令见 scripts/linux-native-baseline.js。
+      - name: Rebuild native modules on the glibc 2.28 baseline
+        if: matrix.platform == 'linux'
+        run: node scripts/linux-native-baseline.js rebuild --platform linux-${{ matrix.native_arch }}
 
       # dev 通道：tag 所指 commit 的 package.json 未必已 bump 到 beta 版本号，而产物名与
       # latest*.yml 内版本取自 package.json——构建前写入，保证与 Release tag 一致
@@ -273,6 +289,32 @@ jobs:
           # so the matrix intentionally leaves Electron/builder mirrors empty for macOS.
           ELECTRON_MIRROR: ${{ matrix.electron_mirror }}
           ELECTRON_BUILDER_BINARIES_MIRROR: ${{ matrix.electron_builder_binaries_mirror }}
+
+      # 打包后门禁：真正发出去的 pty.node 必须是基线内产物。afterPack 只保证「产物在包里且
+      # 被 asarUnpack」，这里再核对 ELF 符号需求，防止重建步骤被跳过或 runner 升级后静默回退。
+      - name: Verify packaged native modules against the glibc 2.28 baseline
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          extract="$RUNNER_TEMP/pideck-deb"
+          rm -rf "$extract"
+          mkdir -p "$extract"
+          dpkg-deb -x release/*.deb "$extract"
+          unpacked="$(find "$extract" -maxdepth 4 -type d -name app.asar.unpacked | head -n 1)"
+          if [ -z "$unpacked" ]; then
+            echo "找不到 app.asar.unpacked，无法核对原生模块基线"
+            exit 1
+          fi
+          node scripts/linux-native-baseline.js scan --root "$unpacked" --fail
+
+      # 打包后门禁：mac 包必须带有效 bundle 签名。electron-builder 26.15 起找不到证书时
+      # 不再回退 ad-hoc（26.8.1 的 fallBackToAdhoc 已删除），本仓库又没有 Apple 证书，
+      # 签名会被静默跳过且 CI 全绿，产物在 Apple Silicon 上停在 _dyld_start 起不来（#347）。
+      - name: Verify macOS bundle signature
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: node scripts/verify-mac-signature.mjs
 
       # sidecar 跟应用版本 Release 一起发，不另开 tag（独立 tag 会抢走 GitHub /releases/latest）。
       # runner-node 只在 Windows job 打两个 arch；DSH runtime tgz 改由下方专用的

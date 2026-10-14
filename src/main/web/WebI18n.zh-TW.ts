@@ -2,6 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
+ * source-sha256: a8daa83a43d04c09adb243328e4f14c8834f03ad11ae4c938119ad488bc7b965（来自 src/main/web/WebI18n.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../shared/i18n/mainProcessCopy.zh-TW";
 import type { WebTranslationKey } from "./WebI18n";
@@ -51,8 +52,12 @@ export const webZhTW: Record<WebTranslationKey, string> = {
 	"webError.requestIdRequired": "requestId 不能為空",
 	"webError.messageRequired": "message 或 images 不能為空",
 	"webError.runtimeTargetRequired": "需要匹配當前會話的執行目標",
+	"webError.runtimeUnavailable": "會話執行時啟用不可用",
 	"webError.apiNotFound": "API 不存在",
 	"webError.internal": "Web 服務發生內部錯誤",
 	"webError.unauthorized": "缺少或錯誤的 Web 服務訪問令牌",
 	"webError.bodyTooLarge": "請求體超過大小限制",
+	"webError.invalidJson": "請求體不是合法的 JSON",
+	"web.toolRunning": " 執行中…",
+	"web.toolComplete": " 完成",
 };

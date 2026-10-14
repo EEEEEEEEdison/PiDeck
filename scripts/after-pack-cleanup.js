@@ -12,7 +12,7 @@ const { finished } = require("node:stream");
 const path = require("node:path");
 const asar = require("@electron/asar");
 const { dirSize, rmDir } = require("./after-pack-file-utils");
-const { assertNodePtyRuntimeArtifact, cleanNodePtyCompileTimeDirectories } = require("./after-pack-node-pty");
+const { assertLinuxNativeBaseline, assertNodePtyRuntimeArtifact, cleanNodePtyCompileTimeDirectories } = require("./after-pack-node-pty");
 const { patchSharpIndexCjs } = require("./patch-sharp-index");
 
 /** 要保留的语言包列表（小写，无 .pak 后缀） */
@@ -484,5 +484,8 @@ exports.default = async function (context) {
 	if (context.verifyNodePtyRuntime !== false && fs.existsSync(asarPath)) {
 		const artifact = assertNodePtyRuntimeArtifact(asarPath, CURRENT_PLATFORM);
 		console.log(`[afterPack] node-pty runtime: 已验证 ${artifact.relativePath}`);
+		// Linux 还要核对 glibc 基线：产物「在包里」不等于「目标发行版加载得起来」，见
+		// assertLinuxNativeBaseline 注释。
+		if (CURRENT_PLATFORM.startsWith("linux")) assertLinuxNativeBaseline(artifact.unpackedPath);
 	}
 };
