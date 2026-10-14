@@ -37,7 +37,7 @@ const sandbox = createTsSandbox({
 	globals: { Date },
 });
 const timeline = sandbox("src/renderer/src/hooks/useSessionTimelineController.ts");
-const { shouldSkipInitialDiskLoad } = timeline;
+const { shouldSkipInitialDiskLoad, shouldSkipInitialDiskRead } = timeline;
 
 test("empty runtime projection must still trigger the initial disk load", () => {
 	// 现场形态：runtime 全量 flush 了 0 条。跳过读盘 = 骨架屏永驻。
@@ -64,10 +64,33 @@ test("missing cache entry still loads from disk (LRU self-heal contract)", () =>
 	assert.equal(shouldSkipInitialDiskLoad(undefined, false), false);
 });
 
-test("controller effect must consult shouldSkipInitialDiskLoad", () => {
-	// 回归保险：effect 里不得再裸判断 `cachedEntry ||`（空 runtime 条目会误跳读盘）。
+test("runtime window replaced by an empty projection re-reads the disk when no read happened yet (Issue #350)", () => {
+	// Issue #350：重启换代后主进程下发未初始化的空窗口，替换掉会话此前显示的 runtime 内容。
+	// 本次挂载从未发起/拿到读盘结论（loadState 仍是 undefined）→ 必须读盘核实，否则骨架屏永驻。
+	assert.equal(shouldSkipInitialDiskRead({ previouslyLoaded: true, cachedEntry: { source: "runtime", messages: [] }, knownEmpty: false, loadStateStatus: undefined }), false);
+});
+
+test("initial disk read is not restarted for runtime cache churn (in-flight/settled dedupe)", () => {
+	// runtime 节流 flush 每次重建缓存条目对象 → effect 重跑，但不得重复发起初始读盘。
+	assert.equal(shouldSkipInitialDiskRead({ previouslyLoaded: true, cachedEntry: { source: "runtime", messages: [] }, knownEmpty: false, loadStateStatus: "loading" }), true);
+	assert.equal(shouldSkipInitialDiskRead({ previouslyLoaded: true, cachedEntry: { source: "runtime", messages: [] }, knownEmpty: false, loadStateStatus: "ready" }), true);
+});
+
+test("settled read with an evicted cache entry still self-heals (LRU)", () => {
+	assert.equal(shouldSkipInitialDiskRead({ previouslyLoaded: true, cachedEntry: undefined, knownEmpty: false, loadStateStatus: "ready" }), false);
+});
+
+test("first visit keeps the authority rules of shouldSkipInitialDiskLoad", () => {
+	assert.equal(shouldSkipInitialDiskRead({ previouslyLoaded: false, cachedEntry: { source: "runtime", messages: [] }, knownEmpty: false, loadStateStatus: undefined }), false);
+	assert.equal(shouldSkipInitialDiskRead({ previouslyLoaded: false, cachedEntry: { source: "disk", messages: [] }, knownEmpty: false, loadStateStatus: undefined }), true);
+	assert.equal(shouldSkipInitialDiskRead({ previouslyLoaded: false, cachedEntry: undefined, knownEmpty: true, loadStateStatus: undefined }), true);
+});
+
+test("controller effect must consult shouldSkipInitialDiskRead", () => {
+	// 回归保险：effect 里不得再裸判断 `previouslyLoaded && cachedEntry` 或 `cachedEntry ||`
+	// （空 runtime 条目覆盖旧窗口时会误跳读盘，Issue #350 / 2026-10-08 现场）。
 	const source = readFileSync("src/renderer/src/hooks/useSessionTimelineController.ts", "utf8");
-	assert.match(source, /shouldSkipInitialDiskLoad\(cachedEntry, knownEmpty\)/);
-	// 原裸判断必须消失（含空条目误判的根源）。
+	assert.match(source, /shouldSkipInitialDiskRead\(\{ previouslyLoaded, cachedEntry, knownEmpty, loadStateStatus \}\)/);
+	assert.doesNotMatch(source, /if \(previouslyLoaded && cachedEntry\) return/);
 	assert.doesNotMatch(source, /if \(cachedEntry \|\| knownEmpty\) return/);
 });
