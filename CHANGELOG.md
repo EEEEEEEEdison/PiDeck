@@ -1,3 +1,14 @@
+## v0.9.1 (2026-10-14)
+
+macOS packaging fix: the 0.9.0 macOS packages were shipped without a code signature and would not launch on Apple Silicon.
+
+### 🐛 Fixes
+- **macOS app would not launch on Apple Silicon** — The 0.9.0 macOS packages silently skipped code signing (since electron-builder 26.15 there is no automatic fallback to an ad-hoc signature when no certificate is found), so the app opened no window, the process stalled at `_dyld_start`, and no "Open Anyway" option was offered. Packaging now signs explicitly with an ad-hoc signature, and the release workflow verifies it — a missing signature fails the packaging job instead of shipping a broken build. Reinstalling this build fixes existing 0.9.0 installations; as a stopgap, the installed app can be re-signed manually (`codesign --force --deep --sign -`) to restore launching — repeat it after every reinstall.
+
+### 🙏 Acknowledgements
+
+Thanks to **yuta2** for pinpointing and validating the missing macOS signature on 0.9.0 and how to fix it (#347) 🎉
+
 ## v0.9.0 (2026-10-14)
 
 This is a major feature update: PiDeck expands beyond the pi / DSH workbench with ACP tools and an independent host-plugin system, alongside upgrades to remote access, the terminal and native session management.
