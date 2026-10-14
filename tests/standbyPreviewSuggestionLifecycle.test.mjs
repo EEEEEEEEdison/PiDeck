@@ -22,7 +22,7 @@ const CONTROLLER_PATH = "src/renderer/src/hooks/useSessionComposerController.ts"
 
 test("standby preview effect: gated modes reset the snapshot without fetching", () => {
 	const source = readFileSync(CONTROLLER_PATH, "utf8");
-	assert.match(source, /if \(isDshBackend \|\| runtime\?\.agentId \|\| !effectiveProjectId\) \{\s*setStandbyPreviewCommandSnapshot\(\{ projectId: effectiveProjectId, commands: \[\] \}\);\s*return;\s*\}/, "dsh/runtime-started/no-project must clear the snapshot and never hit the IPC");
+	assert.match(source, /if \(isDshBackend \|\| isAcpBackend \|\| runtime\?\.agentId \|\| !effectiveProjectId\) \{\s*setStandbyPreviewCommandSnapshot\(\{ projectId: effectiveProjectId, commands: \[\] \}\);\s*return;\s*\}/, "dsh/acp/runtime-started/no-project must clear the snapshot and never hit the IPC");
 });
 
 test("standby preview effect: snapshot resets before the fetch so a project switch never shows stale commands", () => {
@@ -39,7 +39,7 @@ test("standby preview effect: late or empty responses never land", () => {
 
 test("standby preview effect: re-runs when the runtime starts so the RPC command table takes over", () => {
 	const source = readFileSync(CONTROLLER_PATH, "utf8");
-	assert.match(source, /\}, \[effectiveProjectId, isDshBackend, runtime\?\.agentId\]\);/, "deps must include runtime?.agentId");
+	assert.match(source, /\}, \[effectiveProjectId, isAcpBackend, isDshBackend, runtime\?\.agentId\]\);/, "deps must include runtime?.agentId and the acp backend flag");
 });
 
 test("composer wiring: preview is projected per project and feeds the priority selector in order", () => {

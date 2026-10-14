@@ -19,6 +19,7 @@
  * - unknown update:忽略(前向兼容,规范允许新增 update 类型)。
  */
 import type { AcpContentBlock, AcpSessionUpdate, AcpStopReason, AcpToolCallUpdate } from "./acpProtocol";
+import { parseUsageUpdate, readAcpCommandsUpdate, readAcpSessionTitle, readAcpPlanEntries, toAcpCommands, type AcpSessionUsage } from "./acpWireTolerance";
 import { fallbackSessionTitle } from "../dsh/dshSessionTitleFold";
 import { defaultToolDetailTranslate, formatToolDetail } from "../../shared/formatToolDetail";
 import type { TodoItem } from "../../shared/types/todo";
@@ -73,37 +74,6 @@ let messageCounter = 0;
 function nextMessageId(): string {
 	messageCounter += 1;
 	return `acp-${Date.now().toString(36)}-${messageCounter.toString(36)}`;
-}
-
-/** usage_update 的宽容读取：字段位形在实现间不完全一致（顶层 or usage 子对象）。 */
-export type AcpSessionUsage = {
-	used?: number;
-	size?: number;
-	costAmount?: number;
-	costCurrency?: string;
-};
-
-function parseUsageUpdate(update: Record<string, unknown>): AcpSessionUsage | undefined {
-	const nested = typeof update.usage === "object" && update.usage !== null ? (update.usage as Record<string, unknown>) : undefined;
-	const pick = (key: string): unknown => update[key] ?? nested?.[key];
-	const used = pick("used");
-	const size = pick("size");
-	const costRaw = pick("cost");
-	let costAmount: number | undefined;
-	let costCurrency: string | undefined;
-	if (typeof costRaw === "object" && costRaw !== null) {
-		const cost = costRaw as Record<string, unknown>;
-		if (typeof cost.amount === "number" && Number.isFinite(cost.amount)) costAmount = cost.amount;
-		if (typeof cost.currency === "string" && cost.currency) costCurrency = cost.currency;
-	} else if (typeof costRaw === "number" && Number.isFinite(costRaw)) {
-		costAmount = costRaw;
-	}
-	const usage: AcpSessionUsage = {};
-	if (typeof used === "number" && Number.isFinite(used)) usage.used = used;
-	if (typeof size === "number" && Number.isFinite(size) && size > 0) usage.size = size;
-	if (costAmount !== undefined) usage.costAmount = costAmount;
-	if (costCurrency) usage.costCurrency = costCurrency;
-	return usage.used !== undefined || usage.size !== undefined || usage.costAmount !== undefined ? usage : undefined;
 }
 
 /** 工具正文解包标准 content；旧 CLI 的直接文本块也可读，不改变出站协议。 */
@@ -269,24 +239,15 @@ export function projectAcpSessionUpdate(state: AcpProjectionState, update: AcpSe
 			return next;
 		}
 		case "plan": {
-			const planUpdate = update as { entries?: Array<{ content?: unknown; status?: unknown }>; plan?: Array<{ content?: unknown; status?: unknown }> };
-			const entries = Array.isArray(planUpdate.entries) ? planUpdate.entries : Array.isArray(planUpdate.plan) ? planUpdate.plan : [];
-			next.todos = entries.map((entry) => ({
+			next.todos = readAcpPlanEntries(update as unknown as Record<string, unknown>).map((entry) => ({
 				content: typeof entry?.content === "string" ? entry.content : "",
 				status: entry?.status === "in_progress" ? "in_progress" : entry?.status === "completed" ? "completed" : "pending",
 			}));
 			return next;
 		}
 		case "available_commands_update": {
-			// 键名宽容读取:规范 SDK 是 commands,opencode 等实现实际发 availableCommands
-			//(2027-02 live smoke 实测;只读兼容不改出站协议);两者都缺则清空。
-			const commandsUpdate = update as { commands?: Array<{ name?: unknown; description?: unknown }>; availableCommands?: Array<{ name?: unknown; description?: unknown }> };
-			const raw = Array.isArray(commandsUpdate.commands) ? commandsUpdate.commands : Array.isArray(commandsUpdate.availableCommands) ? commandsUpdate.availableCommands : [];
-			next.commands = raw.map((command) => ({
-				name: typeof command?.name === "string" ? command.name : "",
-				...(typeof command?.description === "string" && command.description ? { description: command.description } : {}),
-				source: "acp",
-			}));
+			// 键名宽容读取（commands | availableCommands 双键）收拢在 acpWireTolerance；两者都缺则清空。
+			next.commands = toAcpCommands(readAcpCommandsUpdate(update as unknown as Record<string, unknown>));
 			return next;
 		}
 		case "usage_update": {
@@ -295,9 +256,8 @@ export function projectAcpSessionUpdate(state: AcpProjectionState, update: AcpSe
 			return next;
 		}
 		case "session_info_update": {
-			const infoUpdate = update as { title?: unknown; sessionTitle?: unknown };
-			const title = infoUpdate.title ?? infoUpdate.sessionTitle;
-			if (typeof title === "string" && title.trim()) next.title = title.trim();
+			const title = readAcpSessionTitle(update as unknown as Record<string, unknown>);
+			if (title) next.title = title;
 			return next;
 		}
 		case "current_mode_update":

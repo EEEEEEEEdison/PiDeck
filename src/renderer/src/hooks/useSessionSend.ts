@@ -248,7 +248,9 @@ export function useSessionSend(options: UseSessionSendOptions) {
 			const record = store.get(sessionRecordsAtom)[targetSessionId];
 			const liveRuntime = store.get(sessionRuntimeByIdAtom)[targetSessionId];
 			return deriveComposerAgentMode({
-				backend: record?.backend === "dsh" || liveRuntime?.backend === "dsh" ? "dsh" : "pi",
+				// 真实 backend 透传（不能折叠成 pi/dsh 二选一）：deriveComposerAgentMode 对
+				// acp 有「恒普通模式」守卫，折叠会把残留的 pi 会话 plan/goal 选择带进发送。
+				backend: record?.backend ?? liveRuntime?.backend,
 				localMode: store.get(sessionComposerModeByIdAtom)[targetSessionId],
 				planModeActive: liveRuntime?.state?.planModeActive === true,
 				goalPhase: liveRuntime?.state?.goal?.phase,

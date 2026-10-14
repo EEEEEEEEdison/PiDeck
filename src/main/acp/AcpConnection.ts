@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { StringDecoder } from "node:string_decoder";
 import type { AcpIncomingRequest, AcpJsonRpcMessage, AcpRpcId, AcpRpcNotification, AcpRpcRequest } from "./acpProtocol";
+import { LARGE_NDJSON_LINE_PARSE_CHARS, MAX_NDJSON_LINE_BYTES } from "../ndjsonLineGuards";
 
 /** JSON-RPC 调用被 agent 拒绝（响应带 error 对象）。 */
 export class AcpRpcError extends Error {
@@ -38,13 +39,12 @@ type PendingRequest = {
 export type AcpRequestHandler = (params: Record<string, unknown> | undefined, rpcId: AcpRpcId) => Promise<unknown> | unknown;
 
 /**
- * 超过该长度的 NDJSON 行延后到 setImmediate 再 JSON.parse（与 PiRpcClient 同因：
- * 大响应不该堵住主进程事件循环）。数值对齐 PiRpcClient 便于统一心智。
+ * 超过该长度的 NDJSON 行延后到 setImmediate 再 JSON.parse（共享护栏见 ndjsonLineGuards）。
  */
-export const LARGE_ACP_LINE_PARSE_CHARS = 256 * 1024;
+export const LARGE_ACP_LINE_PARSE_CHARS = LARGE_NDJSON_LINE_PARSE_CHARS;
 
-/** 单行缓冲硬上限：无 LF 的失控输出会让行缓冲无界增长（对齐 PiRpcClient）。 */
-export const MAX_ACP_LINE_BYTES = 8 * 1024 * 1024;
+/** 单行缓冲硬上限（共享护栏见 ndjsonLineGuards）。 */
+export const MAX_ACP_LINE_BYTES = MAX_NDJSON_LINE_BYTES;
 
 const JSON_RPC_INTERNAL_ERROR = -32603;
 

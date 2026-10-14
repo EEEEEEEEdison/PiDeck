@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
+import { LARGE_NDJSON_LINE_PARSE_CHARS, MAX_NDJSON_LINE_BYTES } from "../ndjsonLineGuards";
 
 export type RpcResponse = {
 	id?: string;
@@ -17,12 +18,11 @@ type PendingRequest = {
 	timer: NodeJS.Timeout;
 };
 
-/** 超过该长度的 JSONL 行延后到 setImmediate 再 JSON.parse，避免 stdout data 回调堵住主进程。 */
-export const LARGE_RPC_LINE_PARSE_CHARS = 256 * 1024;
+/** 超过该长度的 JSONL 行延后到 setImmediate 再 JSON.parse，避免 stdout data 回调堵住主进程。（共享护栏见 ndjsonLineGuards） */
+export const LARGE_RPC_LINE_PARSE_CHARS = LARGE_NDJSON_LINE_PARSE_CHARS;
 
-/** 单行缓冲硬上限：无 LF 的失控输出（启动脚本打印二进制/死循环刷屏）会让行缓冲无界增长。
- *  上限取大行解析阈值的 32 倍——正常 get_entries 响应远小于此，超限即视为 stdout 已被污染。 */
-export const MAX_RPC_LINE_BYTES = 8 * 1024 * 1024;
+/** 单行缓冲硬上限：无 LF 的失控输出（启动脚本打印二进制/死循环刷屏）会让行缓冲无界增长。（共享护栏见 ndjsonLineGuards） */
+export const MAX_RPC_LINE_BYTES = MAX_NDJSON_LINE_BYTES;
 
 export class PiRpcClient extends EventEmitter {
 	private buffer = "";

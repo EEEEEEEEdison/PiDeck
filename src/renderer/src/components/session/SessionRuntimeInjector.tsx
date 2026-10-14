@@ -176,13 +176,16 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
 	const activeAgent = runtime.activeAgentId ? services.agents.find((a) => a.id === runtime.activeAgentId) : undefined;
 	const canMutateActiveMessages = runtime.canMutateActiveMessages;
 	// 未启动时 activeAgent 为空，必须看 catalog backend，不能只看 live tab。
-	// DSH 本轮不做编辑/删除/重发（无 JSONL 离线改写）；
+	// DSH 本轮不做编辑/删除/重发（无 JSONL 离线改写）；ACP 历史存 agent 侧，
+	// PiDeck 无法重写（editMessage/deleteMessage/重发/fork/rewind 主进程均抛不支持），
+	// 入口不隐藏只会变成死胡同 toast。
 	// fork 对 pi/DSH 都始终提供入口：DSH 未激活时由 forkFromUserMessage 内部
 	// 先 activateRuntime 再 fork，不再用 canMutateActiveMessages 门控——否则打开
 	// 历史 DSH 会话（runtime 懒启动）时 fork 入口时有时无。
 	const isDshBackend = sessionRecord?.backend === "dsh" || activeAgent?.backend === "dsh";
-	const canEditOrDeleteMessages = !isDshBackend;
-	const canResend = !isDshBackend;
+	const isAcpBackend = sessionRecord?.backend === "acp" || activeAgent?.backend === "acp";
+	const canEditOrDeleteMessages = !isDshBackend && !isAcpBackend;
+	const canResend = !isDshBackend && !isAcpBackend;
 
 	// ── 回退到此消息：解析最近检查点 + 确认回退（仅 pi 后端注入入口）──
 	const [rewindConfirm, setRewindConfirm] = React.useState<RewindCheckpointSummary | null>(null);
@@ -266,8 +269,8 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
 					onEditMessage={canEditOrDeleteMessages ? services.editMessage : undefined}
 					onDeleteMessage={canEditOrDeleteMessages ? services.deleteMessage : undefined}
 					onRemoveMessageImage={!services.isLanWeb && (!sessionRecord?.backend || sessionRecord.backend === "pi") && sessionRecord?.filePath && services.removeMessageImage ? (message, index) => services.removeMessageImage?.(currentSessionId, message, index) : undefined}
-					onForkMessage={services.forkFromUserMessage}
-					onRewindToMessage={isDshBackend ? undefined : handleRewindToMessage}
+					onForkMessage={isAcpBackend ? undefined : services.forkFromUserMessage}
+					onRewindToMessage={isDshBackend || isAcpBackend ? undefined : handleRewindToMessage}
 					forkingMessageId={services.forkingMessageId}
 					onToast={(message: string) => services.showToast(message)}
 					onQuickPrompt={(message) => services.insertQuickPrompt(currentSessionId, message)}
