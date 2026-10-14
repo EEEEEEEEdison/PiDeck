@@ -8,6 +8,7 @@
 
 import { ipcMain, type BrowserWindow } from "electron";
 import { ipcChannels } from "../../shared/ipc";
+import type { WeChatSettingsSnapshot } from "../../shared/types";
 import { getAppLogger } from "../logging/sharedLogger";
 import type { WeChatService } from "../wechat/WeChatService";
 
@@ -49,7 +50,17 @@ async function guard<T>(action: string, run: () => Promise<T> | T): Promise<T | 
 export function registerWeChatIpc(deps: WeChatIpcDeps): void {
 	const { wechatService } = deps;
 
-	ipcMain.handle(ipcChannels.wechatGetSettings, () => guard("get-settings", () => ({ settings: wechatService.getSettings(), status: wechatService.getStatus(), bindings: wechatService.getBindings(), projects: deps.getProjects() })));
+	// 信封必须带 ok: true：渲染层按 WeChatIpcResult 判定是否应用快照，漏掉会让设置页永远停在
+	// 「未登录 + 开关关闭」，扫码成功后点开关也看不出变化。显式标注返回类型让契约在 typecheck 阶段暴露。
+	ipcMain.handle(ipcChannels.wechatGetSettings, () =>
+		guard<{ ok: true } & WeChatSettingsSnapshot>("get-settings", () => ({
+			ok: true,
+			settings: wechatService.getSettings(),
+			status: wechatService.getStatus(),
+			bindings: wechatService.getBindings(),
+			projects: deps.getProjects(),
+		})),
+	);
 
 	ipcMain.handle(ipcChannels.wechatGetStatus, () => guard("get-status", () => wechatService.getStatus()));
 

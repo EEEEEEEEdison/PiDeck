@@ -21,7 +21,7 @@ async function openConfigurationManagement(window: Page) {
  * - 扩展：已安装扩展列表渲染（不依赖网络/pi），IPC 失败不白屏
  * - 技能：SkillsTab 空态/列表渲染
  * - 提示词：PromptsTab 渲染
- * - 飞书机器人：ImTab 连接表单渲染（#113 手测 #15 的 UI 链路部分，真机收发仍需手动）
+ * - 外部连接：「外部连接」tab 的飞书机器人连接表单渲染（#113 手测 #15 的 UI 链路部分，真机收发仍需手动）
  *
  * 注意：e2e 无真实 pi/网络，这里只验证 UI 链路与错误兜底，不验证真实安装/开关。
  */
@@ -81,7 +81,7 @@ test("config modal: feishu bot section renders connect form (UI smoke)", async (
 
 	const modal = await openSettingsDialog(window);
 
-	await modal.getByRole("tab", { name: "飞书机器人", exact: true }).click();
+	await modal.getByRole("tab", { name: "外部连接", exact: true }).click();
 	// 空态先渲染（无 Bot 配置），再点「添加 Bot」展开表单
 	await expect(modal.getByText("暂无 Bot 配置")).toBeVisible({ timeout: 10_000 });
 	await modal.getByRole("button", { name: "添加 Bot" }).click();

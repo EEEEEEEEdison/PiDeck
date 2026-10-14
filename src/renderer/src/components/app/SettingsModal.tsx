@@ -886,7 +886,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 								</TabsContent>
 							)}
 
-							{/* ── 外部连接 tab（飞书机器人，由 Pi 管理界面迁入） ── */}
+							{/* ── 外部连接 tab（飞书 / 微信，由 Pi 管理界面迁入） ── */}
 							{activeTab === "im" && (
 								<TabsContent value="im" className="settings-panel min-w-0">
 									<Suspense fallback={<SettingsTabLoading />}>

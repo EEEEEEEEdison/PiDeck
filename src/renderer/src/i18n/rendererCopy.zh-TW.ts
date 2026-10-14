@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 6d00741f4ddcc7e57827f57e67eb91cf9aef8eb93c643529b6a2575760c1a8a6（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: a0fd482168d8b262e68a3508732d68fc73e1bed7eed0e888cf3ac58ed064a857（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4065,7 +4065,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.tabs.editors": "外部編輯器",
 	"settings.tabs.git": "Git",
 	"settings.tabs.dev": "開發設定",
-	"settings.tabs.im": "飛書機器人",
+	"settings.tabs.im": "外部連線",
 	"settings.tabs.devDesc": "環境、版本和除錯",
 	"settings.tabs.pet": "桌面寵物",
 	"settings.tabs.petDesc": "在桌面懸浮顯示 Agent 狀態",
@@ -4894,7 +4894,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.modules.dshDesc": "配置管理的 DSH 分頁、輸入框的 DSH 後端選項",
 	"settings.modules.composerModes": "模式選擇器",
 	"settings.modules.composerModesDesc": "輸入框底欄的普通/目標/規劃模式切換入口（進行中的特殊模式仍可退出）",
-	"settings.modules.imDesc": "飛書機器人設定頁",
+	"settings.modules.imDesc": "飛書 / 微信等外部連線設定頁",
 	"settings.modules.petDesc": "桌面寵物設定頁",
 	"settings.modules.visionDesc": "視覺橋設定頁",
 	"settings.modules.imagegenDesc": "生圖設定頁、輸入框的生圖入口",
@@ -5424,7 +5424,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"agent.tips.sessionMenu": "會話標籤的「更多操作」選單可匯出 HTML、複製會話或開啟會話檔案",
 	"agent.tips.composerModes": "底欄左側可切換計劃、目標、生圖等模式",
 	"agent.tips.multiSelect": "懸停自己的訊息可多選分享為文本 / Markdown / 圖片",
-	"agent.tips.settingsExtras": "設定裡有用量統計、桌面寵物、Web 服務與飛書機器人",
+	"agent.tips.settingsExtras": "設定裡有用量統計、桌面寵物、Web 服務與外部連線（飛書 / 微信）",
 	"agent.tips.sessionStatusPlacement": "設定 →「外觀設定」的會話狀態位置能把待辦、修改檔案、子代理挪到右側邊欄",
 	"agent.tips.moduleVisibility": "設定 →「外觀設定」裡能關掉不用的模組與輸入框入口，只隱藏介面、不動配置和快捷鍵",
 	"agent.tips.pasteAttach": "輸入框可以直接貼上圖片、拖入檔案當附件",

@@ -1,9 +1,9 @@
 import { Button } from "../../ui-shadcn/button";
 import { Input } from "../../ui-shadcn/input";
 /**
- * ImTab — 外部链接配置选项卡
+ * ImTab — 外部连接配置选项卡
  *
- * 在 PiDeck 设置中集中管理外部 IM/Bot 连接（由 Pi 管理界面迁入）（当前支持飞书/Lark）。
+ * 在 PiDeck 设置中集中管理外部 IM/Bot 连接（由 Pi 管理界面迁入）：飞书/Lark 与微信（iLink）。
  * 样式统一使用配置页的设计 tokens。
  */
 
@@ -15,6 +15,7 @@ import type { FeishuBotConfig, FeishuBridgeStatus, FeishuChatBinding, FeishuTest
 import { formatI18nDateTime, t } from "../../../i18n";
 import { WeChatSection } from "./WeChatSection";
 import { Label } from "../../ui-shadcn/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui-shadcn/tabs";
 
 type Props = {
 	onSave?: () => void;
@@ -847,21 +848,21 @@ export function ImTab() {
 	const [platform, setPlatform] = useState<"feishu" | "wechat">("feishu");
 	return (
 		<div className="flex flex-col gap-4">
-			<div className="flex gap-1.5" role="tablist" aria-label={t("config.im.platformLabel")}>
-				<Button variant={platform === "feishu" ? "secondary" : "ghost"} size="sm" role="tab" aria-selected={platform === "feishu"} onClick={() => setPlatform("feishu")}>
-					{t("config.im.platformFeishu")}
-				</Button>
-				<Button variant={platform === "wechat" ? "secondary" : "ghost"} size="sm" role="tab" aria-selected={platform === "wechat"} onClick={() => setPlatform("wechat")}>
-					{t("config.im.platformWechat")}
-				</Button>
-			</div>
-			{platform === "wechat" ? (
-				<div className="config-im-tab">
-					<WeChatSection />
-				</div>
-			) : (
-				<FeishuPane />
-			)}
+			{/* 平台切换用共享 Tabs 分组控件：容器包住两个 tab，选中项靠 data-state 高亮 */}
+			<Tabs value={platform} onValueChange={(value) => setPlatform(value === "wechat" ? "wechat" : "feishu")} className="gap-4">
+				<TabsList className="w-auto self-start" aria-label={t("config.im.platformLabel")}>
+					<TabsTrigger value="feishu">{t("config.im.platformFeishu")}</TabsTrigger>
+					<TabsTrigger value="wechat">{t("config.im.platformWechat")}</TabsTrigger>
+				</TabsList>
+				<TabsContent value="feishu">
+					<FeishuPane />
+				</TabsContent>
+				<TabsContent value="wechat">
+					<div className="config-im-tab">
+						<WeChatSection />
+					</div>
+				</TabsContent>
+			</Tabs>
 		</div>
 	);
 }

@@ -101,7 +101,12 @@ export function WeChatSection() {
 		const offStatus = api.onStatus?.((status) => {
 			setSnapshot((prev) => (prev ? { ...prev, status } : prev));
 		});
-		const offLogin = api.onLoginState?.(setLoginState);
+		const offLogin = api.onLoginState?.((state) => {
+			setLoginState(state);
+			// 扫码确认后主进程已把账号落盘并把开关置为启用，快照不重拉会让界面继续显示
+			// 「尚未登录 + 开关关闭」，用户会以为扫码没生效。
+			if (state.phase === "confirmed") void loadSnapshot();
+		});
 		const offBindings = api.onBindingsChanged?.((bindings) => {
 			setSnapshot((prev) => (prev ? { ...prev, bindings } : prev));
 		});
@@ -110,7 +115,7 @@ export function WeChatSection() {
 			offLogin?.();
 			offBindings?.();
 		};
-	}, [api]);
+	}, [api, loadSnapshot]);
 
 	// 初始登录阶段也要拉一次：事件只覆盖「变化」，刷新页面后没人会再推。
 	useEffect(() => {
