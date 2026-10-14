@@ -52,6 +52,8 @@ export type SessionRuntimeViewState = {
 	title?: string;
 	piSessionId?: string;
 	sessionPath?: string;
+	/** PiDeck 会话身份（agents:state / sessions:runtime 事件与 listRuntimes 透传）：侧栏 ACP「agent↔会话」配对用，缺它会把同一会话画成两行。 */
+	deckSessionId?: string;
 	createdAt?: number;
 	compactionCount?: number;
 	noSession?: boolean;
@@ -483,6 +485,8 @@ export const replaceSessionRuntimesAtom = atom(null, (get, set, runtimes: Sessio
 			createdAt: runtime.createdAt,
 			compactionCount: runtime.compactionCount,
 			noSession: runtime.noSession,
+			// listRuntimes 快照可能落后于事件流（或旧主进程未带此字段）：不冲掉已知身份。
+			deckSessionId: runtime.deckSessionId ?? existing?.deckSessionId,
 		};
 	}
 	set(sessionRuntimeByIdAtom, next);
@@ -1295,6 +1299,7 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 				title: typeof payload.title === "string" ? payload.title : nextRuntime.title,
 				piSessionId: typeof payload.sessionId === "string" ? payload.sessionId : nextRuntime.piSessionId,
 				sessionPath: typeof payload.sessionPath === "string" ? payload.sessionPath : nextRuntime.sessionPath,
+				deckSessionId: typeof payload.deckSessionId === "string" ? payload.deckSessionId : nextRuntime.deckSessionId,
 				createdAt: typeof payload.createdAt === "number" ? payload.createdAt : nextRuntime.createdAt,
 				compactionCount: typeof payload.compactionCount === "number" ? payload.compactionCount : nextRuntime.compactionCount,
 				noSession: payload.noSession === true || nextRuntime.noSession,
@@ -1548,7 +1553,9 @@ export const applySessionRuntimeEventAtom = atom(null, (get, set, event: Session
 		currentRuntime.sessionPath === nextRuntime.sessionPath &&
 		currentRuntime.createdAt === nextRuntime.createdAt &&
 		currentRuntime.compactionCount === nextRuntime.compactionCount &&
-		currentRuntime.noSession === nextRuntime.noSession;
+		currentRuntime.noSession === nextRuntime.noSession &&
+		currentRuntime.backend === nextRuntime.backend &&
+		currentRuntime.deckSessionId === nextRuntime.deckSessionId;
 	if (!runtimeUnchanged) {
 		set(sessionRuntimeByIdAtom, {
 			...get(sessionRuntimeByIdAtom),

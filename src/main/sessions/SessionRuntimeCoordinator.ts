@@ -1092,6 +1092,14 @@ export class SessionRuntimeCoordinator {
 		return this.agents.requestBridgeResync?.(agentId) ?? false;
 	}
 
+	/**
+	 * 激活前合成事件用的当前代数（bind 递增前的值）：IPC 层在激活窗口发 session 级
+	 * starting 事件时，需要与渲染层已存的代数对齐才能压住旧 runtime 的迟到事件。
+	 */
+	currentRuntimeGeneration(sessionId: string): number {
+		return this.generationBySession.get(sessionId) ?? 0;
+	}
+
 	getRuntimeBinding(agentId: string):
 		| {
 				sessionId: string;
@@ -1875,6 +1883,8 @@ export class SessionRuntimeCoordinator {
 			createdAt: tab.createdAt,
 			compactionCount: tab.compactionCount,
 			noSession: tab.noSession,
+			// PiDeck 会话身份透传：渲染层侧栏 ACP「agent↔会话」配对依赖它（见 SessionRuntimeInfo.deckSessionId）。
+			deckSessionId: tab.deckSessionId,
 		};
 	}
 

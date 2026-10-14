@@ -875,13 +875,16 @@ export function AgentContextMenu(props: {
 				</DropdownMenuItem>
 			)}
 			{/* DSH 运行中会话的复制走 clone 分流（fork 无锚点完整副本），保留入口；
-			    导出 HTML 无 DSH 实现（G10 待决策），对 dsh agent 隐藏 */}
-			<DropdownMenuItem disabled={busy} onSelect={props.onCopySession}>
-				{props.actionLoading === "copy" && <span className="mini-loader animate-pideck-spin" />}
-				<Copy className="size-3.5" aria-hidden="true" />
-				{props.actionLoading === "copy" ? t("menu.copying") : t("menu.copySession")}
-			</DropdownMenuItem>
-			{props.menu.agent.backend !== "dsh" && (
+			    导出 HTML 无 DSH 实现（G10 待决策），对 dsh agent 隐藏；
+			    ACP 两者皆无实现（无 clone 协议、无宿主文件），同样隐藏（审计发现 H） */}
+			{props.menu.agent.backend !== "acp" && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onCopySession}>
+					{props.actionLoading === "copy" && <span className="mini-loader animate-pideck-spin" />}
+					<Copy className="size-3.5" aria-hidden="true" />
+					{props.actionLoading === "copy" ? t("menu.copying") : t("menu.copySession")}
+				</DropdownMenuItem>
+			)}
+			{props.menu.agent.backend !== "dsh" && props.menu.agent.backend !== "acp" && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onExport}>
 					{props.actionLoading === "export" && <span className="mini-loader animate-pideck-spin" />}
 					<FileDown className="size-3.5" aria-hidden="true" />
@@ -905,8 +908,9 @@ export function AgentContextMenu(props: {
 			)}
 			{/* 会话运行控制：全状态可用（启动/停止/重载三项按策略置灰） */}
 			{props.runControl && <SidebarRunControlItems runControl={props.runControl} />}
-			{/* 会话代理：与 Session 菜单同源（同一弹框宿主），agent 入口此前缺失导致「Chat 里找不到代理」 */}
-			{props.onOpenProxySetting && (
+			{/* 会话代理：与 Session 菜单同源（同一弹框宿主），agent 入口此前缺失导致「Chat 里找不到代理」；
+			    ACP 子进程不消费会话代理（仅 pi spawn 读取），隐藏（审计发现 H） */}
+			{props.onOpenProxySetting && props.menu.agent.backend !== "acp" && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onOpenProxySetting}>
 					<Settings2 className="size-3.5" aria-hidden="true" />
 					{t("menu.sessionProxy")}
@@ -1029,19 +1033,23 @@ export function SessionContextMenu(props: {
 			)}
 			{/* 运行控制：全状态可用（历史会话未启动时主控项即「启动 Agent」） */}
 			{props.runControl && <SidebarRunControlItems runControl={props.runControl} />}
-			{/* DSH 历史会话无宿主文件可复制/导出（主进程显式拒绝，A8/A9）：隐藏入口 */}
-			<DropdownMenuItem disabled={busy} onSelect={props.onOpenProxySetting}>
-				<Settings2 className="size-3.5" aria-hidden="true" />
-				{t("menu.sessionProxy")}
-			</DropdownMenuItem>
-			{props.menu.session.backend !== "dsh" && (
+			{/* DSH 历史会话无宿主文件可复制/导出（主进程显式拒绝，A8/A9）；ACP 无文件也无 clone 协议
+			    （live 走 pi clone 会报 unknown agent，审计发现 H）：同款隐藏入口 */}
+			{/* 会话代理：同 agent 菜单；ACP 子进程不消费会话代理，隐藏（审计发现 H） */}
+			{props.onOpenProxySetting && props.menu.session.backend !== "acp" && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onOpenProxySetting}>
+					<Settings2 className="size-3.5" aria-hidden="true" />
+					{t("menu.sessionProxy")}
+				</DropdownMenuItem>
+			)}
+			{props.menu.session.backend !== "dsh" && props.menu.session.backend !== "acp" && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onCopySession}>
 					{props.actionLoading === "copy" && <span className="mini-loader animate-pideck-spin" />}
 					<Copy className="size-3.5" aria-hidden="true" />
 					{props.actionLoading === "copy" ? t("menu.copying") : t("menu.copySession")}
 				</DropdownMenuItem>
 			)}
-			{props.menu.session.backend !== "dsh" && (
+			{props.menu.session.backend !== "dsh" && props.menu.session.backend !== "acp" && (
 				<DropdownMenuItem disabled={busy} onSelect={props.onExport}>
 					{props.actionLoading === "export" && <span className="mini-loader animate-pideck-spin" />}
 					<FileDown className="size-3.5" aria-hidden="true" />
@@ -1091,10 +1099,14 @@ export function SessionContextMenu(props: {
 					{t("menu.closeAgent")}
 				</DropdownMenuItem>
 			)}
-			<DropdownMenuItem disabled={busy} onSelect={props.onArchiveSession}>
-				<Archive className="size-3.5" aria-hidden="true" />
-				{t("menu.archiveSession")}
-			</DropdownMenuItem>
+			{/* ACP 无宿主文件可归档（主进程直接回 false，行会被刷新带回、toast 假成功）：
+			    隐藏入口（审计发现 J）。DSH 归档走 host 目录分支，保留 */}
+			{props.menu.session.backend !== "acp" && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onArchiveSession}>
+					<Archive className="size-3.5" aria-hidden="true" />
+					{t("menu.archiveSession")}
+				</DropdownMenuItem>
+			)}
 			<DropdownMenuItem variant="destructive" disabled={busy} onSelect={props.onDeleteSession}>
 				<Trash2 className="size-3.5" aria-hidden="true" />
 				{t("common.delete")}

@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: c96c3b17ef68411e5185c922b46bdf36aa0e16ab76f57284c1e9a3c318628c83（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: bf0adaee4c373a0613bac5f3986233814986433bcd053ee4d78b90d49abccc43（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -212,6 +212,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"acp.toolMissing": "會話繫結的 ACP 工具已被刪除或停用，請在設定 → ACP 工具裡重新登記後重試",
 	"acp.startupTimeout": "「{tool}」啟動超時（首次下載或冷啟動可能較慢），請重試",
 	"acp.restoreHint": "歷史儲存在 {tool} 側：傳送訊息後自動恢復最近的對話內容",
+	"acp.restoringHistory": "正在從 {tool} 恢復歷史訊息…",
 	"acp.restoreMissing": "該會話繫結的 ACP 工具已被刪除，請在設定 → ACP 工具裡重新登記後才能恢復與繼續",
 	"acp.hostInstructionsUnsupported": "ACP 後端不支援內部指令",
 	"acp.turnBusy": "{tool} 正在回覆中，請等待本輪結束或先停止當前回覆",

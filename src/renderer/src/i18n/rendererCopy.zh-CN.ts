@@ -205,6 +205,7 @@ export const zhCN = {
 	"acp.toolMissing": "会话绑定的 ACP 工具已被删除或禁用，请在设置 → ACP 工具里重新登记后重试",
 	"acp.startupTimeout": "「{tool}」启动超时（首次下载或冷启动可能较慢），请重试",
 	"acp.restoreHint": "历史保存在 {tool} 侧：发送消息后自动恢复最近的对话内容",
+	"acp.restoringHistory": "正在从 {tool} 恢复历史消息…",
 	"acp.restoreMissing": "该会话绑定的 ACP 工具已被删除，请在设置 → ACP 工具里重新登记后才能恢复与继续",
 	"acp.hostInstructionsUnsupported": "ACP 后端不支持内部指令",
 	"acp.turnBusy": "{tool} 正在回复中，请等待本轮结束或先停止当前回复",

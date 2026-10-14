@@ -206,6 +206,7 @@ export const enUS: Record<TranslationKey, string> = {
 	"acp.toolMissing": "The ACP tool bound to this session was removed or disabled; re-register it in Settings → ACP Tools and retry",
 	"acp.startupTimeout": "{tool} startup timed out (first download or cold start can be slow); please retry",
 	"acp.restoreHint": "History lives in {tool}: send a message to automatically restore the recent conversation",
+	"acp.restoringHistory": "Restoring conversation history from {tool}…",
 	"acp.restoreMissing": "The ACP tool bound to this session was removed; re-register it in Settings → ACP Tools to restore and continue",
 	"acp.hostInstructionsUnsupported": "The ACP backend does not support host instructions",
 	"acp.turnBusy": "{tool} is still responding; wait for this turn to finish or stop it first",

@@ -257,3 +257,94 @@ test("fork replacement detaches the origin session and binds the fork record to 
 		true,
 	);
 });
+
+test("agents:state 事件透传 deckSessionId 到 agent 清单（ACP 侧栏配对依赖）", () => {
+	const store = createStore();
+	store.set(atoms.replaceProjectSessionsAtom, {
+		projectId: "project-a",
+		sessions: [session("deck-sess-1", "project-a", "ACP 会话")],
+	});
+	// ACP 激活：主进程 tab 带 deckSessionId（PiDeck 会话身份），状态 starting → idle。
+	// 若渲染层把 deckSessionId 丢掉，侧栏 ACP「agent↔会话」配对永不命中，
+	// 同一会话会被画成「agent 行 + 会话行」两行（2027-03 重复会话事故）。
+	store.set(atoms.applySessionRuntimeEventAtom, runtimeEvent("deck-sess-1", "agent-acp", 1, "agents:state", { id: "agent-acp", projectId: "project-a", cwd: "C:/project-a", title: "ACP 会话", status: "starting", createdAt: 1, deckSessionId: "deck-sess-1", backend: "acp" }));
+
+	const runtimeEntry = store.get(atoms.sessionRuntimeByIdAtom)["deck-sess-1"];
+	assert.equal(runtimeEntry.deckSessionId, "deck-sess-1");
+
+	const tab = store.get(atoms.agentByIdAtomFamily("agent-acp"));
+	assert.equal(tab.deckSessionId, "deck-sess-1");
+	assert.equal(tab.backend, "acp");
+
+	// selectAtom 相等比较必须覆盖 deckSessionId：同代事件只更新该字段时清单仍要重发。
+	store.set(atoms.applySessionRuntimeEventAtom, runtimeEvent("deck-sess-1", "agent-acp", 1, "agents:state", { id: "agent-acp", projectId: "project-a", cwd: "C:/project-a", title: "ACP 会话", status: "idle", createdAt: 1, deckSessionId: "deck-sess-1", backend: "acp" }));
+	assert.equal(store.get(atoms.agentByIdAtomFamily("agent-acp"))?.status, "idle");
+});
+
+test("listRuntimes 快照缺 deckSessionId 时不冲掉事件流已写入的身份", () => {
+	const store = createStore();
+	store.set(atoms.replaceProjectSessionsAtom, {
+		projectId: "project-a",
+		sessions: [session("deck-sess-2", "project-a", "ACP 会话 2")],
+	});
+	store.set(atoms.applySessionRuntimeEventAtom, runtimeEvent("deck-sess-2", "agent-acp-2", 1, "agents:state", { id: "agent-acp-2", projectId: "project-a", cwd: "C:/project-a", title: "ACP 会话 2", status: "idle", createdAt: 1, deckSessionId: "deck-sess-2", backend: "acp" }));
+	// 旧主进程/快照未带 deckSessionId：不能把已知身份抹回 undefined。
+	store.set(atoms.replaceSessionRuntimesAtom, [runtime("deck-sess-2", "agent-acp-2", "project-a", 1, "idle")]);
+	assert.equal(store.get(atoms.agentByIdAtomFamily("agent-acp-2")).deckSessionId, "deck-sess-2");
+});
+
+test("激活窗口合成 starting 事件（agentId 空占位）能推进发送态并被真实事件接管", () => {
+	const store = createStore();
+	store.set(atoms.replaceProjectSessionsAtom, {
+		projectId: "project-a",
+		sessions: [session("deck-act-1", "project-a", "ACP 激活")],
+	});
+	// 审计发现 A：coordinator bind() 之前 emitSessionRuntimeEvent 丢弃一切状态事件，
+	// 主进程在激活 IPC 入口发 session 级合成 starting（agentId=""、代数取 bind 前值）。
+	store.set(atoms.applySessionRuntimeEventAtom, runtimeEvent("deck-act-1", "", 0, "agents:state", { status: "starting" }));
+	let runtimeEntry = store.get(atoms.sessionRuntimeByIdAtom)["deck-act-1"];
+	assert.equal(runtimeEntry.status, "starting", "合成事件必须立即可见（加载动画数据源）");
+
+	// 激活进行中发送：activating 的发送态必须被 starting 推进到 sending（首回合卡 activating 修复）
+	store.set(atoms.setSessionSendStateAtom, { sessionId: "deck-act-1", state: { status: "activating", requestId: "req-1" } });
+	store.set(atoms.applySessionRuntimeEventAtom, runtimeEvent("deck-act-1", "", 0, "agents:state", { status: "starting" }));
+	assert.equal(store.get(atoms.sessionSendStateByIdAtom)["deck-act-1"].status, "sending");
+
+	// 激活完成：真实 agent 的同代 agents:state 事件不被空 agentId 挡住，deckSessionId/backend 落地
+	store.set(atoms.applySessionRuntimeEventAtom, runtimeEvent("deck-act-1", "agent-real", 1, "agents:state", { id: "agent-real", projectId: "project-a", cwd: "C:/project-a", title: "ACP 激活", status: "idle", createdAt: 2, deckSessionId: "deck-act-1", backend: "acp" }));
+	runtimeEntry = store.get(atoms.sessionRuntimeByIdAtom)["deck-act-1"];
+	assert.equal(runtimeEntry.agentId, "agent-real");
+	assert.equal(runtimeEntry.status, "idle");
+	assert.equal(runtimeEntry.deckSessionId, "deck-act-1", "侧栏 ACP 配对身份必须随激活完成立即落地");
+	assert.equal(runtimeEntry.backend, "acp");
+});
+
+test("runtimeUnchanged 守卫覆盖 backend/deckSessionId：仅身份字段变化不得吞写", () => {
+	const store = createStore();
+	store.set(atoms.replaceProjectSessionsAtom, {
+		projectId: "project-a",
+		sessions: [session("deck-act-2", "project-a", "守卫字段")],
+	});
+	// agents:runtime-state 只建 state 不带身份 → 条目缺 deckSessionId/backend；
+	// 随后同 agentId、同状态(手动构造 idle→idle) 的 agents:state 只补身份字段：
+	// 旧守卫比较列表缺这两个字段 → runtimeUnchanged=true → 写入被跳过 → 配对身份丢失。
+	store.set(atoms.applySessionRuntimeEventAtom, runtimeEvent("deck-act-2", "agent-g", 1, "agents:runtime-state", { agentId: "agent-g", state: { isStreaming: false } }));
+	store.set(atoms.applySessionRuntimeEventAtom, runtimeEvent("deck-act-2", "agent-g", 1, "agents:state", { id: "agent-g", projectId: "project-a", cwd: "C:/project-a", title: "守卫字段", status: "idle", createdAt: 1, deckSessionId: "deck-act-2", backend: "acp" }));
+	const runtimeEntry = store.get(atoms.sessionRuntimeByIdAtom)["deck-act-2"];
+	assert.equal(runtimeEntry.deckSessionId, "deck-act-2", "仅 deckSessionId 变化也必须写入条目");
+	assert.equal(runtimeEntry.backend, "acp");
+});
+
+test("合成 starting 事件不产生空 agentId 的侧栏 agent 行", () => {
+	const store = createStore();
+	store.set(atoms.replaceProjectSessionsAtom, {
+		projectId: "project-a",
+		sessions: [session("deck-act-3", "project-a", "无幽灵行")],
+	});
+	store.set(atoms.applySessionRuntimeEventAtom, runtimeEvent("deck-act-3", "", 0, "agents:state", { status: "starting" }));
+	// agent 清单投影要求 agentId/projectId/cwd/createdAt 齐全：空 agentId 必须被过滤，
+	// 否则激活窗口会在侧栏画出一行无身份的「幽灵 agent」。
+	const agents = store.get(atoms.agentsByProjectIdAtomFamily("project-a"));
+	assert.equal(agents.length, 0);
+	assert.equal(store.get(atoms.sessionRuntimeByIdAtom)["deck-act-3"].status, "starting", "加载态数据源不受影响");
+});

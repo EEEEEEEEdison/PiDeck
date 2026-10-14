@@ -94,6 +94,27 @@ export class CompositeAgentGateway implements SessionAgentGateway {
 		return this.gateways.flatMap((gateway) => gateway.list());
 	}
 
+	/**
+	 * 激活/重启/换绑后的状态+消息窗口重下发（index.ts emitReplacementState 消费）。
+	 * pi 网关实现窗口协议（窗口段 + windowStart/totalLength/fileVersion）；其余后端
+	 * 没有 getMessageWindow，回退全量消息（ACP/DSH 的 live 列表本身有界，全量即窗口）。
+	 * 此前 emitReplacementState 只查 pi AgentManager，ACP/DSH 的 tab 查不到直接 return，
+	 * 重启/换绑后的状态与消息窗口重下发全部静默失效（2027-03 审计发现 B）。
+	 */
+	getMessageWindow(agentId: string): {
+		messages: ChatMessage[];
+		windowStart?: number;
+		totalLength: number;
+		fileVersion?: string;
+		windowStartFilePos?: number;
+	} {
+		const gateway = this.owner(agentId);
+		const ownerWindow = (gateway as { getMessageWindow?: (id: string) => { messages: ChatMessage[]; windowStart?: number; totalLength: number; fileVersion?: string; windowStartFilePos?: number } }).getMessageWindow;
+		if (typeof ownerWindow === "function") return ownerWindow.call(gateway, agentId);
+		const messages = gateway.getMessages(agentId);
+		return { messages, totalLength: messages.length };
+	}
+
 	async sendPrompt(input: SendPromptInput): Promise<SendPromptResult> {
 		return this.owner(input.agentId).sendPrompt(input);
 	}

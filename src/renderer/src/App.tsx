@@ -2286,10 +2286,12 @@ export function App() {
 		const agentId = runtime?.agentId;
 		// 草稿闸门：草稿期不提供重命名（自动命名还没跑，先钉名字会让条目进 manual
 		// 终态，扩展规划的会话名再也写不进来）；复制/导出同款闸门。
+		// ACP 同样隐藏：live 复制走 pi manager cloneSession 会报 unknown agent，历史会话
+		// 无 filePath 只会报「文件不存在」——两条路都是死胡同（2027-03 审计发现 H）。
 		const canRename = record.status !== "draft";
 		return {
-			canCopySession: canRename && (isLive || record.backend !== "dsh"),
-			canExportHtml: canRename && record.backend !== "dsh",
+			canCopySession: canRename && record.backend !== "acp" && (isLive || record.backend !== "dsh"),
+			canExportHtml: canRename && record.backend !== "dsh" && record.backend !== "acp",
 			hasFilePath: Boolean(record.filePath),
 			onCopySession: () => {
 				if (isLive && agentId) {
@@ -2427,7 +2429,9 @@ export function App() {
 			: undefined,
 		// 会话代理（网络代理）入口：与侧栏会话菜单同源，打开同一个弹框。
 		// 仅在有当前会话时给出；弹框内自行判断 DSH 等宿主差异并给出「下次启动生效」提示。
-		onOpenProxySetting: currentSessionId ? () => setProxyDialogSessionId(currentSessionId) : undefined,
+		// ACP 隐藏：会话代理只在 pi spawn 时消费（AgentManager.resolveSessionProxy），
+		// ACP 子进程从不读取——入口是死胡同（2027-03 审计发现 H）。
+		onOpenProxySetting: currentSessionId && getSessionRecord(currentSessionId)?.backend !== "acp" ? () => setProxyDialogSessionId(currentSessionId) : undefined,
 		onToggleDrawer: toggleRightDrawer,
 		drawerOpen: Boolean(drawer && !drawerCollapsed),
 		listCollapsed,

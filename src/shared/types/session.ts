@@ -459,6 +459,8 @@ export type SessionRuntimeInfo = SessionRuntimeTarget & {
 	createdAt: number;
 	compactionCount?: number;
 	noSession?: boolean;
+	/** PiDeck 会话身份（AgentTab.deckSessionId 透传）：渲染层侧栏 ACP「agent↔会话」配对用，缺它会把同一会话画成两行。 */
+	deckSessionId?: string;
 };
 
 export type SessionCommandErrorCode =

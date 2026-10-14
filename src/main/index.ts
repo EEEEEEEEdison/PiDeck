@@ -223,6 +223,7 @@ process.on("unhandledRejection", (reason) => {
 	console.error("Unhandled rejection:", reason);
 });
 import { ipcChannels } from "../shared/ipc";
+import { collectLatestTurnFileChanges } from "../shared/fileChanges";
 import { mainProcessT, normalizeMainProcessLocale, type MainProcessLocale, type MainProcessTranslationKey } from "../shared/i18n/mainProcessCopy";
 import { buildSessionOriginKey, canonicalizeSessionPath, toAbsoluteSessionPath } from "../shared/sessionIdentity";
 import type {
@@ -709,6 +710,22 @@ async function runDshForeignSync(): Promise<{ imported: number; skipped: number 
 	return result;
 }
 
+/**
+ * 激活失败的 session 级合成 error 事件：激活失败时 binding 从未建立，manager 的
+ * 终态事件同样被丢弃——若不补发，渲染层会永远停在合成 starting 的加载态。
+ * 仅在失败后仍无活 runtime 时发（bind 后才失败的边缘路径不深究，真实事件已可路由）。
+ */
+function emitSessionActivationFailed(sessionId: string): void {
+	sendSessionRuntimeEnvelope({
+		kind: "event",
+		sessionId,
+		agentId: "",
+		runtimeGeneration: sessionRuntimeCoordinator.currentRuntimeGeneration(sessionId),
+		sourceChannel: ipcChannels.agentsState,
+		payload: { status: "error" },
+	});
+}
+
 function sendSessionRuntimeEnvelope(event: SessionRuntimeEvent): void {
 	const window = mainWindow;
 	if (window && !window.isDestroyed()) {
@@ -965,17 +982,45 @@ async function stopDshHostFromMonitor(): Promise<SessionCommandResult<undefined>
 }
 
 function emitReplacementState(binding: SessionRuntimeBinding, includeMessages: boolean): void {
-	const tab = agentManager.list().find((candidate) => candidate.id === binding.agentId);
+	// 多后端查找：ACP/DSH 的 tab 不在 pi AgentManager 里。此前只查 agentManager，
+	// 查不到直接 return，导致换绑/重启后的状态+消息窗口重下发对 ACP/DSH 全部静默失效
+	//（渲染层停在旧 runtime 的窗口/live 身份，重启后编辑/删除/重发定位失败）。
+	// 2027-03 审计发现 B；composite 未装配时（启动极早期/测试沙箱）回退 pi 查找。
+	const tab = compositeAgentGateway?.list().find((candidate) => candidate.id === binding.agentId) ?? agentManager.list().find((candidate) => candidate.id === binding.agentId);
 	if (!tab) return;
 	emitSessionRuntimeEvent(binding.agentId, ipcChannels.agentsState, tab);
 	if (includeMessages) {
 		// 与 flush 同一窗口协议：只下发显示窗口段 + windowStart/totalLength/fileVersion，
-		// 渲染层合并逻辑一处生效（窗口前历史由 disk 轮次分页 prepend）
+		// 渲染层合并逻辑一处生效（窗口前历史由 disk 轮次分页 prepend）；
+		// ACP/DSH 无窗口实现时为全量（live 列表有界，协议兼容：无 windowStart = 全窗口）。
+		const messageWindow = compositeAgentGateway?.getMessageWindow(binding.agentId) ?? agentManager.getMessageWindow(binding.agentId);
 		emitSessionRuntimeEvent(binding.agentId, ipcChannels.agentsMessage, {
 			agentId: binding.agentId,
-			...agentManager.getMessageWindow(binding.agentId),
+			...messageWindow,
 		});
 	}
+}
+
+/**
+ * 激活窗口的 session 级合成 starting 事件（2027-03 审计发现 A）。
+ *
+ * 背景：emitSessionRuntimeEvent 依赖 binding 才转发，而 coordinator.activate 要等
+ * create+waitUntilReady 完成才 bind()——ACP 握手可达 ~8.5s，期间 manager 发的一切
+ * agents:state（含 starting）全部被丢弃，渲染层全程静默、恢复条停在静态提示。
+ * 激活开始时先发一条 session 级合成事件（agentId 占位、代数取 bind 前当前值，
+ * 能压住旧 runtime 的迟到事件），渲染层据 status="starting" 显示加载动画；
+ * 激活完成后由 emitReplacementState / 后续真实事件接管。与 emitAgentsNotice 同一
+ * 合成模式；不经过 observeRuntimeEvent/automation，避免合成状态驱动运行编排。
+ */
+function emitSessionActivating(sessionId: string): void {
+	sendSessionRuntimeEnvelope({
+		kind: "event",
+		sessionId,
+		agentId: "",
+		runtimeGeneration: sessionRuntimeCoordinator.currentRuntimeGeneration(sessionId),
+		sourceChannel: ipcChannels.agentsState,
+		payload: { status: "starting" },
+	});
 }
 
 async function readCatalogSessionReferenceMessages(sessionId: string) {
@@ -3081,6 +3126,8 @@ function registerIpc() {
 		getMainWindow: () => mainWindow,
 		emitSessionRuntimeEvent,
 		emitSessionRuntimeDetach,
+		emitSessionActivating,
+		emitSessionActivationFailed,
 		createAnonymousSession,
 		stopSessionRuntime,
 		emitReplacementState,
@@ -4721,6 +4768,8 @@ app
 			// 会话活动监控（第二批 strips）：与桌面 sessionIpc.ts 同源同闸门
 			listSessionFileChanges: (sessionId) => {
 				const entry = sessionCatalog.get(sessionId);
+				// ACP 分支与桌面 sessionIpc 同源（审计发现 I）：运行时投影内存聚合，无读盘
+				if (entry?.backend === "acp") return Promise.resolve(collectLatestTurnFileChanges(acpAgentManager.readMessagesByAcpSessionId(entry.acpSessionId ?? "")));
 				// DSH/生图会话无 pi 会话文件，文件汇总无意义
 				if (!entry?.filePath || entry.backend === "dsh" || entry.backend === "imagegen") return Promise.resolve([]);
 				return agentManager.readSessionFileChanges(entry.filePath);

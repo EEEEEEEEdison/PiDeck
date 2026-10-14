@@ -171,6 +171,55 @@ test("DSH attach 回写窗口期：按 deckSessionId 兜底配对，不产生重
 	assert.equal(display.children[0].agent?.id, "dsh:session-xyz", "会话行携带配对 agent 装饰");
 });
 
+test("ACP agent 与 ACP 会话按 deckSessionId 配对：只渲染一个会话行，不产生重复 agent 行", () => {
+	// ACP agent tab 没有 sessionPath、ACP 记录没有 filePath（两者都不带 key），
+	// 不配对时项目树同时渲染 agent 行与会话行（同一标题两份）。
+	const { getProjectAgentSessionDisplay } = loadModule();
+	const acpSession = session({
+		id: "acp-session-1",
+		filePath: "",
+		backend: "acp",
+		acpSessionId: "ses_ec54bf011ffe",
+		source: "pi",
+		updatedAt: 5,
+	});
+	const display = getProjectAgentSessionDisplay({
+		agents: [
+			{
+				id: "acp:71b36945-0780",
+				backend: "acp",
+				deckSessionId: "acp-session-1",
+				sessionPath: undefined,
+				createdAt: 2,
+				status: "idle",
+			},
+		],
+		sessions: [acpSession],
+	});
+	assert.equal(display.children.length, 1, "配对后只保留一个行，不得出现重复条目");
+	assert.equal(display.children[0].type, "session");
+	assert.equal(display.children[0].session.id, "acp-session-1");
+	assert.equal(display.children[0].agent?.id, "acp:71b36945-0780", "会话行携带配对 agent 装饰");
+});
+
+test("ACP agent 无配对会话时仍平铺为 agent 行（孤儿不消失）", () => {
+	const { getProjectAgentSessionDisplay } = loadModule();
+	const display = getProjectAgentSessionDisplay({
+		agents: [
+			{
+				id: "acp:orphan",
+				backend: "acp",
+				deckSessionId: "missing-session",
+				createdAt: 2,
+				status: "idle",
+			},
+		],
+		sessions: [],
+	});
+	assert.equal(display.children.length, 1);
+	assert.equal(display.children[0].type, "agent");
+});
+
 test("filters runtime rows by their canonical Session origin before falling back to agent source", () => {
 	const { filterAgentsForSidebarDisplay } = loadModule();
 	const piSession = session({ id: "pi-session", filePath: "C:/sessions/pi.jsonl", source: "pi" });

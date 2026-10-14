@@ -278,6 +278,11 @@ export function getProjectAgentSessionDisplay({
 	// attach 回写是 fire-and-forget，渲染层快照可能先于 attach 到达，此时
 	// session.dshSessionId 还没落盘，只按 dshSessionId 配对会漏配产生重复条目。
 	const dshAgentBySessionId = new Map<string, AgentTab>();
+	// ACP agent ↔ ACP 会话配对：ACP agent tab 没有 sessionPath（只有 deckSessionId），
+	// ACP 记录没有 filePath，两者会分别落 unkeyedAgents / unkeyedSessions——
+	// 不配对时项目树出现「agent 行 + 会话行」两个相同标题的重复条目（与 DSH 同因）。
+	// AgentTab 不携带 acpSessionId，唯一可用身份就是 catalog 会话 id（= deckSessionId）。
+	const acpAgentBySessionId = new Map<string, AgentTab>();
 	for (const agent of agents) {
 		if (agent.backend === "dsh" && typeof agent.sessionId === "string" && agent.sessionId) {
 			const linked = parentCandidateSessions.find((session) => session.dshSessionId === agent.sessionId || (typeof agent.deckSessionId === "string" && session.id === agent.deckSessionId));
@@ -285,6 +290,13 @@ export function getProjectAgentSessionDisplay({
 				dshAgentBySessionId.set(agent.sessionId, agent);
 				// 同时登记 catalog 会话 id 键，覆盖 dshSessionId 尚未回写的窗口期
 				if (linked.id !== agent.sessionId) dshAgentBySessionId.set(linked.id, agent);
+				continue; // 会话行已存在（unkeyedSessions），不再产生独立 agent 行
+			}
+		}
+		if (agent.backend === "acp" && typeof agent.deckSessionId === "string" && agent.deckSessionId) {
+			const linked = parentCandidateSessions.find((session) => session.id === agent.deckSessionId);
+			if (linked) {
+				acpAgentBySessionId.set(linked.id, agent);
 				continue; // 会话行已存在（unkeyedSessions），不再产生独立 agent 行
 			}
 		}
@@ -368,9 +380,10 @@ export function getProjectAgentSessionDisplay({
 				piSubagents: getPiSubagents(session.filePath, getSessionEnvironment(session)),
 			})),
 		...unkeyedSessions.map<ProjectChildItem>((session) => {
-			// DSH 会话行带上配对 agent 装饰（状态点/右键菜单走 runtime 查找，这里提供 title 权重等）；
-			// 双键查询：dshSessionId（attach 已回写）或 catalog 会话 id（dshSessionId 尚未回写窗口期）
-			const pairedAgent = (typeof session.dshSessionId === "string" ? dshAgentBySessionId.get(session.dshSessionId) : undefined) ?? dshAgentBySessionId.get(session.id);
+			// DSH/ACP 会话行带上配对 agent 装饰（状态点/右键菜单走 runtime 查找，这里提供 title 权重等）；
+			// DSH 双键查询：dshSessionId（attach 已回写）或 catalog 会话 id（dshSessionId 尚未回写窗口期）；
+			// ACP 只能按 catalog 会话 id（= deckSessionId）查询。
+			const pairedAgent = (typeof session.dshSessionId === "string" ? dshAgentBySessionId.get(session.dshSessionId) : undefined) ?? dshAgentBySessionId.get(session.id) ?? acpAgentBySessionId.get(session.id);
 			return {
 				type: "session",
 				key: getSessionRowKey(session),

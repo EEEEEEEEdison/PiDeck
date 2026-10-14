@@ -17,6 +17,7 @@ function areAgentTabsEqual(left: AgentTab[], right: AgentTab[]): boolean {
 			tab.title === other.title &&
 			tab.status === other.status &&
 			tab.sessionId === other.sessionId &&
+			tab.deckSessionId === other.deckSessionId &&
 			tab.sessionPath === other.sessionPath &&
 			tab.sessionEnvironment === other.sessionEnvironment &&
 			tab.sessionSource === other.sessionSource &&
@@ -60,6 +61,9 @@ const agentInventorySourceAtom = atom((get) => {
 				status: runtime.status,
 				sessionId: runtime.piSessionId,
 				sessionPath: runtime.sessionPath,
+				// PiDeck 会话身份：侧栏把 ACP agent 行与 catalog 会话行配对（同 DSH 的 dshSessionId 配对）依赖它，
+				// 缺失时同一会话会被画成「agent 行 + 会话行」两行（2027-03 重复会话事故）。
+				deckSessionId: runtime.deckSessionId,
 				sessionEnvironment: record?.environment,
 				sessionSource: record?.source,
 				wslDistro: record?.wslDistro,
