@@ -96,6 +96,9 @@ export function MessageScroller({
 	const engineContentRef = stick.contentRef;
 	const engineScrollToBottom = stick.scrollToBottom;
 	const engineIsAtBottom = stick.isAtBottom;
+	// state 是引擎内的可变单例（useMemo([])），isAtBottom 字段始终反映引擎当前实况，
+	// 不随 React 提交快照走——上报新鲜度守卫依赖它区分「过期的 isFollowing」。
+	const engineLiveState = stick.state;
 	const engineRestoreAt = stick.restoreAt;
 	const engineStopScroll = stick.stopScroll;
 	const engineScrollByWheel = stick.scrollByWheel;
@@ -175,8 +178,17 @@ export function MessageScroller({
 	}, [followOutput, followThreshold, reduce, engineScrollToBottom, engineStopScroll]);
 
 	useEffect(() => {
+		// 新鲜度守卫（ACP 崩溃根因）：isFollowing 是本次渲染提交的快照，而 layout-effect
+		// 级联中（followOutput 效应 → scrollToBottom/stopScroll → engine setState）引擎的
+		// 可变单例 state.isAtBottom 已经再次翻转。把过期快照上报给 controller 会写进
+		// autoScroll → followOutput 反相 → 引擎再翻转 → 下一份反相的过期上报……
+		// 周期-2 永不收敛，最终 Maximum update depth exceeded 崩掉整窗（AppErrorBoundary
+		// 重载后内存缓存全丢 = ACP 会话「切走再切回消息消失」的入口）。丢弃过期上报即可
+		// 断链：引擎每次翻转都会提交一份新快照，收敛后自然有一份新鲜上报补上；级联里被
+		// 合并抵消（净零变化）的翻转本就无需上报。
+		if (engineLiveState.isAtBottom !== isFollowing) return;
 		onFollowChange?.(isFollowing);
-	}, [isFollowing, onFollowChange]);
+	}, [isFollowing, onFollowChange, engineLiveState]);
 
 	// 流式结束瞬间：busy true→false，开启 150ms 过渡窗口（期间追底用 instant）。
 	useEffect(() => {

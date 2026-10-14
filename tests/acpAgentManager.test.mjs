@@ -814,6 +814,37 @@ test("stop 后 readMessagesByAcpSessionId 回退内存快照:重入会话时间�
 	assert.equal(manager.readMessagesByAcpSessionId("sess-unknown").length, 0, "未见过的会话仍为空(跨 Realm 数组不能 deepEqual)");
 });
 
+test("快照上限不截断正常长会话:60 条消息 stop 后仍完整可读(2026-10-14 丢史回归)", async (t) => {
+	// 一个带工具调用的回合 assistant/tool 条目就能上双位数;旧上限 16 会把关闭
+	// 重开后的历史截到只剩最后一小段(ACP CLI 不支持 loadSession 重放时无第二数据源)。
+	// 投影里连续同型 chunk 会并回一条消息,所以用 30 个回合(每回合 user+assistant 各一)攒 60 条。
+	const TURNS = 30;
+	let promptCount = 0;
+	const { manager, events, createAgent } = harness(t, {
+		handler: (frame, { writeFromCli }) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: {} };
+			if (frame.method === "session/new") return { sessionId: "sess-long" };
+			if (frame.method === "session/prompt") {
+				promptCount += 1;
+				writeFromCli({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "sess-long", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `answer-${promptCount}` } } } });
+				return { stopReason: "end_turn" };
+			}
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	for (let i = 0; i < TURNS; i += 1) {
+		const result = await manager.sendPrompt({ agentId: tab.id, message: `msg-${i}` });
+		assert.equal(result.accepted, true, `turn ${i} settles with output`);
+	}
+	assert.equal(promptCount, TURNS);
+	await waitFor(() => (events.messages.at(-1)?.messages ?? []).length >= TURNS * 2, "all turns flushed");
+	await manager.stop(tab.id);
+	// 每回合 user 1 + assistant 1 = 60 条;旧上限 16 必红。
+	const snapshot = manager.readMessagesByAcpSessionId("sess-long");
+	assert.ok(snapshot.length >= TURNS * 2, `snapshot keeps full conversation (snapshot=${snapshot.length}, expected>=${TURNS * 2})`);
+});
+
 test("图片物化:消息里的 base64 图经 imageStore 落盘成 ref,put 失败保留 data", async (t) => {
 	const puts = [];
 	let seq = 0;

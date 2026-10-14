@@ -75,8 +75,11 @@ const FLUSH_THROTTLE_MS = 80;
 const ABORT_ESCALATION_MS = 5_000;
 /** 回合内全静默(无任何 session/update 且无挂起审批)的 stall 判定阈值;深思回合正常也有 thought/tool 流。 */
 const PROMPT_STALL_TIMEOUT_MS = 90_000;
-/** 每会话保留的 ACP 消息内存快照条数:stop 后重入时间线的临时数据源,激活后 load 重放覆盖。 */
-const MESSAGE_SNAPSHOT_LIMIT = 16;
+/** 每会话保留的 ACP 消息内存快照条数:stop/重启后重入时间线的临时数据源,激活后 load 重放覆盖。
+ * 上限只需防内存失控(条数×会话数),不能小于一个正常长回合的消息量——一个带工具调用的
+ * 回合 assistant/tool 条目就能上双位数,取 16 会把关闭重开后的历史截到只剩最后一小段
+ * (ACP CLI 不支持 loadSession 重放时无第二数据源,2026-10-14 实测丢史放人)。 */
+const MESSAGE_SNAPSHOT_LIMIT = 400;
 
 type AcpAgentRuntime = {
 	tab: AgentTab;
