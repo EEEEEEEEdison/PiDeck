@@ -7,10 +7,24 @@
  * AgentManager），本模块只有类型，没有运行时依赖。
  */
 
-import type { AgentRuntimeState, AgentTab, AvailableModel, ImageContent } from "../../shared/types";
+import type { AgentRuntimeState, AgentTab, AvailableModel, ImageContent, SessionChannel } from "../../shared/types";
 
 export interface SessionRuntimeBindingGateway {
-	ensureSession(input: { projectId: string; title: string; existingSessionId?: string; sessionPath?: string }): Promise<{ sessionId: string }>;
+	ensureSession(input: {
+		projectId: string;
+		title: string;
+		existingSessionId?: string;
+		sessionPath?: string;
+		/**
+		 * 外部连接渠道（微信/飞书桥建的会话）：落库后侧栏显示渠道标志。
+		 */
+		channel?: SessionChannel;
+		/**
+		 * 开放自动命名：会话标题不归 IM 桥所有，等 pi 侧自动命名（扩展模型标题）来领。
+		 * 缺省（false）= 桥给的标题是权威名（titleOrigin: "manual"），自动命名不得覆盖。
+		 */
+		autoTitle?: boolean;
+	}): Promise<{ sessionId: string }>;
 	activateRuntime(sessionId: string): Promise<AgentTab>;
 	bindRuntime(input: { projectId: string; agent: AgentTab; existingSessionId?: string }): Promise<{ sessionId: string }>;
 	sendPrompt(input: { sessionId: string; message: string; agentMessage?: string; images?: ImageContent[] }): Promise<void>;

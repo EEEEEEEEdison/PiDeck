@@ -15,7 +15,7 @@ import { filterSidebarSessions, getBoundSidebarRuntimeAgent, type SidebarControl
 import { Button } from "../ui-shadcn/button";
 import type { SidebarActions } from "./SidebarContent";
 import { PendingAskBadge } from "./PendingAskBadge";
-import { AcpBackendMark, SessionBackendMark, SessionSourceBadge } from "../session/SessionSourceBadge";
+import { AcpBackendMark, SessionBackendMark, SessionChannelMark, SessionSourceBadge } from "../session/SessionSourceBadge";
 import { SessionActivityIndicator } from "../session/SessionActivityIndicator";
 import { SessionHoverCard } from "./SessionHoverCard";
 import { TitleScrollText } from "./TitleScrollText";
@@ -349,6 +349,7 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 									{/* 生图角标：imagegen 后端会话的徽标已含生图标识，此处仅对遗留 pi 后端含生图消息的会话补图标 */}
 									{child.session.backend !== "imagegen" && child.session.hasImageGen && <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
 									{child.session.source && child.session.source !== "pi" && <SessionSourceBadge source={child.session.source} />}
+									{child.session.channel && <SessionChannelMark channel={child.session.channel} />}
 									{renderToggle(groupKey, childCount)}
 									{/* 相对时间常显：会话更新于多久前一目了然；hover 行时让位给右侧「⋯」按钮。
                   窄侧栏时间可能被截断，title 提示完整相对时间。 */}

@@ -405,9 +405,13 @@ export function WeChatSection() {
 					) : (
 						modelChain.map((entry, index) => (
 							<div key={`${entry.provider}/${entry.modelId}`} className="border-border flex items-center justify-between gap-2 rounded-md border px-3 py-1.5">
-								<span className="text-foreground flex items-center gap-2 text-xs">
+								<span className="text-foreground flex min-w-0 flex-1 items-center gap-2 text-xs">
 									<span className="text-muted-foreground">{index + 1}</span>
-									{entry.modelName ?? `${entry.provider}/${entry.modelId}`}
+									{/* 同名模型可能来自不同供应商：名称后面始终跟供应商，避免只看到模型名分不出条目 */}
+									<span className="truncate" title={`${entry.provider}/${entry.modelId}`}>
+										{entry.modelName ?? entry.modelId}
+									</span>
+									<span className="text-muted-foreground shrink-0 text-[11px]">{entry.provider}</span>
 								</span>
 								<span className="flex items-center gap-1">
 									<Button size="sm" variant="ghost" disabled={busy || index === 0} aria-label={t("config.wechat.modelChainUp")} onClick={() => void handleModelChainChange(moveChainEntry(modelChain, index, index - 1))}>
@@ -424,6 +428,18 @@ export function WeChatSection() {
 						))
 					)}
 					<span className="text-muted-foreground text-xs">{t("config.wechat.modelChainHint")}</span>
+				</div>
+			) : null}
+
+			{/* 操作指志：微信侧只有纯文本命令，桌面上没有入口提示，不写在这里用户就不知道 /new 能开新会话。 */}
+			{account ? (
+				<div className="border-border bg-muted/30 flex flex-col gap-1.5 rounded-md border px-3 py-2">
+					<span className="text-foreground text-xs font-medium">{t("config.wechat.guideTitle")}</span>
+					<ul className="text-muted-foreground flex list-disc flex-col gap-1 pl-4 text-xs">
+						<li>{t("config.wechat.guideNewSession")}</li>
+						<li>{t("config.wechat.guideCommands")}</li>
+						<li>{t("config.wechat.guideModelChain")}</li>
+					</ul>
 				</div>
 			) : null}
 
@@ -451,6 +467,7 @@ export function WeChatSection() {
 			{confirmLogout ? <ConfirmDialog title={t("config.wechat.logout")} message={t("config.wechat.logoutMessage")} onCancel={() => setConfirmLogout(false)} onConfirm={() => void handleLogout()} /> : null}
 
 			{pickerOpen ? (
+				// 这里是「从全部模型里挑一条加入优先级链」：默认展开所有供应商，避免逐个手动展开找模型。
 				<ModelPicker
 					models={models}
 					loading={models.length === 0 && !modelsRefreshing}
@@ -458,6 +475,7 @@ export function WeChatSection() {
 					onRefresh={() => void loadModels(true)}
 					favoriteModels={[]}
 					onToggleFavorite={() => undefined}
+					expandAllProviders
 					onPick={(model) => {
 						setPickerOpen(false);
 						const next = appendChainEntry(modelChain, { provider: model.provider, modelId: model.id, modelName: model.name });

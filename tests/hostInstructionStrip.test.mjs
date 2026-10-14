@@ -47,3 +47,14 @@ test("普通用户消息不被动（只有真正带通道签名才剥）", () =>
 	assert.equal(extractMessageText("当前会话已连接微信吗？"), "当前会话已连接微信吗？");
 	assert.equal(extractMessageText("微信只支持纯文本吗？"), "微信只支持纯文本吗？");
 });
+
+test("自动标题里的宿主指令同样被剥掉（侧栏不能出现整段提示词）", () => {
+	const { sanitizeAutomaticTitle } = sandbox("src/main/sessions/sessionTitleSanitize.ts");
+	assert.equal(sanitizeAutomaticTitle(`${WECHAT_INSTRUCTION}\n\n1`), "1");
+	assert.equal(sanitizeAutomaticTitle(`${WECHAT_INSTRUCTION}\n\n帮我看看这个 bug`), "帮我看看这个 bug");
+	// 整条消息只有指令（用户只发了空内容）时没标题可用，调用方应忽略空串
+	assert.equal(sanitizeAutomaticTitle(WECHAT_INSTRUCTION), "");
+	// 正常标题/多行标题只做空白归一，不被误伤
+	assert.equal(sanitizeAutomaticTitle("修复登录超时\n第二行"), "修复登录超时 第二行");
+	assert.equal(sanitizeAutomaticTitle("  多余空格  "), "多余空格");
+});

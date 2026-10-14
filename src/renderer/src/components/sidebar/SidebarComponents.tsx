@@ -51,7 +51,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import type { SessionSummary, Project, AgentTab, ArchivedDshSession, ArchivedPiSession, SessionSortModeId } from "../../../../shared/types";
 import { SESSION_SORT_MODES, resolveSessionSortMode } from "../../sessionSortModes";
 import { worktreeSlugify } from "../../../../shared/worktreeSlug";
-import { SessionSourceBadge, SessionBackendMark, DshSourceBadge, ImageGenSourceBadge } from "../session/SessionSourceBadge";
+import { SessionSourceBadge, SessionBackendMark, SessionChannelMark, DshSourceBadge, ImageGenSourceBadge } from "../session/SessionSourceBadge";
 import { Checkbox } from "../ui-shadcn/checkbox";
 import { Input } from "../ui-shadcn/input";
 import { Label } from "../../components/ui-shadcn/label";
@@ -417,6 +417,8 @@ export function SessionManagerModal(props: {
 														) : (
 															session.source && session.source !== "pi" && <SessionSourceBadge source={session.source} />
 														)}
+														{/* 外部连接（微信/飞书）入口标志：这类会话 source 恒为 pi，用渠道徽标区分消息从哪来 */}
+														{session.channel && <SessionChannelMark channel={session.channel} />}
 													</div>
 												</TableCell>
 												<TableCell className="w-40 text-right">

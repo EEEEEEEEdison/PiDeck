@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: b807b00c08ba5e12a6a820ac78feffe2a2439f97d584f5e78942d4c993165ec4（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: c96c3b17ef68411e5185c922b46bdf36aa0e16ab76f57284c1e9a3c318628c83（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -1503,6 +1503,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"sessionBackend.imagegen": "生圖",
 	"sessionBackend.videogen": "生影片",
 	"sessionBackend.acp": "Agent CLI",
+	"sessionChannel.wechat": "微信",
+	"sessionChannel.feishu": "飛書",
 	"session.acpToolHint": "選擇 Agent CLI 工具（僅草稿期可改）",
 	"sidebar.dshSearchResults": "DSH 會話搜尋結果",
 	"session.backendPickerHint": "選擇後端（Pi / DSH / 生圖 / 生影片 / Agent CLI）",
@@ -3661,6 +3663,10 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.wechat.noBindings": "暫無繫結，收到微信訊息後會自動建立。",
 	"config.wechat.unbind": "解綁",
 	"config.wechat.p2pHint": "微信側只支援與機器人 1:1 私聊，且必須先由你發訊息——服務端不允許機器人主動推送，群聊也不支援。",
+	"config.wechat.guideTitle": "在微信裡怎麼用",
+	"config.wechat.guideNewSession": "發 /new 開始一個新會話（換話題）：每個會話在桌面端是一條獨立的會話記錄，舊會話繼續保留，隨時可以開啟接著用。",
+	"config.wechat.guideCommands": "發 /stop 中斷當前任務，/status 檢視會話與模型，/model 切換模型，/help 檢視全部命令。",
+	"config.wechat.guideModelChain": "不配置優先順序時回覆用會話當前模型；配置了模型優先順序就按順序嘗試，執行失敗自動順延到下一個。",
 	"environment.title": "Pi 環境檢測",
 	"environment.checking": "正在檢測 Pi CLI…",
 	"environment.passed": "檢測通過",
@@ -5552,6 +5558,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"timeline.dshHostStopped": "DSH 執行時已手動停止",
 	"timeline.dshHostStoppedHint": "這個會話的歷史存在 DSH 側，需要 host 線上才能讀取。你在設定裡手動停止了它，PiDeck 不會自動啟動——點「啟動 host 並重試」即可恢復。",
 	"timeline.dshHostStoppedStart": "啟動 host 並重試",
+	"timeline.emptySessionFile": "這個會話還沒有內容",
+	"timeline.emptySessionFileHint": "新建會話（包括微信、飛書等外部連線建立的會話）在收到第一條訊息之前不會寫入歷史檔案——訊息到達後內容會自動出現在這裡。",
 	"common.retry": "重試",
 	"timeline.loadingMore": "載入中…",
 	"timeline.loadEarlierTurns": "顯示更早的 {count} 輪對話",

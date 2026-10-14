@@ -623,6 +623,10 @@ export class WeChatBridge {
 				title,
 				existingSessionId: existing?.sessionId,
 				sessionPath: existing?.sessionPath,
+				// 微信会话在侧栏带渠道标志，并像桌面会话一样由 pi 侧自动命名
+				// （桥给的「微信 xxxx」只是首条消息前的占位，不再锁死标题所有权）。
+				channel: "wechat",
+				autoTitle: true,
 			});
 			let tab: AgentTab;
 			try {
@@ -632,7 +636,7 @@ export class WeChatBridge {
 				// 而不是让这个 chat 永久卡在错误上。
 				if (!existing?.sessionPath) throw error;
 				this.deps.logger?.("warn", "微信会话恢复失败，改新建", error instanceof Error ? error.message : String(error));
-				session = await this.deps.runtimeBindings.ensureSession({ projectId, title: `微信 ${chatId.slice(-4)}` });
+				session = await this.deps.runtimeBindings.ensureSession({ projectId, title: `微信 ${chatId.slice(-4)}`, channel: "wechat", autoTitle: true });
 				tab = await this.deps.runtimeBindings.activateRuntime(session.sessionId);
 			}
 			const binding: WeChatChatBinding = {

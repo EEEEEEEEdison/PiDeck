@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { AgentBackend, AgentTab, SessionEnvironment, SessionModelPreference, SessionRecord, SessionSource, SessionSummary } from "../../shared/types";
+import type { AgentBackend, AgentTab, SessionChannel, SessionEnvironment, SessionModelPreference, SessionRecord, SessionSource, SessionSummary } from "../../shared/types";
 import type { SessionProxyOverride } from "../../shared/types/session";
 import { getAppLogger } from "../logging/sharedLogger";
 import { renameWithRetry } from "../utils/fsRetry";
@@ -41,6 +41,8 @@ export type SessionCatalogEntry = {
 	noSession?: boolean;
 	source: SessionSource;
 	environment: SessionEnvironment;
+	/** 外部连接渠道（微信/飞书桥建的会话）；缺省 = 桌面端创建，列表据此显示渠道标志。 */
+	channel?: SessionChannel;
 	/** 运行时后端；缺省 "pi"（旧 catalog 数据兼容）。 */
 	backend?: AgentBackend;
 	filePath?: string;
@@ -605,6 +607,8 @@ export class SessionCatalog {
 		wslUser?: string;
 		importedSourceId?: string;
 		piSessionId?: string;
+		/** 会话来源渠道（微信/飞书等外部连接）：由 IM 桥在注册会话时写入，落库后侧栏显示渠道标志。 */
+		channel?: SessionChannel;
 		/**
 		 * 命令层权威标题（fork/clone/copy 专用）：命令刚把 (fork) 后缀名物理写进会话文件，
 		 * 授权本次注册把标题当作权威名落库（见下方覆盖规则）。
@@ -658,6 +662,7 @@ export class SessionCatalog {
 					wslUser: input.wslUser,
 					importedSourceId: input.importedSourceId,
 					piSessionId: input.piSessionId,
+					channel: input.channel,
 					forked: input.forked,
 					model: cloneModelPreference(input.model),
 					thinkingLevel: input.thinkingLevel,
@@ -676,6 +681,9 @@ export class SessionCatalog {
 				entry.wslUser = input.wslUser;
 				entry.importedSourceId = input.importedSourceId;
 				entry.piSessionId = input.piSessionId;
+				// 渠道标志只增补不清空：同一文件后续被普通扫描命中时不带渠道信息，
+				// 直接覆盖会让微信/飞书会话的标志在下次扫描后消失。
+				if (input.channel) entry.channel = input.channel;
 				// 命令层标题覆盖规则（fork/clone/copy）：命令刚刚把 (fork) 名写进会话文件，但扫描
 				// 可能抢在改名落盘前先索引了新文件，用正文兜底（首条消息，或复制进来的父会话名）
 				// 把标题锁成 fallback —— 而大文件只读头/尾窗口，rename 追加的 session_info 很快被
@@ -721,6 +729,11 @@ export class SessionCatalog {
 		agentPreset?: string;
 		/** ACP 工具预选（AcpToolConfig.id）：backend=acp 草稿期选哪个 CLI。 */
 		acpToolId?: string;
+		/**
+		 * 外部连接渠道（微信/飞书桥建的会话）。与 titleOrigin 独立：渠道只决定标志，
+		 * 标题所有权由 titleOrigin 决定（IM 桥想要自动命名就不要传 titleOrigin）。
+		 */
+		channel?: SessionChannel;
 		/** 外部（dsh-web 等）会话导入：host 会话已存在，条目直接置 active（重启不清理）。 */
 		dshSessionId?: string;
 		/**
@@ -784,6 +797,7 @@ export class SessionCatalog {
 				titleOrigin: input.titleOrigin ?? (input.dshSessionId ? "manual" : undefined),
 				source: input.source ?? "pi",
 				environment: input.environment,
+				channel: input.channel,
 				backend: input.backend,
 				wslDistro: input.environment === "wsl" ? this.identityContext.wslDistro : undefined,
 				wslUser: input.environment === "wsl" ? this.identityContext.wslUser : undefined,
@@ -1477,6 +1491,7 @@ export class SessionCatalog {
 			noSession: entry.noSession,
 			source: summary?.source ?? entry.source,
 			environment: summary ? getSessionEnvironment(summary) : entry.environment,
+			channel: entry.channel,
 			backend: entry.backend,
 			filePath: summary?.filePath ?? entry.filePath,
 			wslDistro: entry.wslDistro,
@@ -1607,6 +1622,11 @@ export class SessionCatalog {
 		const entries = parsed.sessions.filter((entry): entry is SessionCatalogEntry => typeof entry?.id === "string" && typeof entry.projectId === "string" && typeof entry.title === "string" && (entry.environment === "native" || entry.environment === "wsl") && (entry.status === "draft" || entry.status === "active"));
 		if (entries.length !== parsed.sessions.length) {
 			throw new Error(`Session catalog contains invalid records: ${filePath}`);
+		}
+		// 渠道标志是渲染层显示标志的依据：只认白名单值，手改/未来版本的未知值按「无渠道」
+		// 处理，不把未知字符串传给 UI（与 titleOrigin 等字段的读盘清洗同一口径）。
+		for (const entry of entries) {
+			if (entry.channel !== "wechat" && entry.channel !== "feishu") delete entry.channel;
 		}
 		const dismissed = Array.isArray(parsed.dismissedDshSessionIds) ? parsed.dismissedDshSessionIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0) : [];
 		return {
