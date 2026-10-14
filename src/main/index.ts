@@ -5121,11 +5121,15 @@ app
 			onTitleChanged: (deckSessionId, title) => {
 				const entry = sessionCatalog?.get(deckSessionId);
 				if (!entry || entry.title === title) return;
+				// session_info_update.title 是 agent 侧命名而非用户手动：走 applyAgentTitle
+				// （同源 last-wins、不覆盖用户改名、拒收标记脏名）。此前直接 update() 会把 CLI
+				// 标题锁成 manual 终态，用户改名在下一个回合就被 CLI 拉回。
 				void sessionCatalog
-					.update(entry.id, { title })
-					.then(() => {
+					.applyAgentTitle(deckSessionId, title)
+					.then((applied) => {
+						if (!applied) return;
 						if (mainWindow && !mainWindow.isDestroyed()) {
-							mainWindow.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: entry.projectId });
+							mainWindow.webContents.send(ipcChannels.sessionsCatalogRefreshed, { projectId: applied.projectId });
 						}
 					})
 					.catch((error: unknown) => {

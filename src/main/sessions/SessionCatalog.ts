@@ -910,6 +910,41 @@ export class SessionCatalog {
 	}
 
 	/**
+	 * ACP CLI（session_info_update）标题回写：agent 侧来源，last-wins。
+	 *
+	 * 与 applyAutomaticTitle 的差异：CLI 每回合末会持续精修标题（codex 首个标题常是 prompt 原文），
+	 * 锁一次会丢掉后续更好的名字，所以同源可重复领取；唯一硬边界是 manual（用户确认名）——
+	 * 用户改名的会话绝不被 CLI 拉回（对齐 pi/DSH 侧「自动结果不得覆盖用户改名」语义）。
+	 * 标记形态脏名（上下文代理确认行）任何来源都不写。
+	 * 存量注意：旧版本曾把 CLI 标题当 manual 写入，这类条目无法与真用户改名区分，
+	 * 保守按 manual 处理（CLI 后续标题被拒），直到用户再次手动改名。
+	 */
+	async applyAgentTitle(id: string, title: string): Promise<SessionRecord | undefined> {
+		this.assertLoaded();
+		const nextTitle = title.replace(/\s+/g, " ").trim();
+		if (!nextTitle || looksLikeToolMarkerTitle(nextTitle)) return undefined;
+		const transient = this.transientEntries.get(id);
+		if (transient) {
+			if (resolveTitleOrigin(transient) === "manual" || transient.title === nextTitle) return undefined;
+			transient.title = nextTitle;
+			assignTitleOrigin(transient, "auto");
+			transient.updatedAt = Date.now();
+			return this.recordFromEntry(transient);
+		}
+		let claimed = false;
+		const entry = await this.enqueueMutation((entries) => {
+			const nextEntry = this.requireEntry(entries, id);
+			if (resolveTitleOrigin(nextEntry) === "manual" || nextEntry.title === nextTitle) return { value: cloneEntry(nextEntry), changed: false };
+			nextEntry.title = nextTitle;
+			assignTitleOrigin(nextEntry, "auto");
+			nextEntry.updatedAt = Date.now();
+			claimed = true;
+			return { value: cloneEntry(nextEntry), changed: true };
+		});
+		return claimed ? this.recordFromEntry(entry) : undefined;
+	}
+
+	/**
 	 * Reserves catalog title ownership before a manual rename reaches pi. The rename
 	 * RPC is asynchronous, so this closes the window where a pending auto-title
 	 * result could otherwise claim the still-provisional record first.
