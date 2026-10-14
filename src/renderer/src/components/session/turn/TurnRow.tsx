@@ -277,6 +277,9 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 	for (let index = assistantMessages.length - 1; index >= 0 && !turnModel; index -= 1) {
 		turnModel = assistantMessages[index]?.message.model;
 	}
+	// 只在本轮结束后显示：流式期间模型名跟着正文一起长出来，既干扰阅读也像「已经定稿」的断言；
+	// 回看历史轮用的是哪个模型只关心定论，故与固定耗时（showDuration 的非 live 分支）同一时机出现。
+	const showTurnModel = !isRunLive && Boolean(turnModel);
 
 	// 本轮没有任何可渲染内容时不输出空容器
 	if (displayItems.length === 0 && allImages.length === 0) return null;
@@ -446,7 +449,7 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 				    透明度：半透明降噪（hover/focus-within 恢复）必须盖住整行——按钮图标与行末耗时/模型同一层，
 				    否则出现「图标偏淡、数字偏深」的割裂观感；无按钮时不降噪（没有需要弱化的交互件）。
 				    ask_question 等待回答期间不增长：冻结在提问弹起时刻，等待不计入处理耗时。 */}
-				{((mergedText && !editing) || showDuration || turnModel) && (
+				{((mergedText && !editing) || showDuration || showTurnModel) && (
 					<div className={`flex min-h-6 items-center gap-1${mergedText && !editing ? " opacity-55 transition-opacity hover:opacity-100 focus-within:opacity-100" : ""}`}>
 						{mergedText && !editing && (
 							<>
@@ -480,9 +483,9 @@ export const TurnRow = memo(function TurnRow(props: TurnRowProps) {
 								<span className="text-body leading-none tabular-nums">{isRunLive && run.askPending ? formatDuration(Math.max(0, (run.askPendingAt ?? effectiveStart) - effectiveStart)) : isRunLive ? <LiveDuration startedAt={effectiveStart} isStreaming /> : formatDuration(duration)}</span>
 							</div>
 						)}
-						{turnModel && (
+						{showTurnModel && turnModel && (
 							/* 本轮实际使用的模型（provider + modelId）跟在耗时后面：同一会话内用户会频繁换模型，
-							   只在输入框显示当前模型不足以回看历史轮。
+							   只在输入框显示当前模型不足以回看历史轮；流式中不显示，回复结束才落定。
 							   做成小标签而不是同号纯文本：左边耗时是读数（text-body + 等宽数字），
 							   模型名是名字，同色同号时两段会连成一句「2m18s global:xxx」读不断。
 							   模型名长短不一（如 global:deepseek-v4.1-flash），限宽截断 + title 给全量 provider/model，
