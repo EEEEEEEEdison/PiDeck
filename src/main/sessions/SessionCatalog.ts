@@ -6,7 +6,7 @@ import type { AgentBackend, AgentTab, SessionEnvironment, SessionModelPreference
 import type { SessionProxyOverride } from "../../shared/types/session";
 import { getAppLogger } from "../logging/sharedLogger";
 import { renameWithRetry } from "../utils/fsRetry";
-import { buildSessionOriginKey, buildSummaryOriginKey, canonicalizeSessionPath, collectSessionSubtreeIds, getImportedSessionSourceId, getSessionEnvironment, isInSubagentArtifactsDir, looksLikeCodexSessionFileStem, looksLikePiSessionFileStem } from "../../shared/sessionIdentity";
+import { buildSessionOriginKey, buildSummaryOriginKey, canonicalizeSessionPath, collectSessionSubtreeIds, getImportedSessionSourceId, getSessionEnvironment, isInSubagentArtifactsDir, looksLikeCodexSessionFileStem, looksLikePiSessionFileStem, looksLikeToolMarkerTitle } from "../../shared/sessionIdentity";
 import { looksLikeExpandedRefBlockTitle } from "../../shared/expandedRefBlocks";
 import { createSessionModelPreference } from "../../shared/modelDisplayName";
 
@@ -164,7 +164,10 @@ function findExistingAncestorDir(filePath: string, maxDepth = 6): string | undef
 /** 侧栏/Tab 展示用：pi 文件名时间戳不是会话名。 */
 function catalogDisplayTitle(title: string | undefined): string | undefined {
 	if (!title) return undefined;
-	return looksLikePiSessionFileStem(title) ? undefined : title;
+	// 工具/上下文代理的确认标记行（`[ACP] acp_status result`）不是任何人起的名字：
+	// 展示层一律当没有名字（Untitled），等权威名/自动标题来替换。
+	if (looksLikePiSessionFileStem(title) || looksLikeToolMarkerTitle(title)) return undefined;
+	return title;
 }
 
 /** 占位标题判定：catalog 无真实名称时落成 Untitled（pi 时间戳 stem 加载时也被清成它），
@@ -172,6 +175,8 @@ function catalogDisplayTitle(title: string | undefined): string | undefined {
 function isPlaceholderCatalogTitle(title: string | undefined): boolean {
 	if (!title) return true;
 	if (looksLikePiSessionFileStem(title)) return true;
+	// 标记脏名同样是占位名：值得再读一次头部，让权威名/首句兜底把它换掉。
+	if (looksLikeToolMarkerTitle(title)) return true;
 	// 未折叠的块原文标题（`<prompt_template …>` 等历史脏数据）同样是占位名：
 	// 允许首次补名把它换成用户可识别的标题，否则它会一直留在侧栏。
 	if (looksLikeExpandedRefBlockTitle(title)) return true;
@@ -184,6 +189,11 @@ function isPlaceholderCatalogTitle(title: string | undefined): boolean {
  * 但保留一次指纹修复机会（#266 存量被误锁的首句兜底，见 repairedLegacyFallbackTitle）。
  */
 function resolveTitleOrigin(entry: Pick<SessionCatalogEntry, "title" | "titleLocked" | "titleOrigin">): SessionTitleOrigin | undefined {
+	// 标记形态的脏名永远不算所有权：现场（2026-10-14）是扩展的旁路补全被第三方上下文代理接管，
+	// 一段 `[ACP] acp_status result` 被当成权威 session_info 名锁成 manual 终态，此后自动命名再也
+	// 修不掉，用户看到的就是「标题老是被插件改掉」。放在最前面（覆盖已持久化的 origin），
+	// 一次性放开 claimAutomaticTitle / isTitleLocked / scannedTitleOrigin 三条判定。
+	if (looksLikeToolMarkerTitle(entry.title)) return undefined;
 	if (entry.titleOrigin === "fallback" || entry.titleOrigin === "auto" || entry.titleOrigin === "manual" || entry.titleOrigin === "legacy") return entry.titleOrigin;
 	if (entry.titleLocked === false) return undefined;
 	// 缺 titleOrigin 只有 locked=true：存量条目来源未知，标成 legacy 等一次指纹修复机会（#266）。
@@ -1421,7 +1431,14 @@ export class SessionCatalog {
 				if (item.includeTitle && result.name) {
 					// fromSessionInfo=false 是首条消息弱回退（#266）：所有权只能算 fallback，
 					// 缺省（旧 fetcher/未标记）按权威名处理，保持既有行为。
-					titles.set(item.originKey, { name: result.name, fromSessionInfo: result.nameFromSessionInfo !== false, fallbackName: result.fallbackName });
+					// 权威名本身是标记脏行（第三方上下文代理把它写进了 session_info）时不采信：
+					// 有弱兜底就用弱兜底（侧栏显示首句而不是日志，所有权仍算 fallback，可被扩展升级）；
+					// 连弱兜底都没有就干脆不登记，让条目保持占位标题等后续命名。
+					const junkMarkerName = result.nameFromSessionInfo !== false && looksLikeToolMarkerTitle(result.name);
+					const scannedName = junkMarkerName ? result.fallbackName : result.name;
+					if (scannedName) {
+						titles.set(item.originKey, { name: scannedName, fromSessionInfo: junkMarkerName ? false : result.nameFromSessionInfo !== false, fallbackName: result.fallbackName });
+					}
 				}
 				if (item.legacyProbe) {
 					// 只有真读到 session_info 才算权威名：另一个弱兜底不能用来「修复」弱兜底。

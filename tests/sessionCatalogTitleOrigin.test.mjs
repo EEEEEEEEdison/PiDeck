@@ -593,3 +593,88 @@ test("a command title never overrides a user-owned manual title", async () => {
 		await rm(dir, { recursive: true, force: true });
 	}
 });
+
+// ── 2026-10-14：工具/上下文代理的确认标记行被当成标题写进 session_info ──
+// 现场：内置自动命名扩展的旁路补全被第三方上下文代理接管，返回 `📦 [ACP] acp_status result: …`
+// 标记行；扩展收下后写进 pi 的 session_info，扫描把它当权威名锁成 manual 终态，
+// 侧栏于是永久显示一段工具日志（用户看到的「标题老是被改掉」）。
+// 修复方向：标记形态的标题永远不算锁定（可被权威名/自动标题替换），且扫描到的脏权威名
+// 降级成弱兜底名（fallback），而不是 manual。
+
+/** 盘上形态与现场一致：标记脏名 + manual 终态锁。 */
+function markerJunkEntry(filePath, title = "[ACP] acp_status result") {
+	return legacyHealEntry(filePath, title, { titleOrigin: "manual" });
+}
+
+// 存量脏名（manual 终态）必须还能被扩展的自动标题替换。
+test("a marker-shaped manual title is not terminal for the extension", async () => {
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-title-origin-marker-auto-"));
+	try {
+		const filePath = join(dir, "2026-08-22T04-22-29-170Z_marker.jsonl");
+		await writeFile(join(dir, "sessions.json"), JSON.stringify({ version: 1, sessions: [markerJunkEntry(filePath)] }), "utf8");
+		const catalog = new SessionCatalog(join(dir, "sessions.json"));
+		await catalog.load();
+
+		const upgraded = await catalog.applyAutomaticTitle("legacy-heal", "修复登录流程", "auto");
+		assert.equal(upgraded.title, "修复登录流程", "标记脏名不得挡住自动命名");
+		const onDisk = await readEntry(dir, "legacy-heal");
+		assert.equal(onDisk.titleOrigin, "auto");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+// 侧栏展示口径：脏标记名在修复前先当占位名，不显示成日志行。
+test("a marker-shaped title is not shown as the session title", async () => {
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-title-origin-marker-record-"));
+	try {
+		const filePath = join(dir, "2026-08-22T04-22-29-171Z_marker.jsonl");
+		await writeFile(join(dir, "sessions.json"), JSON.stringify({ version: 1, sessions: [markerJunkEntry(filePath)] }), "utf8");
+		const catalog = new SessionCatalog(join(dir, "sessions.json"));
+		await catalog.load();
+		const [record] = await catalog.mergeScanned("project-1", [lightSummary({ id: filePath, filePath })]);
+		assert.equal(record.title, "Untitled", "标记脏名不得出现在侧栏");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+// 扫描侧：JSONL 权威名是标记脏名时，用文件内弱兜底候选命名并只落 fallback 所有权，
+// 否则脏名会以 manual 终态重新写回、永不可修。
+test("a scanned marker-shaped session_info name is demoted to the weak fallback", async () => {
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-title-origin-marker-scan-"));
+	try {
+		const fetcher = async () => ({ name: "[ACP] acp_status result", nameFromSessionInfo: true, valid: true, fallbackName: "帮我看看这个报错" });
+		const catalog = new SessionCatalog(join(dir, "sessions.json"), {}, undefined, fetcher);
+		await catalog.load();
+		const [scanned] = await catalog.mergeScanned("project-1", [lightSummary()]);
+		assert.equal(scanned.title, "帮我看看这个报错", "脏权威名不得作为标题落库");
+		assert.equal((await readEntry(dir, scanned.id)).titleOrigin, "fallback", "弱兜底只算 fallback，留给扩展自动命名覆盖");
+
+		const upgraded = await catalog.applyAutomaticTitle(scanned.id, "排查报错根因", "auto");
+		assert.equal(upgraded.title, "排查报错根因");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+// 反例（防误伤）：带方括号的正常手动标题仍是终态 manual，自动命名不得覆盖。
+test("a bracketed manual title is still terminal", async () => {
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-title-origin-marker-manual-"));
+	try {
+		const catalog = new SessionCatalog(join(dir, "sessions.json"));
+		await catalog.load();
+		const [draft] = await catalog.mergeScanned("project-1", [lightSummary()]);
+		await catalog.update(draft.id, { title: "[WIP] 重构商店页" });
+
+		const blocked = await catalog.applyAutomaticTitle(draft.id, "自动标题", "auto");
+		assert.equal(blocked.title, "[WIP] 重构商店页", "正常标题的所有权不被形态判定抢走");
+		assert.equal((await readEntry(dir, draft.id)).title, "[WIP] 重构商店页");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});

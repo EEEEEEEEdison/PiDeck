@@ -33,6 +33,31 @@ export function looksLikeCodexSessionFileStem(title: string): boolean {
 	return /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-[0-9a-f]{8}(?:-[0-9a-f]+)*(?:\.jsonl)?(?:\.{3})?$/i.test(trimmed);
 }
 
+/** 标记行前导的象形符号（📦/❌ 等）与紧随空白，判定前先剥掉。 */
+const MARKER_PICTOGRAPH_PREFIX = /^[\p{Extended_Pictographic}\uFE0F\u200D]+[ \t]*/u;
+/**
+ * 工具/上下文代理确认标记行的标题形态：`[全大写标签]` + 紧随的 ASCII 正文，且这段正文里
+ * 带日志分隔符（`_` 或 `:`，如 acp_status / FAILED:）。三条同时成立才算，防止误伤正常标题——
+ * `[WIP] 重构商店页`（中文正文）、`[Bug] fix the API timeouts`（标签非全大写、正文无分隔符）都不是标记行。
+ */
+const MARKER_TAG_TITLE = /^\[[A-Z][A-Z0-9_-]{1,11}\][ \t]+[\x20-\x7E]*[:_]/;
+
+/**
+ * 工具/上下文代理的确认标记形态标题（如 `[ACP] acp_status result`、
+ * `[ACP] Compression FAILED: None of the 1 requested range(s) resolved …`）。
+ *
+ * 现场（2026-10-14）：内置自动命名扩展的旁路补全被第三方上下文代理接管，
+ * 返回的是代理自己注入的确认标记行（原文形如 `📦 [ACP] acp_status result: …`）。
+ * 扩展剥掉 emoji 与尾部冒号后原样收下并写进 pi 的 session_info，侧栏标题于是变成一段工具标记。
+ *
+ * 这类文本不是任何人起的会话名字：必须始终当占位名，让后续权威名/自动标题能替换它，
+ * 否则条目被锁成 manual 终态，脏名永久留存。
+ */
+export function looksLikeToolMarkerTitle(title: string): boolean {
+	const trimmed = title.replace(/\s+/g, " ").trim().replace(MARKER_PICTOGRAPH_PREFIX, "");
+	return MARKER_TAG_TITLE.test(trimmed);
+}
+
 /** pi-subagents 产物目录名：artifactDir="session"（默认）把子代理输入/输出/转储写进父会话同级目录。 */
 export const SUBAGENT_ARTIFACTS_DIR_NAME = "subagent-artifacts";
 
