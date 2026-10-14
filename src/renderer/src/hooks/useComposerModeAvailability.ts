@@ -63,6 +63,13 @@ export function useComposerModeAvailability(props: { backend?: AgentBackend; ima
 		}
 	}, [isAcp, isDsh]);
 
+	// 首挂载与后端切换时同步一次可用性：refreshAvailability 的身份随 isAcp/isDsh 变化，
+	// 初始 useState(true) 只是乐观默认；ACP 会话若不同步，会在首次打开下拉前错误地显示
+	// 计划/目标选项（m01733：模式选择器不应出现在 ACP 会话上）。
+	useEffect(() => {
+		void refreshAvailability();
+	}, [refreshAvailability]);
+
 	// 打开菜单时刷新（扩展开关可能刚在设置页改过）。不可用且当前正在用则强制回退，
 	// 这属于模式状态流转的边界：不在这里回退，用户会卡在一个扩展已删的模式上。
 	useEffect(() => {

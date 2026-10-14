@@ -97,3 +97,13 @@ test("模式选择器已常驻底栏并可被功能模块设置隐藏（源码�
 	const modules = readFileSync("src/renderer/src/components/app/settings/ModuleVisibilitySection.tsx", "utf8");
 	assert.match(modules, /composerModes:/, "功能模块设置页列出模式选择器开关");
 });
+
+// m01733：ACP 会话的模式选择器依赖 plan/goal 可用性回落到只剩 normal 才隐藏；
+// 但初始 useState(true) + 仅在下拉打开时刷新，会让 ACP 会话首帧就渲染出选择器。
+// 契约：挂载/后端切换（refreshAvailability 身份变化）时必须同步一次可用性。
+test("模式可用性在挂载与后端切换时同步（ACP 会话首帧不得显示模式选择器，m01733）", () => {
+	const hook = readFileSync("src/renderer/src/hooks/useComposerModeAvailability.ts", "utf8");
+	assert.match(hook, /useEffect\(\(\) => \{\s*void refreshAvailability\(\);\s*\}, \[refreshAvailability\]\)/, "需存在挂载/身份变化时刷新可用性的 effect");
+	// ACP 分支在 refreshAvailability 内同步置 false（不查 pi 扩展列表）
+	assert.match(hook, /if \(isAcp\) \{\s*setPlanModeAvailable\(false\);\s*setGoalModeAvailable\(false\);\s*return;\s*\}/);
+});
