@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 7f88290748b6f8184250484d3ab2513102d8139073740a04b80dbe8d1e76e1e9（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 3370a392480a89a021e0836cf72f8a47bf7b2c162c151d191d57c34d96186c97（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -409,6 +409,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"ctx.detail.total": "回覆總耗時",
 	"ctx.detail.streamingTps": "流式 TPS",
 	"ctx.detail.endToEndTps": "端到端 TPS",
+	"ctx.detail.sessionStreamingTps": "會話平均流式 TPS",
+	"ctx.detail.sessionEndToEndTps": "會話平均端到端 TPS",
 	"ctx.detail.lastReply": "上次回覆",
 	"ctx.detail.sessionStats": "會話統計",
 	"ctx.detail.turnsSteps": "回合/步驟",
@@ -431,6 +433,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"ctx.detail.tpsAverageHint": "DSH 會話內有效回覆的輸出 tokens 總和 ÷ 流式生成耗時總和；不含首 token 等待與工具執行",
 	"ctx.detail.endToEndTpsHint": "最近一條回覆的輸出 tokens ÷ 本次模型請求從發出到結束的耗時；包含首 token 等待，不含前序工具執行；自動重試時只計最後一次請求。缺少用量或計時資料時顯示 —",
 	"ctx.detail.endToEndTpsAverageHint": "DSH 會話內輸出 tokens 總和 ÷ 對應步驟的首 token 等待與流式生成耗時總和；包含步驟內自動重試等待，不含工具執行。缺少資料時顯示 —",
+	"ctx.detail.sessionStreamingTpsHint": "整段會話累計輸出 tokens ÷ 解碼活躍耗時並集；通過時間區間並集消除了派生任務（如 subagent）併發重疊耗時",
+	"ctx.detail.sessionEndToEndTpsHint": "整段會話累計輸出 tokens ÷ 整體活躍耗時並集；包含首 token 等待，通過時間區間並集消除了派生任務（如 subagent）併發重疊耗時",
 	"ctx.detail.costHint": "本會話累計 API 費用（按模型/供應商上報的 usage 計價累計）",
 	"ctx.detail.costCnyHint": "按固定匯率 ¥7.2/USD 便捷換算，非即時牌價",
 	"ctx.detail.turnsStepsHint": "DSH 會話累計：對話回合數 / 工具步驟數（host sessionStats 投影）",
@@ -1024,6 +1028,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"composerStats.ttftAverage": "首 token 平均 {duration}",
 	"composerStats.streamingTps": "流式 {throughput} tok/s",
 	"composerStats.endToEndTps": "端到端 {throughput} tok/s",
+	"composerStats.sessionStreamingTps": "均速 {throughput} tok/s",
+	"composerStats.sessionEndToEndTps": "端到端均速 {throughput} tok/s",
 	"composerStats.cacheHit": "快取命中 {percent}%",
 	"composerStats.tokens": "輸入 {input} tok · 輸出 {output} tok",
 	"composerStats.ttft": "首 token {duration}",

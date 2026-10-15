@@ -234,6 +234,10 @@ export type AgentRuntimeState = {
 	tps?: number;
 	/** 最近一次 assistant 回复的端到端速度（tokens/s；同一回复的 output tokens ÷ totalMs）。 */
 	endToEndTps?: number;
+	/** 会话累计平均流式速度（tokens/s；output tokens ÷ 解码活跃耗时并集，已消除派生任务并发重叠）。 */
+	sessionTps?: number;
+	/** 会话累计平均端到端速度（tokens/s；output tokens ÷ 整体活跃耗时并集，已消除派生任务并发重叠）。 */
+	sessionEndToEndTps?: number;
 	/** 性能指标结算时刻（Date.now()），渲染层据此判断是否为近期数据 */
 	perfAt?: number;
 };

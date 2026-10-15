@@ -195,7 +195,7 @@ export type SessionStatusDetail = {
  * 纯函数：label/value 已本地化，调用方只负责布局。
  */
 export function buildSessionStatusDetail(
-	state: Pick<AgentRuntimeState, "contextPercent" | "contextTokens" | "contextWindow" | "inputTokens" | "outputTokens" | "cacheRead" | "cacheWrite" | "cacheTotal" | "cacheHitPercent" | "ttftMs" | "totalMs" | "tps" | "endToEndTps" | "cost" | "dshSessionStats"> | undefined,
+	state: Pick<AgentRuntimeState, "contextPercent" | "contextTokens" | "contextWindow" | "inputTokens" | "outputTokens" | "cacheRead" | "cacheWrite" | "cacheTotal" | "cacheHitPercent" | "ttftMs" | "totalMs" | "tps" | "endToEndTps" | "sessionTps" | "sessionEndToEndTps" | "cost" | "dshSessionStats"> | undefined,
 	averageCacheHit: number | undefined,
 	averageCacheHitSampleCount: number,
 	tpsMode: TpsDisplayMode = "streaming",
@@ -287,6 +287,9 @@ export function buildSessionStatusDetail(
 		}
 		const throughput = buildTpsDisplay(tpsMode, sessionStats.tokensPerSecond, sessionStats.endToEndTokensPerSecond, "session");
 		sessionStatRows.push({ label: throughput.label, value: throughput.value, hint: throughput.hint });
+	} else if (state.sessionTps != null || state.sessionEndToEndTps != null) {
+		const sessionThroughput = buildTpsDisplay(tpsMode, state.sessionTps, state.sessionEndToEndTps, "sessionAverage");
+		sessionStatRows.push({ label: sessionThroughput.label, value: sessionThroughput.value, hint: sessionThroughput.hint });
 	}
 	return {
 		detailRows,

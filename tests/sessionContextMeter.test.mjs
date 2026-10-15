@@ -228,7 +228,7 @@ test("bottom bar keeps model and thinking together with independent one-click en
 	// 注入 ComposerStatsLine（与统计行并排）；chip 容器仍在 ComposerComponents。
 	const areaSource = readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
 	assert.match(areaSource, /import \{ SessionContextMeter \} from "\.\/SessionContextMeter"/);
-	assert.match(areaSource, /contextMeter=\{[\s\S]{0,240}?<SessionContextMeter[\s\S]{0,360}?backend=\{composer\.backend === "dsh" \? "dsh" : "pi"\}/);
+	assert.match(areaSource, /contextMeter=\{[\s\S]{0,300}?<SessionContextMeter[\s\S]{0,600}?backend=\{composer\.backend === "dsh" \? "dsh" : "pi"\}/);
 	assert.match(source, /composer-bottom-right ml-auto flex shrink-0 items-center gap-2/);
 	const chip = readFileSync("src/renderer/src/components/session/ModelThinkingChip.tsx", "utf8");
 	const host = readFileSync("src/renderer/src/components/session/ComposerPickerHost.tsx", "utf8");

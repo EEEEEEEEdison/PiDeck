@@ -2884,8 +2884,33 @@ export class AgentManager {
 			totalMs: perf?.totalMs,
 			endToEndTps: perf?.endToEndTps,
 			tps: perf?.tps,
+			sessionTps: perf?.sessionTps,
+			sessionEndToEndTps: perf?.sessionEndToEndTps,
 			perfAt: perf?.at,
 		};
+	}
+
+	/** 同步某 agent 的子任务（如 subagent）记录到性能追踪器中（消解并发区间重叠） */
+	syncSubagentPerfSpans(
+		agentId: string,
+		records: ReadonlyArray<{
+			id: string;
+			startedAt?: number;
+			completedAt?: number;
+			tokens?: number;
+			streamingTokens?: number;
+			streamingStartedAt?: number;
+		}>,
+	): void {
+		const tasks = records
+			.filter((r): r is typeof r & { startedAt: number } => typeof r.startedAt === "number")
+			.map((r) => ({
+				id: r.id,
+				startedAt: r.startedAt,
+				completedAt: r.completedAt,
+				tokens: r.tokens,
+			}));
+		this.messagePerf.syncSubagentTasks(agentId, tasks, (channel, payload) => this.emit(channel, payload));
 	}
 
 	private applyActiveToolCallState(agentId: string, state: ActiveToolCallState) {
@@ -4927,6 +4952,16 @@ export class AgentManager {
 			const endedToolName = typeof typed.toolName === "string" ? typed.toolName : "";
 			if (MUTATING_TOOLS.has(endedToolName)) {
 				this.rewindCheckpoints.scheduleToolCheckpoint(agentId, endedToolName, this.rewindCheckpoints.turnCounter(agentId));
+			}
+			if (endedToolName === "Agent" || endedToolName === "subagent" || endedToolName === "acp_delegate") {
+				const sessionPath = runtime?.tab.sessionPath;
+				if (sessionPath) {
+					void this.readSessionSubagentRecords(sessionPath, { liveRuntimeStartedAt: runtime.tab.createdAt })
+						.then((records) => {
+							this.syncSubagentPerfSpans(agentId, records);
+						})
+						.catch(() => {});
+				}
 			}
 			// 工具执行结束是终态，立即 flush 把最终结果推给渲染进程，避免节流窗口内用户看不到完成状态。
 			this.flushMessageEmit(agentId);

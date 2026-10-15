@@ -17,7 +17,7 @@ import { formatTokens } from "./SessionContextMeter";
 /** 单个可悬停指标：text 为展示文本，hint 为悬停说明（计算口径），缺省不渲染 title。 */
 export type ComposerStatPart = { text: string; hint?: string };
 
-export function buildComposerStatsSegments(state: Pick<AgentRuntimeState, "dshSessionStats" | "inputTokens" | "outputTokens" | "cacheHitPercent" | "ttftMs" | "totalMs" | "tps" | "endToEndTps"> | undefined, turnCount = 0, tpsMode: TpsDisplayMode = "streaming"): ComposerStatPart[][] {
+export function buildComposerStatsSegments(state: Pick<AgentRuntimeState, "dshSessionStats" | "inputTokens" | "outputTokens" | "cacheHitPercent" | "ttftMs" | "totalMs" | "tps" | "endToEndTps" | "sessionTps" | "sessionEndToEndTps"> | undefined, turnCount = 0, tpsMode: TpsDisplayMode = "streaming"): ComposerStatPart[][] {
 	if (!state) return [];
 	const groups: ComposerStatPart[][] = [];
 	const sessionStats = state.dshSessionStats;
@@ -69,6 +69,10 @@ export function buildComposerStatsSegments(state: Pick<AgentRuntimeState, "dshSe
 			const throughput = buildTpsDisplay(tpsMode, state.tps, state.endToEndTps, "reply");
 			lastReply.push({ text: throughput.text, hint: throughput.hint });
 		}
+		if (state.sessionTps != null || state.sessionEndToEndTps != null) {
+			const sessionThroughput = buildTpsDisplay(tpsMode, state.sessionTps, state.sessionEndToEndTps, "sessionAverage");
+			lastReply.push({ text: sessionThroughput.text, hint: sessionThroughput.hint });
+		}
 		if (lastReply.length > 0) groups.push(lastReply);
 	}
 	const input = state.inputTokens ?? 0;
@@ -91,7 +95,7 @@ export function buildComposerStatsSegments(state: Pick<AgentRuntimeState, "dshSe
 }
 
 /** 字符串版（兼容既有调用/测试）：每组用「 · 」拼接成单段文本。 */
-export function buildComposerStatsGroups(state: Pick<AgentRuntimeState, "dshSessionStats" | "inputTokens" | "outputTokens" | "cacheHitPercent" | "ttftMs" | "totalMs" | "tps" | "endToEndTps"> | undefined, turnCount = 0, tpsMode: TpsDisplayMode = "streaming"): string[] {
+export function buildComposerStatsGroups(state: Pick<AgentRuntimeState, "dshSessionStats" | "inputTokens" | "outputTokens" | "cacheHitPercent" | "ttftMs" | "totalMs" | "tps" | "endToEndTps" | "sessionTps" | "sessionEndToEndTps"> | undefined, turnCount = 0, tpsMode: TpsDisplayMode = "streaming"): string[] {
 	return buildComposerStatsSegments(state, turnCount, tpsMode).map((parts) => parts.map((part) => part.text).join(" · "));
 }
 

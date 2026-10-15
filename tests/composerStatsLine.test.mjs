@@ -13,6 +13,8 @@ function loadStats() {
 			"composerStats.ttftAverage": "首 token 平均 {duration}",
 			"composerStats.streamingTps": "流式 {throughput} tok/s",
 			"composerStats.endToEndTps": "端到端 {throughput} tok/s",
+			"composerStats.sessionStreamingTps": "均速 {throughput} tok/s",
+			"composerStats.sessionEndToEndTps": "端到端均速 {throughput} tok/s",
 			"composerStats.cacheHit": "缓存命中 {percent}%",
 			"composerStats.tokens": "输入 {input} tok · 输出 {output} tok",
 			"composerStats.ttft": "首 token {duration}",
@@ -148,8 +150,34 @@ test("composer area mounts the stats strip under the input card", () => {
 test("stats copy exists in both locales", () => {
 	const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 	const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
-	for (const key of ["composerStats.counts", "composerStats.llm", "composerStats.toolCall", "composerStats.ttftAverage", "composerStats.streamingTps", "composerStats.endToEndTps", "composerStats.cacheHit", "composerStats.tokens", "composerStats.ttft", "composerStats.reply", "composerStats.turnsHint"]) {
+	for (const key of ["composerStats.counts", "composerStats.llm", "composerStats.toolCall", "composerStats.ttftAverage", "composerStats.streamingTps", "composerStats.endToEndTps", "composerStats.sessionStreamingTps", "composerStats.sessionEndToEndTps", "composerStats.cacheHit", "composerStats.tokens", "composerStats.ttft", "composerStats.reply", "composerStats.turnsHint"]) {
 		assert.match(zh, new RegExp(`"${key.replace(".", "\\.")}"`));
 		assert.match(en, new RegExp(`"${key.replace(".", "\\.")}"`));
 	}
+});
+
+test("pi stats line displays session average tps when available", () => {
+	const { buildComposerStatsGroups } = loadStats();
+	const groups = buildComposerStatsGroups({
+		ttftMs: 210,
+		totalMs: 4300,
+		tps: 31,
+		sessionTps: 45,
+		inputTokens: 800,
+		outputTokens: 90,
+	});
+	assert.equal(groups[0], "首 token 210ms · 回复 4300ms · 流式 31 tok/s · 均速 45 tok/s");
+	assert.equal(groups[1], "输入 800 tok · 输出 90 tok");
+
+	const e2eGroups = buildComposerStatsGroups(
+		{
+			ttftMs: 210,
+			totalMs: 4300,
+			endToEndTps: 20.9,
+			sessionEndToEndTps: 28.4,
+		},
+		0,
+		"endToEnd",
+	);
+	assert.equal(e2eGroups[0], "首 token 210ms · 回复 4300ms · 端到端 21 tok/s · 端到端均速 28 tok/s");
 });

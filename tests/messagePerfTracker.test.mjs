@@ -34,8 +34,8 @@ test("reply pairs both TPS values with the same usage, independently of text-onl
 	f.at(9000, () => f.tracker.markFirstText("a"));
 	f.at(16000, () => f.settle("a", { usage: { output: 1000 } }));
 	const result = f.tracker.getLast("a");
-	assert.deepEqual({ ...result }, { totalMs: 15000, ttftMs: 8000, tps: 100, endToEndTps: 1000 / 15, at: 16000 });
-	assert.deepEqual({ ...f.events[0].payload.state }, { totalMs: result.totalMs, ttftMs: result.ttftMs, tps: result.tps, endToEndTps: result.endToEndTps, perfAt: result.at });
+	assert.deepEqual({ ...result }, { totalMs: 15000, ttftMs: 8000, tps: 100, endToEndTps: 1000 / 15, sessionTps: 100, sessionEndToEndTps: 1000 / 15, at: 16000 });
+	assert.deepEqual({ ...f.events[0].payload.state }, { totalMs: result.totalMs, ttftMs: result.ttftMs, tps: result.tps, endToEndTps: result.endToEndTps, sessionTps: result.sessionTps, sessionEndToEndTps: result.sessionEndToEndTps, perfAt: result.at });
 });
 
 test("continuation timer starts before provider waiting and excludes preceding tool execution", () => {
@@ -112,4 +112,21 @@ test("agents have isolated timers and lifecycle cleanup removes cached metrics",
 	f.tracker.clearAgent("a");
 	assert.equal(f.tracker.getLast("a"), undefined);
 	assert.ok(f.tracker.getLast("b"));
+});
+
+test("subagents task records merge with interval union for session tps", () => {
+	const f = fixture();
+	// Main reply 1: 1000 -> 3000 (delta: 2000), tokens: 100
+	f.reply({ agentId: "a", start: 1000, delta: 2000, end: 3000, usage: { output: 100 } });
+	// Subagent 1 & Subagent 2 run concurrently
+	// Subagent 1: 4000 -> 6000, tokens: 100
+	// Subagent 2: 5000 -> 7000, tokens: 100
+	// E2E active duration: [1000, 3000] (2000ms) + union([4000, 6000], [5000, 7000]) -> [4000, 7000] (3000ms) = 5000ms
+	// Total tokens: 300
+	// E2E TPS: 300 / 5s = 60 TPS
+	f.tracker.recordSubagentTask("a", { id: "sub-1", startedAt: 4000, completedAt: 6000, tokens: 100 });
+	f.tracker.recordSubagentTask("a", { id: "sub-2", startedAt: 5000, completedAt: 7000, tokens: 100 });
+
+	const last = f.tracker.getLast("a");
+	assert.equal(last.sessionEndToEndTps, 60);
 });
