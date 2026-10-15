@@ -7,7 +7,8 @@
  * AgentManager），本模块只有类型，没有运行时依赖。
  */
 
-import type { AgentRuntimeState, AgentTab, AvailableModel, ImageContent, SessionChannel } from "../../shared/types";
+import type { AgentRuntimeState, AgentTab, AvailableModel, ChatMessage, ImageContent, ImChannelBackend, SessionChannel } from "../../shared/types";
+import type { SessionRunOutcome, SessionRunWaitInput } from "./sessionRunWaiter";
 
 export interface SessionRuntimeBindingGateway {
 	ensureSession(input: {
@@ -15,6 +16,11 @@ export interface SessionRuntimeBindingGateway {
 		title: string;
 		existingSessionId?: string;
 		sessionPath?: string;
+		/**
+		 * 新建会话用哪个后端（缺省 pi）。只对「新建」生效：existingSessionId/sessionPath
+		 * 命中已有会话时以既有会话的后端为准——换引擎会让历史与模型目录都对不上。
+		 */
+		backend?: ImChannelBackend;
 		/**
 		 * 外部连接渠道（微信/飞书桥建的会话）：落库后侧栏显示渠道标志。
 		 */
@@ -29,6 +35,15 @@ export interface SessionRuntimeBindingGateway {
 	bindRuntime(input: { projectId: string; agent: AgentTab; existingSessionId?: string }): Promise<{ sessionId: string }>;
 	sendPrompt(input: { sessionId: string; message: string; agentMessage?: string; images?: ImageContent[] }): Promise<void>;
 	abortRuntime(sessionId: string): Promise<void>;
+	/**
+	 * 按 runtime id 找活跃 AgentTab（全后端：pi/DSH/ACP 统一）。
+	 * 桥接原先只查 pi 的 AgentManager.list()，DSH 会话永远找不到句柄。
+	 */
+	findRuntimeAgent(agentId: string): AgentTab | undefined;
+	/** 会话当前 runtime 的消息（无 runtime 返回空数组）。按会话身份取，避免旧 runtime 的迟到结果串台。 */
+	getRuntimeMessages(sessionId: string): ChatMessage[];
+	/** 等一个回合收口（后端无差别，契约见 sessionRunWaiter）：必须在提交 prompt 之前登记。 */
+	waitForRunEnd(input: SessionRunWaitInput): Promise<SessionRunOutcome>;
 	listRuntimeModels(sessionId: string): Promise<AvailableModel[]>;
 	getRuntimeState(sessionId: string): Promise<AgentRuntimeState | undefined>;
 	setRuntimeModel(sessionId: string, provider: string, modelId: string): Promise<void>;

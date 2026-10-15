@@ -13,7 +13,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { app, safeStorage } from "electron";
-import type { WeChatAccountInfo, WeChatChatBinding, WeChatModelChainEntry, WeChatSettings } from "../../shared/types";
+import type { ImChannelBackend, WeChatAccountInfo, WeChatChatBinding, WeChatModelChainEntry, WeChatSettings } from "../../shared/types";
+import { parseImChannelBackend } from "../../shared/types";
 import { ILINK_DEFAULT_BASE_URL } from "./ilinkProtocol";
 
 /** 模型链上限。链路是「兜底」不是模型清单：太长只会让失败重试拖时间、多花钱。 */
@@ -60,6 +61,8 @@ type SettingsFile = {
 	account: PersistedAccount | null;
 	defaultWorkspaceId?: string;
 	defaultModelId?: string;
+	/** 新会话的运行时后端；缺省 pi。已存在的绑定各带自己的 backend。 */
+	backend?: ImChannelBackend;
 	modelChain?: WeChatModelChainEntry[];
 };
 
@@ -107,6 +110,8 @@ function readSettings(): SettingsFile {
 			account: parsed.account ?? null,
 			defaultWorkspaceId: parsed.defaultWorkspaceId,
 			defaultModelId: parsed.defaultModelId,
+			// 手改/旧版写入的非法值一律丢掉（当未设置），不把脏值带到建会话链路。
+			backend: parseImChannelBackend(parsed.backend),
 			modelChain: normalizeModelChain(parsed.modelChain),
 		};
 	} catch {
@@ -186,6 +191,7 @@ export function getSettings(): WeChatSettings {
 		account: toPublicAccount(settings.account),
 		defaultWorkspaceId: settings.defaultWorkspaceId,
 		defaultModelId: settings.defaultModelId,
+		backend: settings.backend,
 		modelChain: settings.modelChain ?? [],
 	};
 }
@@ -208,10 +214,12 @@ export function setEnabled(enabled: boolean): void {
 	writeSettings(settings);
 }
 
-export function updateSettings(patch: { defaultWorkspaceId?: string; defaultModelId?: string; modelChain?: WeChatModelChainEntry[] }): WeChatSettings {
+export function updateSettings(patch: { defaultWorkspaceId?: string; defaultModelId?: string; backend?: ImChannelBackend; modelChain?: WeChatModelChainEntry[] }): WeChatSettings {
 	const settings = readSettings();
 	if (patch.defaultWorkspaceId !== undefined) settings.defaultWorkspaceId = patch.defaultWorkspaceId || undefined;
 	if (patch.defaultModelId !== undefined) settings.defaultModelId = patch.defaultModelId || undefined;
+	// 非法值归一为 undefined（缺省 pi）；写 "pi" 与不写等价，但保留显式值便于排障。
+	if (patch.backend !== undefined) settings.backend = parseImChannelBackend(patch.backend);
 	if (patch.modelChain !== undefined) settings.modelChain = normalizeModelChain(patch.modelChain);
 	writeSettings(settings);
 	return getSettings();

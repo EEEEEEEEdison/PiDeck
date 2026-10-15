@@ -20,20 +20,24 @@ test("cardTerminalSucceeded 预占必须在 agent_end 消费，不得跨轮残�
 	assert.match(gate[0], /!\s*deliveredByCard/, "文本同步必须以本轮交付标记为条件");
 });
 
-test("waitForAgentEnd 必须在 sendPrompt 之前注册（快速失败的 run 不得错过 agent_end）", () => {
-	// 若监听注册晚于卡片创建（一次网络往返），秒失败的 run 在窗口内广播 agent_end，
+test("回合结束监听必须在 sendPrompt 之前注册（快速失败的 run 不得错过回合结束）", () => {
+	// 若监听注册晚于卡片创建（一次网络往返），秒失败的 run 在窗口内结束，
 	// 错过后等满 300s，processingChats 持有 chatId 期间该聊天消息被静默丢弃。
-	const listenPos = source.indexOf("agentEndPromise = this.waitForAgentEnd");
+	// 两个后端分支都必须提前登记：pi 走 agent_end 本地事件，其它后端走网关等待器。
+	const piPos = source.indexOf("this.waitForAgentEnd(agentId, 300_000)");
+	const gatewayPos = source.indexOf("this.runtimeBindings.waitForRunEnd({");
 	const sendPos = source.indexOf("await this.runtimeBindings.sendPrompt");
-	assert.ok(listenPos > 0, "应提前创建 agentEndPromise");
+	assert.ok(piPos > 0, "应提前登记 pi 的 agent_end 监听");
+	assert.ok(gatewayPos > 0, "应提前登记网关的回合等待器");
 	assert.ok(sendPos > 0, "sendPrompt 调用应存在");
-	assert.ok(listenPos < sendPos, "agentEndPromise 创建必须先于 sendPrompt");
+	assert.ok(piPos < sendPos, "agent_end 监听必须先于 sendPrompt");
+	assert.ok(gatewayPos < sendPos, "网关等待器必须先于 sendPrompt");
 });
 
 test("300s 超时不得删除仍在运行 run 的卡片注册表（终态事件仍需收尾通道）", () => {
 	// 超时时 run 可能仍在运行；删除注册表会让卡片永久停在中间态、最终结果无任何交付。
 	// 保留注册表让 handleAgentEvent 终态分支在真正结束时 flush+close+清理。
-	const timeoutBranch = source.match(/if\s*\(\s*timedOut\s*\)\s*\{[\s\S]*?\n\t\t\t\}/);
+	const timeoutBranch = source.match(/if\s*\(\s*runEnd\.timedOut\s*\)\s*\{[\s\S]*?\n\t\t\t\}/);
 	assert.ok(timeoutBranch, "waitForAgentEnd 超时分支应存在");
 	assert.doesNotMatch(timeoutBranch[0], /streamingCards\.delete|streamingRunStates\.delete|pendingCardEvents\.delete/, "超时分支不得清理注册表");
 	// waitForAgentEnd 需返回是否超时供调用方分流

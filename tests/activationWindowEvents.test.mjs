@@ -32,7 +32,10 @@ test("emitSessionActivating：session 级合成 envelope（agents:state + starti
 });
 
 test("emitReplacementState：多后端 tab 查找（composite 优先）+ 窗口路由（无窗口实现回退全量）", () => {
-	assert.match(mainIndex, /compositeAgentGateway\?\.list\(\)\.find\(\(candidate\) => candidate\.id === binding\.agentId\) \?\? agentManager\.list\(\)\.find/, "tab 查找必须先走 composite（ACP/DSH 不在 pi manager 列表）");
+	// 2027-03 重构：内联查找提成 findRuntimeTab（activateRuntime / findRuntimeAgent 共用），
+	// 不变量不变——必须先问 composite（ACP/DSH 不在 pi manager 列表）。
+	assert.match(mainIndex, /function findRuntimeTab\(agentId: string\): AgentTab \| undefined \{\s*return compositeAgentGateway\?\.list\(\)\.find\(\(([a-z]+)\) => \1\.id === agentId\) \?\? agentManager\.list\(\)\.find\(/, "tab 查找必须先走 composite（ACP/DSH 不在 pi manager 列表）");
+	assert.match(mainIndex, /function emitReplacementState\([\s\S]*?const tab = findRuntimeTab\(binding\.agentId\);/, "emitReplacementState 必须走统一的多后端 tab 查找");
 	assert.match(mainIndex, /compositeAgentGateway\?\.getMessageWindow\(binding\.agentId\) \?\? agentManager\.getMessageWindow\(binding\.agentId\)/, "消息窗口必须按后端路由");
 	assert.match(gateway, /getMessageWindow\(agentId: string\)/, "composite 网关必须提供 getMessageWindow 路由");
 	assert.match(gateway, /if \(typeof ownerWindow === "function"\) return ownerWindow\.call\(gateway, agentId\);/, "有窗口实现（pi）透传窗口协议；无实现回退 getMessages 全量");

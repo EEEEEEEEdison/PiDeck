@@ -8,7 +8,7 @@
 
 import { ipcMain, type BrowserWindow } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import type { WeChatModelChainEntry, WeChatSettingsSnapshot } from "../../shared/types";
+import type { ImChannelBackend, WeChatModelChainEntry, WeChatSettingsSnapshot } from "../../shared/types";
 import { getAppLogger } from "../logging/sharedLogger";
 import { MODEL_CHAIN_MAX, normalizeModelChain } from "../wechat/WeChatConfig";
 import type { WeChatService } from "../wechat/WeChatService";
@@ -80,13 +80,20 @@ export function registerWeChatIpc(deps: WeChatIpcDeps): void {
 	ipcMain.handle(ipcChannels.wechatUpdateSettings, (_event, patch: unknown) => {
 		if (typeof patch !== "object" || patch === null) return { ok: false, message: "patch must be an object" };
 		const source = patch as Record<string, unknown>;
-		const next: { defaultWorkspaceId?: string; defaultModelId?: string; modelChain?: WeChatModelChainEntry[] } = {};
+		const next: { defaultWorkspaceId?: string; defaultModelId?: string; backend?: ImChannelBackend; modelChain?: WeChatModelChainEntry[] } = {};
 		// 空串表示「清空该设置」，是合法输入；只有类型不对才拒绝。
 		for (const key of ["defaultWorkspaceId", "defaultModelId"] as const) {
 			const value = source[key];
 			if (value === undefined) continue;
 			if (typeof value !== "string" || value.length > MAX_TEXT_LENGTH) return { ok: false, message: `${key} is invalid` };
 			next[key] = value.trim();
+		}
+		const backend = source.backend;
+		if (backend !== undefined) {
+			// 只接受 pi / dsh：acp 未接入 IM 渠道（模型来自 configOptions、拒渠道指令），
+			// 其他值一律拒绝，不让脏值落到建会话链路。
+			if (backend !== "pi" && backend !== "dsh") return { ok: false, message: "backend is invalid" };
+			next.backend = backend;
 		}
 		const chain = source.modelChain;
 		if (chain !== undefined) {

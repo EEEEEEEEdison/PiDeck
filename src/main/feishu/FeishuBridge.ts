@@ -11,7 +11,7 @@
 
 import type { BrowserWindow } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import type { FeishuBotConfig, FeishuBridgeStatus, FeishuChatBinding, FeishuChatMessage, FeishuTestResult, ImageContent, AvailableModel, AgentRuntimeState, AgentTab } from "../../shared/types";
+import type { FeishuBotConfig, FeishuBridgeStatus, FeishuChatBinding, FeishuChatMessage, FeishuTestResult, ImageContent, AvailableModel, AgentRuntimeState, AgentTab, ChatMessage, ImChannelBackend } from "../../shared/types";
 import type { FeishuGroupInfo, FeishuGroupMember, FeishuImageAttachment, FeishuFileAttachment, FeishuMessageContext, FeishuCardActionEvent } from "./types";
 import { loadBindings, saveBindings, getPersistentChatId, setPersistentChatId, type FeishuChatBindingPersist } from "./FeishuConfig";
 import { chooseMessageMode, buildPostMessages, buildMarkdownCards } from "./rich-text";
@@ -200,10 +200,21 @@ export class FeishuBridge {
 		this.pushBindings();
 	}
 
+	/** 该 Bot 新建会话使用的后端（设置项，只影响新会话）。 */
+	private botBackend(): ImChannelBackend {
+		return this.botConfig.backend ?? "pi";
+	}
+
+	/** 会话自己的后端：绑定上记录的值优先（随会话走），缺省才回落到 Bot 设置。 */
+	private bindingBackend(binding: FeishuChatBinding): ImChannelBackend {
+		return binding.backend ?? this.botBackend();
+	}
+
 	/** Reuse requires both a live handle and gateway authorization for the same stable Session. */
 	private async authorizeRuntimeAgent(binding: FeishuChatBinding): Promise<string | undefined> {
 		if (!binding.agentId) return undefined;
-		const tab = this.agentManager.list().find((candidate) => candidate.id === binding.agentId);
+		// runtime handle 归属由网关判定：pi 之外的后端（DSH）不在 AgentManager 里。
+		const tab = this.runtimeBindings.findRuntimeAgent(binding.agentId);
 		if (!tab || tab.status === "error" || tab.status === "closed") {
 			this.clearRuntimeAgentId(binding);
 			return undefined;
@@ -740,6 +751,8 @@ export class FeishuBridge {
 		}
 		const agentId = binding.agentId;
 		if (!agentId) return;
+		// 会话自己的后端：流式卡片与宿主指令都是 pi 能力，其它后端降级为「最终文本」。
+		const backend = this.bindingBackend(binding);
 
 		// 关闭已有流式卡片
 		const existingCard = this.streamingCards.get(agentId);
@@ -776,19 +789,31 @@ export class FeishuBridge {
 		}
 
 		const initialState = createInitialState();
-		this.streamingRunStates.set(agentId, initialState);
-		this.pendingCardEvents.set(agentId, []);
+		// 卡片事件机由 pi 本地事件驱动（handleAgentEvent）：非 pi 后端没有这些事件，
+		// 既不能开卡片也不能登记缓存表，否则每轮都会留下永不清理的孤儿注册项。
+		const useStreamingCard = backend === "pi";
+		if (useStreamingCard) {
+			this.streamingRunStates.set(agentId, initialState);
+			this.pendingCardEvents.set(agentId, []);
+		}
 
 		// 流式卡片：创建后实时更新活动轨迹和输出
-		const cardPromise = CardStream.open(this.connection.client!, chatId, renderRunCard(initialState, { locale: this.locale }), { replyToMessageId: ctx.chatType === "group" ? ctx.messageId : undefined }).catch((e) => {
-			logErr("[飞书 Bridge] 流式卡片创建失败:", e);
-			return null as CardStream | null;
-		});
+		const cardPromise = useStreamingCard
+			? CardStream.open(this.connection.client!, chatId, renderRunCard(initialState, { locale: this.locale }), { replyToMessageId: ctx.chatType === "group" ? ctx.messageId : undefined }).catch((e) => {
+					logErr("[飞书 Bridge] 流式卡片创建失败:", e);
+					return null as CardStream | null;
+				})
+			: Promise.resolve(null as CardStream | null);
 
-		// 先注册 agent_end 监听再提交 prompt：快速失败的 run（模型配置错/auth 失败）会在
-		// 卡片创建窗口内广播 agent_end，注册晚于事件会错过 → 等满 300s 超时，期间
+		// 先注册回合结束监听再提交 prompt：快速失败的 run（模型配置错/auth 失败）会在
+		// 卡片创建窗口内结束，注册晚于事件会错过 → 等满 300s 超时，期间
 		// processingChats 持有 chatId，该聊天的后续消息被静默丢弃 5 分钟。
-		const agentEndPromise = this.waitForAgentEnd(agentId, 300_000);
+		// pi 用 agent_end 本地事件；其它后端统一走网关的回合等待器（agents:state 快照 + 时间线错误）。
+		const sinceIndex = this.runtimeBindings.getRuntimeMessages(binding.sessionId).length;
+		const runEndPromise: Promise<{ timedOut: boolean; failed: boolean; errorMessage?: string }> =
+			backend === "pi"
+				? this.waitForAgentEnd(agentId, 300_000).then((timedOut) => ({ timedOut, failed: false }))
+				: this.runtimeBindings.waitForRunEnd({ sessionId: binding.sessionId, sinceIndex, timeoutMs: 300_000 }).then((outcome) => (outcome.kind === "timeout" ? { timedOut: true, failed: false } : { timedOut: false, failed: outcome.failed, ...(outcome.errorMessage ? { errorMessage: outcome.errorMessage } : {}) }));
 
 		this.feishuDrivenRuns.add(agentId);
 		try {
@@ -800,12 +825,10 @@ export class FeishuBridge {
 				"这是飞书群聊消息。请直接回复用户。",
 			].join("\n");
 			const feishuCtx = finalText ? `${feishuActionInstruction}\n\n${finalText}\n\n[这是飞书群聊消息。请直接回复用户。]` : `${feishuActionInstruction}\n\n[飞书群聊消息。请直接回复用户。]`;
-			await this.runtimeBindings.sendPrompt({
-				sessionId: binding.sessionId,
-				message: finalText || "处理附件",
-				agentMessage: feishuCtx,
-				...(images.length > 0 ? { images } : {}),
-			});
+			const promptText = finalText || "处理附件";
+			// pi 走宿主指令通道（agentMessage）；DSH 等后端没有这个通道并会直接拒收整条 prompt，
+			// 因此把同样的内容并进正文——通道约束对它们同样必要。
+			await this.runtimeBindings.sendPrompt(backend === "pi" ? { sessionId: binding.sessionId, message: promptText, agentMessage: feishuCtx, ...(images.length > 0 ? { images } : {}) } : { sessionId: binding.sessionId, message: `${feishuCtx}\n\n${promptText}`, ...(images.length > 0 ? { images } : {}) });
 		} catch (e) {
 			this.feishuDrivenRuns.delete(agentId);
 			this.streamingRunStates.delete(agentId);
@@ -831,10 +854,10 @@ export class FeishuBridge {
 		const startTime = Date.now();
 
 		try {
-			const timedOut = await agentEndPromise;
+			const runEnd = await runEndPromise;
 			await new Promise((r) => setTimeout(r, 800));
 
-			if (timedOut) {
+			if (runEnd.timedOut) {
 				// run 超过 5 分钟仍在运行：保留卡片/状态注册表，让 handleAgentEvent 的
 				// 终态分支在真正结束时 flush+close+清理。此处删注册表会让卡片永久停在
 				// 中间态且最终结果无任何交付通道（agent_end 迟到时三张 map 已被清空）。
@@ -842,30 +865,34 @@ export class FeishuBridge {
 				return;
 			}
 
-			if (hasCard) {
+			if (runEnd.failed) {
+				// 非 pi 后端不会把失败写成时间线里的 assistant 回复，失败文本只能由回合等待器给出。
+				await this.sendSmartMessage(chatId, runEnd.errorMessage ?? feishuT(this.locale, "agent.failed"));
+				this.streamingRunStates.delete(agentId);
+				this.pendingCardEvents.delete(agentId);
+			} else if (hasCard) {
 				if (this.cardUpdateFailed.has(agentId)) {
 					this.cardUpdateFailed.delete(agentId);
 					log(`[飞书 Bridge] 卡片更新失败，降级为文本消息`);
-					await this.sendResultFallback(chatId, agentId, startTime);
+					await this.sendResultFallback(chatId, binding.sessionId, startTime);
 				}
 				this.streamingCards.delete(agentId);
 				this.streamingRunStates.delete(agentId);
 				this.pendingCardEvents.delete(agentId);
 			} else {
-				await this.sendResultFallback(chatId, agentId, startTime);
+				await this.sendResultFallback(chatId, binding.sessionId, startTime);
 				this.streamingRunStates.delete(agentId);
 				this.pendingCardEvents.delete(agentId);
 			}
+			// 标记扫描与文档正文都基于同一份时间线快照（非 pi 后端同样适用）
+			const runMessages = this.runtimeBindings.getRuntimeMessages(binding.sessionId);
 			// 统一扫描 Agent 回复中的飞书标记并执行
-			await this.processFeishuActions(chatId, agentId).catch((e) => logErr("[飞书 Bridge] 处理飞书动作异常:", e));
+			await this.processFeishuActions(chatId, runMessages).catch((e) => logErr("[飞书 Bridge] 处理飞书动作异常:", e));
 
 			// 没有 [CREATE_DOC:] 标记但用户说了要做飞书文档 → 自动创建
 			const docTitle = wantsFeishuDoc(text);
 			if (docTitle) {
-				const lastMsg = this.agentManager
-					.getMessages(agentId)
-					.filter((m) => m.role === "assistant")
-					.pop();
+				const lastMsg = runMessages.filter((m) => m.role === "assistant").pop();
 				if (lastMsg?.text && !lastMsg.text.includes("[CREATE_DOC:")) {
 					const body = stripFeishuActionMarkers(lastMsg.text);
 					if (body) {
@@ -1080,7 +1107,7 @@ export class FeishuBridge {
 		if (this.syncedFingerprints.size > 200) this.syncedFingerprints.delete(this.syncedFingerprints.keys().next().value as string);
 
 		// 先扫 [CREATE_DOC:] 标记
-		await this.processFeishuActions(chatId, agentId).catch((e) => logErr("[Feishu Bridge] process PiDeck Feishu actions failed:", e));
+		await this.processFeishuActions(chatId, messages).catch((e) => logErr("[Feishu Bridge] process PiDeck Feishu actions failed:", e));
 
 		// 没有标记但用户说了要做飞书文档 → 用完整回答正文自动创建
 		const pendingTitle = this.pendingDocRequests.get(agentId);
@@ -1141,6 +1168,7 @@ export class FeishuBridge {
 				projectId,
 				title: _title?.trim() || ctx.groupName || feishuT(this.locale, "group.defaultSession"),
 				channel: "feishu",
+				backend: this.botBackend(),
 			});
 			const binding: FeishuChatBinding = {
 				chatId,
@@ -1149,6 +1177,7 @@ export class FeishuBridge {
 				sessionId: session.sessionId,
 				workspaceId: this.botConfig.defaultWorkspaceId ?? "",
 				source: "feishu",
+				backend: this.botBackend(),
 				chatType: ctx.chatType,
 				groupName: ctx.groupName,
 				createdAt: Date.now(),
@@ -1199,7 +1228,7 @@ export class FeishuBridge {
 			} catch (error) {
 				if (!binding.sessionPath) throw error;
 				log(`[飞书 Bridge] sessionPath 恢复失败，创建新 Session: ${error instanceof Error ? error.message : String(error)}`);
-				session = await this.runtimeBindings.ensureSession({ projectId, title, channel: "feishu" });
+				session = await this.runtimeBindings.ensureSession({ projectId, title, channel: "feishu", backend: this.bindingBackend(binding) });
 				tab = await this.runtimeBindings.activateRuntime(session.sessionId);
 			}
 			log(`[飞书 Bridge] 已为 Session ${session.sessionId} 激活 runtime ${tab.id}`);
@@ -1810,7 +1839,7 @@ export class FeishuBridge {
 	 * 发送 Agent 回复到飞书，并扫描执行 [SEND_FILE:] / [CREATE_DOC:] 标记。
 	 */
 	private async sendResultFallback(chatId: string, sessionId: string, startTime: number): Promise<void> {
-		const messages = this.agentManager.getMessages(sessionId);
+		const messages = this.runtimeBindings.getRuntimeMessages(sessionId);
 		const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
 		const resultText = lastAssistant?.text ?? "";
 		if (!resultText.trim()) return;
@@ -1823,8 +1852,7 @@ export class FeishuBridge {
 	 * 扫描 Agent 回复中的 [SEND_FILE:] / [CREATE_DOC:] 标记并执行飞书操作。
 	 * 如果没有标记，自动检测回复中是否提到了工作目录下的文件并尝试发送。
 	 */
-	private async processFeishuActions(chatId: string, sessionId: string): Promise<void> {
-		const messages = this.agentManager.getMessages(sessionId);
+	private async processFeishuActions(chatId: string, messages: ChatMessage[]): Promise<void> {
 		const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
 		const text = lastAssistant?.text ?? "";
 		if (!text) return;

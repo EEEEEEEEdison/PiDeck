@@ -346,3 +346,40 @@ test("模型链可用空数组清空", async () => {
 		await rm(tempDir, { recursive: true, force: true });
 	}
 });
+
+// ===== 渠道后端（pi / dsh）=====
+
+test("渠道后端只落 pi/dsh：非法值归一化成「不指定」而不是透传", async () => {
+	// 设置文件是明文可手改的，IPC 入参也可能来自旧版渲染层：两层都要挡住非法后端。
+	// 归一化的结果是「不指定」（= pi 默认），不能把垃圾值透给桥接。
+	const { mod, tempDir } = await loadConfigModule();
+	try {
+		assert.equal(mod.getSettings().backend, undefined, "默认不指定后端：与历史行为一致（pi）");
+		mod.updateSettings({ backend: "pi" });
+		assert.equal(mod.getSettings().backend, "pi");
+		mod.updateSettings({ backend: "dsh" });
+		assert.equal(mod.getSettings().backend, "dsh");
+		assert.equal((await readStoredSettings(tempDir)).backend, "dsh", "后端要落盘");
+		mod.updateSettings({ defaultWorkspaceId: "ws-1" });
+		assert.equal(mod.getSettings().backend, "dsh", "未提到的字段不动");
+		mod.updateSettings({ backend: "acp" });
+		assert.equal(mod.getSettings().backend, undefined, "非法后端不得写入（回落默认）");
+	} finally {
+		await rm(tempDir, { recursive: true, force: true });
+	}
+});
+
+test("手改文件里的非法渠道后端在读取时被洗掉", async () => {
+	const { mod, tempDir } = await loadConfigModule({
+		prepare: async (dir) => {
+			await mkdir(join(dir, "wechat"), { recursive: true });
+			await writeFile(join(dir, "wechat", "wechat.json"), JSON.stringify({ version: 1, enabled: true, backend: "claude", defaultWorkspaceId: "ws-9", modelChain: [] }));
+		},
+	});
+	try {
+		assert.equal(mod.getSettings().backend, undefined, "不认识的后端名不得带进运行期");
+		assert.equal(mod.getSettings().defaultWorkspaceId, "ws-9", "洗后端不得弄丢同一文件里的其它设置");
+	} finally {
+		await rm(tempDir, { recursive: true, force: true });
+	}
+});

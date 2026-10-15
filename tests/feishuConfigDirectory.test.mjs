@@ -53,6 +53,28 @@ test("飞书子目录更名失败继续读旧配置，恢复后下次读取自�
 	assert.equal(fs.readFileSync(join(root, "feishu", "feishu-session-bot.json"), "utf8"), '{"s1":"bot-old"}');
 });
 
+test("Bot 后端只认 pi/dsh：非法值不透传，手改文件里的非法值读取时被洗掉", (t) => {
+	const root = fixture(t);
+	const mod = loadConfig(() => root);
+
+	const bot = mod.addBot({ name: "b", appId: "cli_a", appSecret: "s" });
+	assert.equal(mod.listBots()[0].backend, undefined, "缺省不写后端");
+
+	assert.equal(mod.updateBot(bot.id, { backend: "dsh" })?.backend, "dsh");
+	assert.equal(mod.listBots()[0].backend, "dsh", "合法后端落盘");
+	assert.equal(mod.updateBot(bot.id, { backend: "acp" })?.backend, undefined, "非法后端归一化成不指定");
+
+	// 人工编辑配置文件时可能写入任意值：读取阶段必须再洗一次，不能让非法值流进桥接层。
+	const configDir = join(root, "feishu");
+	const configFile = fs.readdirSync(configDir).find((name) => fs.readFileSync(join(configDir, name), "utf8").includes('"bots"'));
+	assert.ok(configFile, "应找到 Bot 配置文件");
+	const filePath = join(configDir, configFile);
+	const raw = JSON.parse(fs.readFileSync(filePath, "utf8"));
+	raw.bots[0].backend = "claude";
+	fs.writeFileSync(filePath, JSON.stringify(raw));
+	assert.equal(mod.listBots()[0].backend, undefined, "读取时洗掉非法后端");
+});
+
 test("两代飞书目录并存时使用新目录，两边数据均不覆盖或合并", (t) => {
 	const root = fixture(t);
 	for (const [dir, value] of [

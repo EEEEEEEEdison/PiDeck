@@ -6,6 +6,8 @@
  * 避免后来者以为它们只是「还没实现」。
  */
 
+import type { ImChannelBackend } from "./agent";
+
 /** 已登录账号的公开信息。**永不包含 bot_token** —— token 只在主进程内存里解密使用。 */
 export type WeChatAccountInfo = {
 	ilinkBotId: string;
@@ -38,6 +40,12 @@ export type WeChatSettings = {
 	 * 已存在的绑定保持自己的工作区，改这里不会迁移旧会话。
 	 */
 	defaultWorkspaceId?: string;
+	/**
+	 * 微信回复跑在哪个运行时后端（缺省 pi）。
+	 * 只影响**新会话**：已有绑定保持自己创建时的后端，改这里不会迁移旧会话。
+	 * 模型优先级链的条目必须与后端同源（pi 模型 / dsh 模型不能混用）。
+	 */
+	backend?: ImChannelBackend;
 	/**
 	 * 微信回复的模型优先级链。空数组 = 不干预会话模型。
 	 * 非空时链首是新会话的默认模型，运行失败（供应商报错）时自动顺延到下一条。
@@ -98,6 +106,9 @@ export type WeChatChatBinding = {
 	 */
 	agentId?: string;
 	workspaceId: string;
+	/** 这个绑定创建时用的运行时后端（缺省 pi）。跟着会话走，不跟设置走：
+	 *  设置里改后端只影响新建会话，否则旧会话会被换引擎（历史/模型目录都对不上）。 */
+	backend?: ImChannelBackend;
 	modelId?: string;
 	/** 微信里 /model 显式选中的 provider。有它才说明 modelId 是一次明确选择，
 	 *  否则只表示「会话最后用过的模型」，不压过设置里的模型链。 */

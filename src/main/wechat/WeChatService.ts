@@ -13,9 +13,8 @@
 
 import type { BrowserWindow } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import type { WeChatBridgeStatus, WeChatChatBinding, WeChatLoginState, WeChatModelChainEntry, WeChatSettings } from "../../shared/types";
+import type { ImChannelBackend, WeChatBridgeStatus, WeChatChatBinding, WeChatLoginState, WeChatModelChainEntry, WeChatSettings } from "../../shared/types";
 import type { SessionRuntimeBindingGateway } from "../sessions/sessionRuntimeBinding";
-import type { AgentManager } from "../pi/AgentManager";
 import { IlinkClient, type IlinkLogFn } from "./IlinkClient";
 import { ILINK_CHANNEL_VERSION } from "./ilinkProtocol";
 import { WeChatBridge } from "./WeChatBridge";
@@ -23,7 +22,6 @@ import { WeChatLogin, type WeChatLoginOutcome } from "./WeChatLogin";
 import { clearAccount, getPublicAccount, getSettings, loadBindings, removeBinding, saveAccount, setDisplayName, setEnabled, updateSettings } from "./WeChatConfig";
 
 export type WeChatServiceDeps = {
-	agentManager: AgentManager;
 	getProjects: () => Array<{ id: string; name: string }>;
 	runtimeBindings: SessionRuntimeBindingGateway;
 	getLocale: () => string | undefined;
@@ -41,7 +39,6 @@ export class WeChatService {
 	constructor(deps: WeChatServiceDeps) {
 		this.deps = deps;
 		this.bridge = new WeChatBridge({
-			agentManager: deps.agentManager,
 			getProjects: deps.getProjects,
 			runtimeBindings: deps.runtimeBindings,
 			getLocale: deps.getLocale,
@@ -92,7 +89,7 @@ export class WeChatService {
 		return getSettings();
 	}
 
-	updateSettings(patch: { defaultWorkspaceId?: string; defaultModelId?: string; modelChain?: WeChatModelChainEntry[] }): WeChatSettings {
+	updateSettings(patch: { defaultWorkspaceId?: string; defaultModelId?: string; backend?: ImChannelBackend; modelChain?: WeChatModelChainEntry[] }): WeChatSettings {
 		const settings = updateSettings(patch);
 		this.bridge.refresh();
 		return settings;

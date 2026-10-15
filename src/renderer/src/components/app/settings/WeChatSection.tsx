@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { useAtomValue } from "jotai";
 import { ArrowDown, ArrowUp, Loader2, Plus, RefreshCw, X } from "lucide-react";
 import { Button } from "../../ui-shadcn/button";
 import { Input } from "../../ui-shadcn/input";
@@ -18,7 +19,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Switch } from "../../ui-shadcn/switch";
 import { ConfirmDialog } from "../../app/AppParts";
 import { ModelPicker } from "../../session/ComposerComponents";
-import type { AvailableModel, WeChatBridgeStatus, WeChatChatBinding, WeChatIpcResult, WeChatLoginState, WeChatModelChainEntry, WeChatSettings, WeChatSettingsSnapshot } from "../../../../../shared/types";
+import type { AvailableModel, ImChannelBackend, WeChatBridgeStatus, WeChatChatBinding, WeChatIpcResult, WeChatLoginState, WeChatModelChainEntry, WeChatSettings, WeChatSettingsSnapshot } from "../../../../../shared/types";
+import { parseImChannelBackend } from "../../../../../shared/types";
+import { dshUiVisibilityFor } from "../../../../../shared/types/dshRuntime";
+import { dshRuntimeStatusAtom } from "../../../atoms/dsh-atoms";
 import { formatI18nDateTime, t, type TranslationKey } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
 import { useQrDataUrl } from "./useQrDataUrl";
@@ -30,7 +34,7 @@ import { useQrDataUrl } from "./useQrDataUrl";
 type WeChatApiRaw = {
 	snapshot?: () => Promise<WeChatIpcResult<WeChatSettingsSnapshot>>;
 	setEnabled?: (enabled: boolean) => Promise<WeChatIpcResult<{ settings: WeChatSettings }>>;
-	updateSettings?: (patch: { defaultWorkspaceId?: string; defaultModelId?: string; modelChain?: WeChatModelChainEntry[] }) => Promise<WeChatIpcResult<{ settings: WeChatSettings }>>;
+	updateSettings?: (patch: { defaultWorkspaceId?: string; defaultModelId?: string; backend?: ImChannelBackend; modelChain?: WeChatModelChainEntry[] }) => Promise<WeChatIpcResult<{ settings: WeChatSettings }>>;
 	renameAccount?: (displayName: string) => Promise<WeChatIpcResult<{ settings: WeChatSettings }>>;
 	logout?: () => Promise<WeChatIpcResult<{ settings: WeChatSettings }>>;
 	beginLogin?: () => Promise<WeChatIpcResult<{ state: WeChatLoginState }>>;
@@ -98,6 +102,8 @@ export function WeChatSection() {
 
 	const api = (window as unknown as { piDesktop?: { wechat?: WeChatApiRaw } }).piDesktop?.wechat;
 	const qrDataUrl = useQrDataUrl(loginState.qrcodeContent ?? "");
+	// 钩子必须在任何提前 return 之前调用（本组件有 loading / api 不可用两条早退路径）。
+	const dshRuntimeState = useAtomValue(dshRuntimeStatusAtom).state;
 
 	const loadSnapshot = useCallback(async () => {
 		if (!api?.snapshot) {
@@ -258,6 +264,15 @@ export function WeChatSection() {
 		[api, runAction, loadSnapshot],
 	);
 
+	const handleBackendChange = useCallback(
+		async (value: ImChannelBackend) => {
+			if (!api?.updateSettings) return;
+			const result = await runAction(() => api.updateSettings?.({ backend: value }) as Promise<WeChatIpcResult<Record<string, unknown>>>);
+			if (result.ok) await loadSnapshot();
+		},
+		[api, runAction, loadSnapshot],
+	);
+
 	if (!api?.snapshot) {
 		return <p className="text-muted-foreground text-sm">{t("config.wechat.unavailable")}</p>;
 	}
@@ -277,6 +292,9 @@ export function WeChatSection() {
 	const bindings = snapshot?.bindings ?? [];
 	const projects = snapshot?.projects ?? [];
 	const modelChain = settings?.modelChain ?? [];
+	// 渠道后端：只作用于新会话（老绑定自带后端）；未设置时与历史行为一致——pi。
+	const backend: ImChannelBackend = settings?.backend ?? "pi";
+	const dshAvailable = dshUiVisibilityFor(dshRuntimeState).canCreateDshSession;
 	const loginInProgress = loginState.phase !== "idle" && loginState.phase !== "confirmed";
 
 	return (
@@ -392,6 +410,30 @@ export function WeChatSection() {
 			) : null}
 
 			{account ? (
+				<div className="flex flex-col gap-1">
+					<Label className="text-xs">{t("config.wechat.backend")}</Label>
+					<Select
+						value={backend}
+						onValueChange={(value) => {
+							const next = parseImChannelBackend(value);
+							if (next) void handleBackendChange(next);
+						}}
+					>
+						<SelectTrigger className="w-60">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="pi">{t("settings.defaultAgentBackendPi")}</SelectItem>
+							<SelectItem value="dsh" disabled={!dshAvailable}>
+								{dshAvailable ? t("settings.defaultAgentBackendDsh") : t("settings.defaultAgentBackendDshUnavailable")}
+							</SelectItem>
+						</SelectContent>
+					</Select>
+					<span className="text-muted-foreground text-xs">{t("config.wechat.backendHint")}</span>
+				</div>
+			) : null}
+
+			{account ? (
 				<div className="flex flex-col gap-2">
 					<div className="flex items-center justify-between gap-2">
 						<span className="text-foreground text-xs font-medium">{t("config.wechat.modelChain")}</span>
@@ -427,7 +469,7 @@ export function WeChatSection() {
 							</div>
 						))
 					)}
-					<span className="text-muted-foreground text-xs">{t("config.wechat.modelChainHint")}</span>
+					<span className="text-muted-foreground text-xs">{backend === "dsh" ? t("config.wechat.modelChainDshHint") : t("config.wechat.modelChainHint")}</span>
 				</div>
 			) : null}
 

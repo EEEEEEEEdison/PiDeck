@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "
 import { join } from "node:path";
 import { app, safeStorage } from "electron";
 import type { FeishuBotConfig } from "../../shared/types";
+import { parseImChannelBackend } from "../../shared/types";
 import { getAppLogger } from "../logging/sharedLogger";
 
 let defaultBotName = "Feishu bot";
@@ -84,7 +85,12 @@ function readConfig(): FeishuMultiBotConfig {
 			};
 		}
 
-		return parsed as FeishuMultiBotConfig;
+		const config = parsed as FeishuMultiBotConfig;
+		// 手改配置文件时可能写入任意值；非法后端在下游只会表现为「不可用」，这里统一洗成不指定。
+		for (const bot of config.bots ?? []) {
+			if (bot.backend !== undefined && parseImChannelBackend(bot.backend) === undefined) delete bot.backend;
+		}
+		return config;
 	} catch {
 		return { version: 2, bots: [], deletedBotIdsByAppId: {} };
 	}
@@ -146,6 +152,11 @@ export function updateBot(botId: string, patch: Partial<FeishuBotConfig>): Feish
 	// 误判成已加密而明文入库，重启后又被误解码成垃圾导致认证失败。
 	if (patch.appSecret) {
 		patch = { ...patch, appSecret: encryptSecret(patch.appSecret) };
+	}
+
+	// 后端只认 pi/dsh：非法值归一化成「不指定」（跟随默认后端），不透传进配置文件。
+	if (patch.backend !== undefined) {
+		patch = { ...patch, backend: parseImChannelBackend(patch.backend) };
 	}
 
 	config.bots[index] = { ...config.bots[index], ...patch };

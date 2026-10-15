@@ -65,6 +65,21 @@ export type AgentStatus = "starting" | "idle" | "running" | "error" | "closed";
 export type AgentBackend = "pi" | "dsh" | "imagegen" | "videogen" | "acp";
 
 /**
+ * IM 渠道（微信 / 飞书桥）可选的运行时后端。
+ *
+ * 只开放 pi 与 dsh：两个后端都有可用的模型目录、thinking 开关与消息读取；
+ * 渠道指令（AgentChannelInstructions）在 dsh 上被拒（降级为不传），其余能力等价。
+ * ACP 刻意不在此放开（二期）：模型来自会话 configOptions、不接受渠道指令、无流式，
+ * 需要单独设计一套模型选择路径，先给半个选项比不给更糟。
+ */
+export type ImChannelBackend = Extract<AgentBackend, "pi" | "dsh">;
+
+/** 设置/绑定里持久化的 backend 一律经此解析：非法值返回 undefined（缺省 = pi），不抛错。 */
+export function parseImChannelBackend(value: unknown): ImChannelBackend | undefined {
+	return value === "pi" || value === "dsh" ? value : undefined;
+}
+
+/**
  * 后端可选能力（核心接口方法之外的可选扩展）。
  * 能力缺失的后端必须显式声明不持有，UI 按能力禁用入口，禁止硬造等价物。
  */

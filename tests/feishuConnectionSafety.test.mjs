@@ -118,7 +118,9 @@ test("FeishuBridge can send a file through the current session binding without a
 
 test("FeishuBridge only executes agent SEND_FILE markers after explicit user send intent", () => {
 	const source = bridgeSource();
-	const method = source.match(/private async processFeishuActions\(chatId: string, sessionId: string\): Promise<void> \{[\s\S]*?\n\t\}/)?.[0] ?? "";
+	// 签名随网关改造改为（chatId, messages）：消息快照由调用方按后端取好，这里只看显式发送意图。
+	const method = source.match(/private async processFeishuActions\([\s\S]*?\n\t\}/)?.[0] ?? "";
+	assert.ok(method, "processFeishuActions 应存在");
 	assert.match(source, /hasExplicitFeishuFileSendIntent/);
 	assert.match(method, /hasExplicitFeishuFileSendIntent\(userText\)/);
 	assert.match(method, /忽略 SEND_FILE/);

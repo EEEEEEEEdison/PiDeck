@@ -206,6 +206,11 @@ export function registerFeishuIpc(deps: FeishuIpcDeps): void {
 
 	// 更新 Bot 配置
 	ipcMain.handle(ipcChannels.feishuBotConfig, async (_event, botId: string, patch: Partial<FeishuBotConfig>) => {
+		// 渲染层数据一律不可信：后端枚举在边界拦掉，不让非法值流进配置层。
+		if (patch.backend !== undefined && patch.backend !== "pi" && patch.backend !== "dsh") {
+			void logger()?.warn("feishu", "Rejected feishu bot backend", { botId, backend: patch.backend });
+			return undefined;
+		}
 		const updated = updateFeishuBot(botId, patch);
 		void logger()?.info("feishu", "Feishu bot config updated", { botId, keys: Object.keys(patch) });
 		// 只热更新当前在线 Bot；修改其它 Bot 配置不应污染正在运行的 bridge。

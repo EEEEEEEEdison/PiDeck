@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import * as fsModule from "node:fs";
+import * as osModule from "node:os";
+import * as pathModule from "node:path";
 import test from "node:test";
 import ts from "typescript";
 import vm from "node:vm";
@@ -163,7 +166,10 @@ function compileBridge(loadBindings = [], options = {}) {
 			getPersistentChatId: options.getPersistentChatId ?? (() => undefined),
 			setPersistentChatId: () => undefined,
 		},
-		"node:fs": { existsSync: options.existsSync ?? (() => false) },
+		// runAgent 的图片落盘会写真实临时文件：只 stub existsSync 会在写盘时 TypeError。
+		"node:fs": { ...fsModule, existsSync: options.existsSync ?? (() => false) },
+		"node:path": pathModule,
+		"node:os": { tmpdir: () => osModule.tmpdir() },
 		"./rich-text": richText,
 		"./CardStream": { CardStream: { open: async () => ({}) } },
 		"./docActions": { buildFeishuTextChildren: () => [], stripFeishuActionMarkers: (text) => text, wantsFeishuDoc: () => undefined },
@@ -245,6 +251,10 @@ function makeBridge(agents, gateway, calls = {}) {
 			return undefined;
 		},
 		setRuntimeModel: async (sessionId, provider, modelId) => calls.setModel?.push([sessionId, provider, modelId]),
+		// runtime handle 归属与消息读取现在都经网关（pi 之外的后端不在 AgentManager 里）
+		findRuntimeAgent: (agentId) => agents.find((candidate) => candidate.id === agentId),
+		getRuntimeMessages: () => [],
+		waitForRunEnd: async () => ({ kind: "ended", failed: false }),
 		...gateway,
 	};
 	const bridge = new FeishuBridge(
@@ -306,7 +316,7 @@ test("existing Feishu binding is reused by ensureSessionMirror without creating 
 		},
 		() => null,
 		() => [],
-		{ bindRuntime: async () => ({ sessionId: "S", runtimeGeneration: 1 }) },
+		{ findRuntimeAgent: (id) => tabs.find((candidate) => candidate.id === id), bindRuntime: async () => ({ sessionId: "S", runtimeGeneration: 1 }) },
 	);
 	await bridge.loadPersistedBindings();
 	let createCount = 0;
@@ -343,7 +353,7 @@ test("removing a stale binding does not remove another binding's current indexes
 		{ list: () => [] },
 		() => null,
 		() => [],
-		{ bindRuntime: async () => ({ sessionId: "S", runtimeGeneration: 1 }) },
+		{ findRuntimeAgent: () => undefined, bindRuntime: async () => ({ sessionId: "S", runtimeGeneration: 1 }) },
 	);
 	await bridge.loadPersistedBindings();
 	assert.equal(bridge.getSessionChatId("S"), "current");
@@ -371,6 +381,7 @@ test("legacy ID absent from catalog may migrate to a new stable ID during resume
 				return { sessionId: "S2" };
 			},
 			activateRuntime: async () => tab,
+			findRuntimeAgent: () => undefined,
 		},
 	);
 	await bridge.loadPersistedBindings();
@@ -602,6 +613,7 @@ test("persisted path collision with a different source stays unowned when gatewa
 		() => null,
 		() => [],
 		{
+			findRuntimeAgent: (id) => (id === tab.id ? tab : undefined),
 			bindRuntime: async () => {
 				gatewayCalls += 1;
 				throw new Error("source mismatch");
@@ -654,6 +666,7 @@ test("two persisted rows sharing a path stay unowned even with one runtime candi
 		() => null,
 		() => [],
 		{
+			findRuntimeAgent: (id) => (id === "B" ? makeAgent("B", "p", "/same") : undefined),
 			bindRuntime: async (input) => {
 				bindInputs.push(input);
 				return { sessionId: "unexpected", runtimeGeneration: 1 };
@@ -933,4 +946,95 @@ test("Feishu numeric text reply maps to the select option value", async () => {
 		sender: { sender_type: "user", sender_id: { open_id: "user" } },
 	});
 	assert.equal(JSON.stringify(uiResponses), JSON.stringify([["A", "req-8", { value: "方案二" }]]), "numeric reply must map to option value");
+});
+
+// ===== 渠道后端（pi / dsh） =====
+
+/** 把 chat 直接绑到一个已有会话/运行时上，跳过建会话链路。 */
+function bindChat(bridge, backend) {
+	const binding = {
+		chatId: "chat",
+		botId: "bot",
+		userId: "u",
+		sessionId: "S1",
+		agentId: "A",
+		sessionPath: "/sessions/S1.json",
+		workspaceId: "",
+		source: "feishu",
+		chatType: "p2p",
+		createdAt: 1,
+		...(backend ? { backend } : {}),
+	};
+	bridge.chatBindings.set("chat", binding);
+	bridge.indexBinding(binding);
+	return binding;
+}
+
+test("新建飞书会话带上 Bot 设置的后端并写进绑定", async () => {
+	const calls = { ensureSession: [] };
+	const { bridge } = makeBridge([], {}, calls);
+	bridge.botConfig.backend = "dsh";
+	bridge.getProjects = () => [{ id: "p", name: "project", path: "." }];
+	bridge.connection.client = mockFeishuClient([]);
+
+	await bridge.createNewSession({ chatId: "chat", senderOpenId: "u", chatType: "p2p", groupName: "", messageId: "m" });
+
+	assert.equal(calls.ensureSession[0].backend, "dsh", "新建会话必须把设置的后端交给网关");
+	assert.equal(bridge.listBindings()[0].backend, "dsh", "后端随会话记录在绑定上");
+});
+
+test("已有绑定用自己的后端：Bot 设置改成 pi 也不影响 dsh 会话", async () => {
+	const prompts = [];
+	const { bridge } = makeBridge([makeAgent("A")], { sendPrompt: async (input) => prompts.push(input) });
+	bridge.botConfig.backend = "pi";
+	bridge.connection.client = mockFeishuClient([]);
+	bindChat(bridge, "dsh");
+
+	await bridge.runAgent({ chatId: "chat", senderOpenId: "u", chatType: "p2p", messageId: "m" }, "hello", [], []);
+
+	assert.equal(prompts.length, 1);
+	assert.equal(prompts[0].agentMessage, undefined, "绑定后端是 dsh：DSH 拒收宿主指令，不能带 agentMessage");
+	assert.ok(prompts[0].message.includes("严禁调用 lark-cli"), "通道约束必须并进正文");
+	assert.ok(prompts[0].message.includes("hello"), "用户消息仍要完整送达");
+	assert.equal(bridge.streamingCards.size, 0, "非 pi 后端不得开流式卡片");
+	assert.equal(bridge.streamingRunStates.size, 0, "非 pi 后端不得留卡片状态注册项");
+	assert.equal(bridge.pendingCardEvents.size, 0, "非 pi 后端不得留事件缓冲注册项");
+});
+
+test("dsh 回合失败时用等待器给出的错误原文回信", async () => {
+	const sent = [];
+	const { bridge } = makeBridge([makeAgent("A")], { sendPrompt: async () => undefined, waitForRunEnd: async () => ({ kind: "ended", failed: true, errorMessage: "供应商 500" }) });
+	bridge.connection.client = mockFeishuClient(sent);
+	bindChat(bridge, "dsh");
+
+	await bridge.runAgent({ chatId: "chat", senderOpenId: "u", chatType: "p2p", messageId: "m" }, "hello", [], []);
+
+	assert.ok(
+		sent.some((call) => JSON.stringify(call.data ?? {}).includes("供应商 500")),
+		"非 pi 后端不写 assistant 文本，失败原文只能由等待器给出",
+	);
+});
+
+test("pi 会话仍走宿主指令与本地 agent_end（行为不变）", async () => {
+	let runError;
+	const prompts = [];
+	const listeners = [];
+	const { bridge } = makeBridge([makeAgent("A")], { sendPrompt: async (input) => prompts.push(input) });
+	bridge.agentManager = {
+		addLocalEventListener: (handler) => {
+			listeners.push(handler);
+			return () => undefined;
+		},
+	};
+	bridge.connection.client = mockFeishuClient([]);
+	bindChat(bridge);
+
+	const run = bridge.runAgent({ chatId: "chat", senderOpenId: "u", chatType: "p2p", messageId: "m" }, "hello", [], []).catch((error) => {
+		runError = error;
+	});
+	for (let i = 0; i < 200 && prompts.length === 0 && !runError; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+	if (runError) throw runError;
+	assert.ok(prompts[0].agentMessage.includes("严禁调用 lark-cli"), "pi 的通道约束仍走宿主指令（agentMessage）");
+	for (const listener of listeners) listener("A", { type: "agent_end" });
+	await run;
 });

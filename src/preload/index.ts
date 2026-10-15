@@ -1566,7 +1566,7 @@ const api = {
 		/** 设置页一次拉齐：设置 + 状态 + 绑定 + 可选工作区。 */
 		snapshot: () => ipcRenderer.invoke(ipcChannels.wechatGetSettings) as Promise<WeChatIpcResult<WeChatSettingsSnapshot>>,
 		setEnabled: (enabled: boolean) => ipcRenderer.invoke(ipcChannels.wechatSetEnabled, enabled) as Promise<WeChatIpcResult<{ settings: WeChatSettings }>>,
-		updateSettings: (patch: { defaultWorkspaceId?: string; defaultModelId?: string }) => ipcRenderer.invoke(ipcChannels.wechatUpdateSettings, patch) as Promise<WeChatIpcResult<{ settings: WeChatSettings }>>,
+		updateSettings: (patch: { defaultWorkspaceId?: string; defaultModelId?: string; backend?: "pi" | "dsh"; modelChain?: { provider: string; modelId: string; modelName?: string }[] }) => ipcRenderer.invoke(ipcChannels.wechatUpdateSettings, patch) as Promise<WeChatIpcResult<{ settings: WeChatSettings }>>,
 		renameAccount: (displayName: string) => ipcRenderer.invoke(ipcChannels.wechatRenameAccount, displayName) as Promise<WeChatIpcResult<{ settings: WeChatSettings }>>,
 		logout: () => ipcRenderer.invoke(ipcChannels.wechatLogout) as Promise<WeChatIpcResult<{ settings: WeChatSettings }>>,
 		/** 取二维码并开始轮询；返回的状态已带 qrcodeContent，界面可直接渲染。 */

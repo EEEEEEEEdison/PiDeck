@@ -147,7 +147,7 @@ function makeConfigStub({ account, token = "TOKEN", allowedUsers = [], bindings 
 			},
 			setDisplayName: () => undefined,
 			// 模型链与默认工作区：默认空（不干预会话模型、不指定工作区），需要测顺延/工作区的用例自己改 state。
-			getSettings: () => ({ enabled: true, account: state.account, modelChain: state.modelChain ?? [], defaultWorkspaceId: state.defaultWorkspaceId }),
+			getSettings: () => ({ enabled: true, account: state.account, modelChain: state.modelChain ?? [], defaultWorkspaceId: state.defaultWorkspaceId, backend: state.backend }),
 		},
 	};
 }
@@ -159,7 +159,9 @@ function createHarness({ account = { ilinkBotId: "bot@im.bot", ilinkUserId: "wxi
 	const tabs = [];
 	const messages = new Map();
 	const prompts = [];
-	let listener = null;
+	// 运行时事件订阅者：桥接不再挂 pi 本地事件（addLocalEventListener），而是每轮登记一个
+	// 等待器，等真实的事件流收口（等待器实现见 src/main/sessions/sessionRunWaiter.ts）。
+	const runtimeListeners = new Set();
 
 	const sessionCreations = [];
 	// 模型切换必须可观测：模型链的全部行为都落在「到底切到了哪个模型」上。
@@ -196,17 +198,20 @@ function createHarness({ account = { ilinkBotId: "bot@im.bot", ilinkUserId: "wxi
 			runtimeState = { ...runtimeState, thinkingLevel: level };
 		},
 		sendUIResponse: async () => undefined,
-	};
-
-	const agentManager = {
-		list: () => [...tabs],
-		getMessages: (agentId) => messages.get(agentId) ?? [],
-		addLocalEventListener: (fn) => {
-			listener = fn;
-			return () => {
-				listener = null;
-			};
-		},
+		// 桥接不再直连 pi AgentManager：这三个方法就是「找 tab / 取消息 / 等回合」的全部依赖面。
+		findRuntimeAgent: (agentId) => tabs.find((tab) => tab.id === agentId),
+		getRuntimeMessages: () => messages.get("a1") ?? [],
+		waitForRunEnd: (input) =>
+			waitForSessionRunEnd(
+				{
+					subscribe: (onEvent) => {
+						runtimeListeners.add(onEvent);
+						return () => runtimeListeners.delete(onEvent);
+					},
+					getMessages: () => messages.get("a1") ?? [],
+				},
+				input,
+			),
 	};
 
 	const sandbox = createTsSandbox({
@@ -216,10 +221,11 @@ function createHarness({ account = { ilinkBotId: "bot@im.bot", ilinkUserId: "wxi
 		},
 	});
 	const { WeChatBridge } = sandbox("src/main/wechat/WeChatBridge.ts");
+	// 等待器用**真实实现**：回合收口判定是这次改动的核心，桩掉它测试就失去意义了。
+	const { waitForSessionRunEnd } = sandbox("src/main/sessions/sessionRunWaiter.ts");
 
 	const statuses = [];
 	const bridge = new WeChatBridge({
-		agentManager,
 		getProjects: () => projects,
 		runtimeBindings,
 		getLocale: () => "zh-CN",
@@ -227,6 +233,30 @@ function createHarness({ account = { ilinkBotId: "bot@im.bot", ilinkUserId: "wxi
 		onStatusChange: (status) => statuses.push(status),
 		onBindingsChange: () => undefined,
 	});
+
+	/**
+	 * 把「pi 的 agent_end」翻译成后端无差别的运行时事件流——等待器只认这一层：
+	 * 先给「回合开始过」的证据（isTurnActive=true），再给终态快照（idle / error）。
+	 * 真实系统里这两步分别来自 agent_start 与 agent_settled。
+	 */
+	const emitRuntimeEvent = (sourceChannel, payload) => {
+		for (const onEvent of [...runtimeListeners]) onEvent({ kind: "event", sessionId: "s1", agentId: "a1", runtimeGeneration: 1, sourceChannel, payload });
+	};
+	const emitAgentEvent = (agentId, event = {}) => {
+		if (agentId !== "a1" || event.type !== "agent_end") return;
+		emitRuntimeEvent("agents:runtime-state", { agentId, state: { isTurnActive: true } });
+		if (event.willRetry === true) {
+			// pi 自己会重试：真实的终态是重试后的 agent_settled，这里在下一个 tick 补上。
+			setTimeout(() => emitRuntimeEvent("agents:state", { id: agentId, status: "idle" }), 0);
+			return;
+		}
+		if (event.stopReason === "error") {
+			emitRuntimeEvent("agents:state", { id: agentId, status: "error", error: typeof event.errorMessage === "string" ? event.errorMessage : "error" });
+			return;
+		}
+		// abort 与正常结束都回落 idle：pi 的 agent_settled 对 abort 同样恢复空闲。
+		emitRuntimeEvent("agents:state", { id: agentId, status: "idle" });
+	};
 
 	return {
 		bridge,
@@ -243,12 +273,15 @@ function createHarness({ account = { ilinkBotId: "bot@im.bot", ilinkUserId: "wxi
 		runtimeBindings,
 		// 让挂在 run 上的 300s 超时定时器收尾，否则测试进程会被它拖住到超时。
 		finishPendingRun: async () => {
-			listener?.("a1", { type: "agent_end" });
+			emitAgentEvent("a1", { type: "agent_end" });
 			await new Promise((resolve) => setTimeout(resolve, 900));
 			await bridge.stop();
 		},
-		emitAgentEvent: (agentId, event) => listener?.(agentId, event),
-		hasListener: () => listener !== null,
+		emitAgentEvent,
+		// DSH 式的运行时事件流（不经 agent_end 翻译）：直接发 agents:state / agents:runtime-state。
+		emitRuntimeEvent,
+		// 当前登记的等待器数量：收口必须退订，否则下一轮的终态会唤醒旧等待器。
+		activeWaiters: () => runtimeListeners.size,
 		start: async () => {
 			await bridge.start();
 		},
@@ -415,13 +448,22 @@ test("the poll cursor is persisted so a restart does not replay the backlog", as
 	await harness.bridge.stop();
 });
 
-test("stop() detaches agent events so a stopped bridge cannot deliver late", async () => {
-	const harness = createHarness({ allowedUsers: ["wxid_me"] });
+test("run waiters are per-turn subscriptions, released on settle (no leaked listeners)", async () => {
+	// 旧实现把 pi 本地事件监听器挂在桥接生命周期上（start 挂、stop 摘）。现在每轮登记一个等待器：
+	// 空闲时必须没有订阅，跑动时恰好一个，收口后必须退订——泄漏会唤醒旧等待器重复回信。
+	const harness = createHarness({ allowedUsers: ["wxid_me"], batches: [{ msgs: [userMessage({ text: "在吗" })] }] });
 	await harness.start();
-	assert.equal(harness.hasListener(), true);
+	assert.equal(harness.activeWaiters(), 0, "空闲的桥接不该订阅运行时事件");
+
+	await waitFor(() => harness.prompts.length === 1, "the prompt");
+	assert.equal(harness.activeWaiters(), 1, "一轮只有一个等待器");
+
+	harness.messages.set("a1", [{ role: "assistant", text: "在的" }]);
+	harness.emitAgentEvent("a1", { type: "agent_end" });
+	await waitFor(() => harness.activeWaiters() === 0, "the waiter to unsubscribe");
 
 	await harness.bridge.stop();
-	assert.equal(harness.hasListener(), false);
+	assert.equal(harness.activeWaiters(), 0);
 	assert.equal(harness.client.calls.notifyStop, 1);
 });
 
@@ -753,6 +795,103 @@ test("微信会话登记时带渠道标志并保持可自动命名", async () =>
 
 	await waitFor(() => harness.prompts.length === 1, "the prompt");
 	harness.messages.set("a1", [{ role: "assistant", text: "你好" }]);
+	endRun(harness);
+	await waitFor(() => harness.client.calls.sent.length === 1, "the reply");
+	await harness.bridge.stop();
+});
+
+// ===== 渠道后端（pi / dsh）=====
+// 设置 → 外部连接 → 微信 → 「会话后端」只作用在**新建**会话上；老绑定自带后端。
+// 后端差异（宿主指令、模型链、失败信号）都在下面钉死，免得以后加 ACP 时又重踩一遍。
+
+test("渠道后端随设置落到新建会话，绑定记住会话自己的后端", async () => {
+	const harness = createHarness({ batches: [{ msgs: [userMessage({ text: "你好" })] }] });
+	harness.config.state.backend = "dsh";
+	await harness.start();
+
+	await waitFor(() => harness.sessionCreations.length === 1, "the session creation");
+	assert.equal(harness.sessionCreations[0].backend, "dsh", "新建会话必须带上渠道后端（否则永远是 pi）");
+	await waitFor(() => harness.prompts.length === 1, "the prompt");
+	assert.equal(harness.config.state.bindings.get("wxid_me")?.backend, "dsh", "绑定要记住这个会话的后端（后续轮次沿用，不受设置改动影响）");
+
+	harness.messages.set("a1", [{ role: "assistant", text: "在" }]);
+	endRun(harness);
+	await waitFor(() => harness.client.calls.sent.length === 1, "the reply");
+	await harness.bridge.stop();
+});
+
+test("DSH 会话：通道约束并进正文（DSH 不收宿主指令），且不套用 pi 的模型链", async () => {
+	// DSH 显式拒收 agentMessage（session.sendDshUnsupportedPayload），模型链又是 pi 目录词汇：
+	// 对 dsh 只能把约束并进正文，并且只认显式 /model 选择。
+	const harness = createHarness({ batches: [{ msgs: [userMessage({ text: "写个函数" })] }] });
+	harness.config.state.backend = "dsh";
+	harness.config.state.modelChain = [{ provider: "p1", modelId: "fast" }];
+	await harness.start();
+
+	await waitFor(() => harness.prompts.length === 1, "the prompt");
+	const prompt = harness.prompts[0];
+	assert.equal(prompt.agentMessage, undefined, "DSH 收不了宿主指令：绝不能带 agentMessage（会被直接拒收）");
+	assert.ok(prompt.message.includes("写个函数"), "用户正文不能丢");
+	assert.ok(prompt.message.includes("纯文本"), "通道约束要并进正文，否则模型会按 Markdown 输出");
+	assert.deepEqual(harness.modelSwitches, [], "pi 的模型链对 dsh 无意义（目录不同、失败回退语义也没有）");
+
+	harness.messages.set("a1", [{ role: "assistant", text: "好了" }]);
+	harness.emitRuntimeEvent("agents:state", { id: "a1", status: "running" });
+	harness.emitRuntimeEvent("agents:state", { id: "a1", status: "idle" });
+	await waitFor(() => harness.client.calls.sent.length === 1, "the reply");
+	assert.equal(harness.client.calls.sent[0].text, "好了", "DSH 回合同样要能正常回信");
+	await harness.bridge.stop();
+});
+
+test("DSH 回合失败：按时间线里的错误消息报失败，不把半截回答当结果", async () => {
+	// DSH 的失败不置 error 状态（控制态只有 idle/running），失败是 turn/end 时追加的错误消息。
+	const harness = createHarness({ batches: [{ msgs: [userMessage({ text: "跑一下" })] }] });
+	harness.config.state.backend = "dsh";
+	await harness.start();
+
+	await waitFor(() => harness.prompts.length === 1, "the prompt");
+	harness.messages.set("a1", [
+		{ role: "user", text: "跑一下" },
+		{ role: "assistant", text: "半截回答" },
+		{ role: "error", text: "模型鉴权失败" },
+	]);
+	harness.emitRuntimeEvent("agents:state", { id: "a1", status: "running" });
+	harness.emitRuntimeEvent("agents:state", { id: "a1", status: "idle" });
+
+	await waitFor(() => harness.client.calls.sent.length === 1, "the failure notice");
+	assert.ok(harness.client.calls.sent[0].text.includes("模型鉴权失败"), "要带上真实原因（用户能据此排查鉴权/额度）");
+	assert.ok(!harness.client.calls.sent[0].text.includes("半截回答"), "失败时不能把半截回答当成结果交出去");
+	await harness.bridge.stop();
+});
+
+test("DSH 运行时不可用：给出可执行的提示，而不是笼统的建会话失败", async () => {
+	const harness = createHarness({ batches: [{ msgs: [userMessage({ text: "你好" })] }] });
+	harness.config.state.backend = "dsh";
+	// 主进程侧建会话前的门禁：DSH 没安装/待更新时抛 code=dshUnavailable。
+	const failure = new Error("DSH runtime is not available");
+	failure.code = "dshUnavailable";
+	harness.runtimeBindings.ensureSession = async () => {
+		throw failure;
+	};
+	await harness.start();
+
+	await waitFor(() => harness.client.calls.sent.length === 1, "the notice");
+	assert.ok(harness.client.calls.sent[0].text.includes("DSH"), "要说明是后端不可用（而不是「建会话失败」这种查不动的文案）");
+	assert.equal(harness.prompts.length, 0, "后端不可用时不该提交任何 prompt");
+	await harness.bridge.stop();
+});
+
+test("老绑定沿用自身后端：设置改成 pi 也不会给它突然塞宿主指令", async () => {
+	const harness = createHarness({
+		batches: [{ msgs: [userMessage({ text: "你好" })] }],
+		bindings: [{ chatId: "wxid_me", userId: "wxid_me", sessionId: "s1", sessionPath: "/tmp/s1.jsonl", workspaceId: "p1", createdAt: 1, agentId: "a1", backend: "dsh" }],
+	});
+	harness.config.state.backend = "pi";
+	await harness.start();
+
+	await waitFor(() => harness.prompts.length === 1, "the prompt");
+	assert.equal(harness.prompts[0].agentMessage, undefined, "老绑定是 dsh：设置改动不能改变既有会话的后端语义");
+	harness.messages.set("a1", [{ role: "assistant", text: "在" }]);
 	endRun(harness);
 	await waitFor(() => harness.client.calls.sent.length === 1, "the reply");
 	await harness.bridge.stop();

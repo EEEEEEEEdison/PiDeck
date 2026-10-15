@@ -300,6 +300,7 @@ import { mergeCatalogModels } from "./pi/catalogModelsForValidation";
 import { createSessionModelPreference } from "../shared/modelDisplayName";
 import { modelThinkingLevelOf } from "../shared/modelThinkingLevels";
 import { SessionCatalog, canAttachRuntimeMetadata } from "./sessions/SessionCatalog";
+import { waitForSessionRunEnd } from "./sessions/sessionRunWaiter";
 import { aggregateDshProxyMode, buildHostProxyEnvPatch, resolveDshHostProxyMode, resolveEffectiveSessionProxyMode } from "./sessions/sessionProxyPolicy";
 import { SessionRuntimeCoordinator, type SessionRuntimeBinding } from "./sessions/SessionRuntimeCoordinator";
 import { IdleAgentReleaser } from "./sessions/IdleAgentReleaser";
@@ -761,6 +762,16 @@ function emitAgentsNotice(payload: { message: string; i18nKey: string; i18nParam
 	sendSessionRuntimeEnvelope(event);
 }
 
+/**
+ * 会话运行时事件的模块内旁路监听（IM 桥接等宿主模块等回合收口用）。
+ *
+ * 为什么不做在 Coordinator 里：observeRuntimeEvent 是「路由」不是订阅中心
+ * （它只维护 agents:ui-request 待决表与自动化协调器），而这里的监听者要的是
+ * 同一条事件流上的旁路副本——挂在事件出口处最不容易漏，也天然覆盖
+ * 「compositeAgentGateway.onOutput 拆包后」的所有分支。
+ */
+const runtimeEventListeners = new Set<(event: SessionRuntimeEvent) => void>();
+
 function emitSessionRuntimeEvent(agentId: string, sourceChannel: string, payload: unknown): boolean {
 	const runtimeBinding = sessionRuntimeCoordinator.getRuntimeBinding(agentId);
 	if (!runtimeBinding) return false;
@@ -772,6 +783,14 @@ function emitSessionRuntimeEvent(agentId: string, sourceChannel: string, payload
 		sourceChannel,
 		payload,
 	};
+	for (const listener of runtimeEventListeners) {
+		// 监听者抛错不影响事件主链路（渲染层状态、自动化、会话落盘都在后面）。
+		try {
+			listener(event);
+		} catch (error) {
+			void appLogger.warn("session", "Runtime event listener failed", { agentId, sourceChannel, error: error instanceof Error ? error.message : String(error) });
+		}
+	}
 	sessionRuntimeCoordinator.observeRuntimeEvent(event);
 	automationRunCoordinator?.observeRuntimeEvent(event);
 	if (payload && typeof payload === "object" && !Array.isArray(payload)) {
@@ -981,12 +1000,20 @@ async function stopDshHostFromMonitor(): Promise<SessionCommandResult<undefined>
 	return { ok: true, value: undefined };
 }
 
+/**
+ * 全后端 runtime 查找（pi/DSH/ACP 统一）。
+ * composite 未装配时（启动极早期/测试沙箱）回退 pi 查找——回退只是兼容，别在回退上建新功能。
+ */
+function findRuntimeTab(agentId: string): AgentTab | undefined {
+	return compositeAgentGateway?.list().find((candidate) => candidate.id === agentId) ?? agentManager.list().find((candidate) => candidate.id === agentId);
+}
+
 function emitReplacementState(binding: SessionRuntimeBinding, includeMessages: boolean): void {
 	// 多后端查找：ACP/DSH 的 tab 不在 pi AgentManager 里。此前只查 agentManager，
 	// 查不到直接 return，导致换绑/重启后的状态+消息窗口重下发对 ACP/DSH 全部静默失效
 	//（渲染层停在旧 runtime 的窗口/live 身份，重启后编辑/删除/重发定位失败）。
-	// 2027-03 审计发现 B；composite 未装配时（启动极早期/测试沙箱）回退 pi 查找。
-	const tab = compositeAgentGateway?.list().find((candidate) => candidate.id === binding.agentId) ?? agentManager.list().find((candidate) => candidate.id === binding.agentId);
+	// 2027-03 审计发现 B；`findRuntimeTab` 里保留了 composite 未装配时的 pi 回退。
+	const tab = findRuntimeTab(binding.agentId);
 	if (!tab) return;
 	emitSessionRuntimeEvent(binding.agentId, ipcChannels.agentsState, tab);
 	if (includeMessages) {
@@ -1331,10 +1358,22 @@ const imSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 			});
 			return { sessionId: restored.id };
 		}
+		if (input.backend === "dsh" && dshRuntimeStatus.canCreateDshSession() !== true) {
+			// 与 sessions:create-anonymous 同一道门控：不可用后端建不出会话。
+			// 这里只抛机器可读错误码，通道文案由桥接词典决定（装配层不写用户文案）。
+			const error: Error & { code?: string } = new Error("DSH runtime is not available");
+			error.code = "dshUnavailable";
+			throw error;
+		}
 		const draft = await sessionCatalog.createDraft({
 			projectId: input.projectId,
 			title: input.title,
 			environment,
+			// 渠道后端（缺省 pi：保持与历史行为一致，undefined 与 pi 等价）。
+			backend: input.backend,
+			// source 是历史来源（pi JSONL 语系），后端才是引擎：新建渠道会话一律 source=pi，
+			// DSH 会话也一样（且不带 filePath——DSH 会话文件是 zstd，
+			// canAttachRuntimeMetadata 会拒绝，host id 由 Coordinator 回写）。
 			source: "pi",
 			channel: input.channel,
 			// 外部连接（微信等）要的是「像桌面会话一样自动命名」：不写 titleOrigin 即留一次
@@ -1346,7 +1385,7 @@ const imSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 	async activateRuntime(sessionId) {
 		const activated = await sessionRuntimeCoordinator.activateRuntime(sessionId);
 		if (!activated.ok) throw sessionCommandIpcError(activated.error);
-		const tab = agentManager.list().find((candidate) => candidate.id === activated.value.agentId);
+		const tab = findRuntimeTab(activated.value.agentId);
 		if (!tab)
 			throw sessionCommandIpcError({
 				code: "SESSION_COMMAND_FAILED",
@@ -1437,6 +1476,29 @@ const imSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 		if (!target) throw sessionCommandIpcError({ code: "SESSION_RUNTIME_UNAVAILABLE" });
 		const result = await sessionRuntimeCoordinator.abortRuntime(target);
 		if (!result.ok) throw sessionCommandIpcError(result.error);
+	},
+	findRuntimeAgent(agentId) {
+		return findRuntimeTab(agentId);
+	},
+	getRuntimeMessages(sessionId) {
+		// 无 runtime（草稿/已释放）按空时间线处理：调用方用它取本轮起点，空数组是安全缺省。
+		return sessionRuntimeCoordinator.getRuntimeMessages(sessionId)?.value ?? [];
+	},
+	waitForRunEnd(input) {
+		// 监听在提交 prompt 之前同步注册（waitForSessionRunEnd 的第一件事就是 subscribe），
+		// 终态契约见 sessions/sessionRunWaiter.ts。
+		return waitForSessionRunEnd(
+			{
+				subscribe: (listener) => {
+					runtimeEventListeners.add(listener);
+					return () => {
+						runtimeEventListeners.delete(listener);
+					};
+				},
+				getMessages: (id) => sessionRuntimeCoordinator.getRuntimeMessages(id)?.value ?? [],
+			},
+			input,
+		);
 	},
 	async listRuntimeModels(sessionId) {
 		const target = sessionRuntimeCoordinator.getTarget(sessionId);
@@ -5353,7 +5415,6 @@ app
 		// 服务在这里建好并登记退出清理；启用状态下的实际连接由 start() 发起（fire-and-forget，
 		// 失败只进日志/状态，不得阻断启动）。
 		const wechatService = new WeChatService({
-			agentManager,
 			getProjects: () => projectStore.list().map((project) => ({ id: project.id, name: project.name })),
 			runtimeBindings: imSessionRuntimeBindings,
 			getLocale: currentMainProcessLocale,

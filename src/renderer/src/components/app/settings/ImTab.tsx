@@ -8,14 +8,19 @@ import { Input } from "../../ui-shadcn/input";
  */
 
 import { useState, useEffect, useCallback } from "react";
+import { useAtomValue } from "jotai";
 import { Loader2, X } from "lucide-react";
 import { ConfirmDialog } from "../../app/AppParts";
 import { writeClipboard } from "../../../utils/clipboard";
-import type { FeishuBotConfig, FeishuBridgeStatus, FeishuChatBinding, FeishuTestResult } from "../../../../../shared/types";
+import type { FeishuBotConfig, FeishuBridgeStatus, FeishuChatBinding, FeishuTestResult, ImChannelBackend } from "../../../../../shared/types";
+import { parseImChannelBackend } from "../../../../../shared/types";
+import { dshUiVisibilityFor } from "../../../../../shared/types/dshRuntime";
+import { dshRuntimeStatusAtom } from "../../../atoms/dsh-atoms";
 import { formatI18nDateTime, t } from "../../../i18n";
 import { WeChatSection } from "./WeChatSection";
 import { Label } from "../../ui-shadcn/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui-shadcn/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui-shadcn/select";
 
 type Props = {
 	onSave?: () => void;
@@ -128,6 +133,9 @@ function FeishuPane(_props: Props) {
 	const [deleteConfirmBotId, setDeleteConfirmBotId] = useState<string | null>(null);
 	const [guideOpen, setGuideOpen] = useState(false);
 	const [copiedScope, setCopiedScope] = useState(false);
+	// 后端可用性：DSH 未安装/待更新时只能选 pi（与「通用 → 默认 Agent 后端」同一套判定）。
+	const dshRuntimeState = useAtomValue(dshRuntimeStatusAtom).state;
+	const dshAvailable = dshUiVisibilityFor(dshRuntimeState).canCreateDshSession;
 	const [copiedEvents, setCopiedEvents] = useState(false);
 	const [copiedCallbacks, setCopiedCallbacks] = useState(false);
 	const [copiedCredential, setCopiedCredential] = useState<string | null>(null);
@@ -280,6 +288,16 @@ function FeishuPane(_props: Props) {
 			await loadData();
 		},
 		[api, editOpenIdValue, loadData],
+	);
+
+	/** 只影响该 Bot 新建的会话；已有绑定保持自己的后端（设置页文案已说明）。 */
+	const handleBackendChange = useCallback(
+		async (botId: string, backend: ImChannelBackend) => {
+			if (!api) return;
+			await api.botConfig!(botId, { backend });
+			await loadData();
+		},
+		[api, loadData],
 	);
 
 	const handleRemoveBinding = useCallback(
@@ -640,6 +658,30 @@ function FeishuPane(_props: Props) {
 												</Button>
 											</div>
 										)}
+									</div>
+
+									<div className="config-im-bot-detail-section">
+										<div className="config-im-section-title">{t("config.im.backend")}</div>
+										<div className="flex items-center gap-3">
+											<Select
+												value={bot.backend ?? "pi"}
+												onValueChange={(value) => {
+													const next = parseImChannelBackend(value);
+													if (next) void handleBackendChange(bot.id, next);
+												}}
+											>
+												<SelectTrigger className="w-60">
+													<SelectValue />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="pi">{t("settings.defaultAgentBackendPi")}</SelectItem>
+													<SelectItem value="dsh" disabled={!dshAvailable}>
+														{dshAvailable ? t("settings.defaultAgentBackendDsh") : t("settings.defaultAgentBackendDshUnavailable")}
+													</SelectItem>
+												</SelectContent>
+											</Select>
+											<span className="text-muted-foreground text-xs">{t("config.im.backendHint")}</span>
+										</div>
 									</div>
 
 									<div className="config-im-bot-detail-section">
