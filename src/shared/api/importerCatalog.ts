@@ -6,7 +6,7 @@
  * （沉默清单 S4：11 导入域不占域清单行，由本表承载），通道走 sessions:import* 入口，
  * handler 统一注册在 ipc/sessionIpc.ts。
  * 守卫测试 tests/unifiedApiDomainCatalog.test.mjs：id 与域清单共用唯一空间、
- * 11 个 *-sessions 前缀由本表认领、命名空间与 DOMAIN_CATALOG 并集恰好覆盖 64 命名空间。
+ * 11 个 *-sessions 前缀由本表认领、命名空间与 DOMAIN_CATALOG 并集恰好覆盖 70 命名空间。
  */
 import type { ImporterCatalogEntry } from "./domainTypes";
 

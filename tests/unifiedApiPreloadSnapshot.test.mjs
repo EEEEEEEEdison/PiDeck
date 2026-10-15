@@ -2,18 +2,18 @@
  * F8 · preload 暴露面快照守卫（TEST-PLAN §F8，6 例=4 正+2 负）。
  *
  * 捕获 src/preload/index.ts 经 contextBridge 实际暴露的 piDesktop API，对
- * 64 命名空间清单与每命名空间方法清单做 sha256 快照（A10：暴露面零变化），
- * 并核对数量锚点（sessions 107 / config 47 / git 38 / app 32）与订阅形态。
- * 摘要来源：T7 只读探针实测（2026-10-14，与 TEST-PLAN §5.2 锚点核对一致，无并行演进差异）。
+ * 70 命名空间清单与每命名空间方法清单做 sha256 快照（A10：暴露面零变化），
+ * 并核对数量锚点（sessions 110 / config 48 / git 38 / app 32）与订阅形态。
+ * 摘要来源：T7 只读探针实测（2026-10-14；2026-10-16 合并刷新随 dev 演进重算）。
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const NS_LIST_SHA256 = "489f58a422c7d323eba3729c2a33196f3176234db03fbf47492691019a9b6c8d";
-const FULL_METHODS_SHA256 = "6a40cb4b9f45dcaaea173215022824cad0ea7213f70d08ae875045374b7314db";
-const NAMESPACE_COUNT = 64;
+const NS_LIST_SHA256 = "5f3768123e04385116d679b8b3e6f16b638a84657c46d036d18faa9fb57ae804";
+const FULL_METHODS_SHA256 = "a6a0b4b2aca14e5a30cca5ec1e580b98a7a107413cdf3a946aec646f359f3a9c";
+const NAMESPACE_COUNT = 70;
 
 /** 捕获 preload 暴露的 piDesktop；null/undefined/形态不符时显式红并给诊断（F8-6 共用）。 */
 function assertValidCapture(capture) {
@@ -45,7 +45,7 @@ const api = capturePreloadApi();
 const namespaces = sortedKeys(api);
 const methodLines = namespaces.map((ns) => `${ns}=${sortedKeys(api[ns]).join(",")}`);
 
-test("F8-1 preload 顶层命名空间数 === 64 且排序清单摘要零漂移", () => {
+test("F8-1 preload 顶层命名空间数 === 70 且排序清单摘要零漂移", () => {
 	assert.equal(namespaces.length, NAMESPACE_COUNT, `命名空间数 ${namespaces.length} ≠ ${NAMESPACE_COUNT}`);
 	assert.equal(sha256(namespaces.join(",")), NS_LIST_SHA256, "命名空间清单摘要漂移：preload 暴露面发生变化（A10 红线）");
 });
@@ -54,9 +54,9 @@ test("F8-2 每命名空间排序方法清单摘要零漂移", () => {
 	assert.equal(sha256(methodLines.join(";")), FULL_METHODS_SHA256, "方法清单摘要漂移：任一命名空间的方法暴露面发生变化（A10 红线）");
 });
 
-test("F8-3 数量锚点：sessions 107 / config 47 / git 38 / app 32", () => {
-	assert.equal(Object.keys(api.sessions).length, 107, "sessions 方法数漂移");
-	assert.equal(Object.keys(api.config).length, 47, "config 方法数漂移");
+test("F8-3 数量锚点：sessions 110 / config 48 / git 38 / app 32", () => {
+	assert.equal(Object.keys(api.sessions).length, 110, "sessions 方法数漂移");
+	assert.equal(Object.keys(api.config).length, 48, "config 方法数漂移");
 	assert.equal(Object.keys(api.git).length, 38, "git 方法数漂移");
 	assert.equal(Object.keys(api.app).length, 32, "app 方法数漂移");
 });

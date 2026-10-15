@@ -4,8 +4,8 @@
  * 解析 src/preload/index.ts 源码（注释与字符串骨架化 + 花括号深度扫描，空白容忍）
  * 提取 sessions/config 命名空间方法全集，并与 electron stub 捕获的实际暴露面交叉印证；
  * 核对 T4 落盘的 SESSIONS_SUBDOMAINS/CONFIG_SUBSTORES（consolidations.ts）：
- * 四组并集≡107 全集（§0 锚）、两两互斥（A14）、DSH 归属按 PLAN.md S5 裁定、
- * config 十组≡47 全集与方法族口径（FIND-4：ConfigManager 单类按语义分组）、
+ * 四组并集≡110 全集（§0 锚）、两两互斥（A14）、DSH 归属按 PLAN.md S5 裁定、
+ * config 十组≡48 全集与方法族口径（FIND-4：ConfigManager 单类按语义分组）、
  * facadeTypes.ts 视图成员与映射常量同源；坏 fixture 对校验函数有分辨力（防恒真）。
  * 映射数据与裁定不符时用例如实红（走返工流程），本测试不改动任何 src/ 数据。
  */
@@ -17,9 +17,9 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 const PRELOAD_SOURCE = readFileSync("src/preload/index.ts", "utf8");
 const CONSOLIDATIONS_SOURCE = readFileSync("src/shared/api/consolidations.ts", "utf8");
 const FACADE_SOURCE = readFileSync("src/shared/api/facadeTypes.ts", "utf8");
-/** TEST-PLAN §0 锚定数字：sessions 107（§0 记 19+78+6+4 分桶）、config 47。 */
-const SESSIONS_METHOD_TOTAL = 107;
-const CONFIG_METHOD_TOTAL = 47;
+/** TEST-PLAN §0 锚定数字：sessions 110（20+79+6+5 分桶，2026-10-16 合并刷新）、config 48。 */
+const SESSIONS_METHOD_TOTAL = 110;
+const CONFIG_METHOD_TOTAL = 48;
 const SESSIONS_GROUP_KEYS = ["catalog", "import", "rewind", "runtime"];
 const CONFIG_GROUP_KEYS = ["auth", "maintenance", "mcp", "models", "resources", "settings", "tokendance", "trust", "usageProbes", "vision"];
 
@@ -174,10 +174,10 @@ test("F5-1 SESSIONS_SUBDOMAINS 组键集恰为 catalog/runtime/import/rewind 四
 	assert.deepEqual(validateGroupingStructure(SESSIONS, SESSIONS_GROUP_KEYS), []);
 });
 
-test("F5-2 四组并集 ≡ preload sessions 命名空间 107 方法全集（无丢失无新增，§0 锚）", () => {
+test("F5-2 四组并集 ≡ preload sessions 命名空间 110 方法全集（无丢失无新增，§0 锚）", () => {
 	assert.equal(sessionsNames.length, SESSIONS_METHOD_TOTAL, `源码解析得 ${sessionsNames.length} 个方法`);
 	assert.deepEqual(diffGroups(SESSIONS, sessionsNames), { missing: [], extra: [] });
-	assert.equal(Object.values(SESSIONS).flat().length, SESSIONS_METHOD_TOTAL, "四组方法数之和 = 107");
+	assert.equal(Object.values(SESSIONS).flat().length, SESSIONS_METHOD_TOTAL, "四组方法数之和 = 110");
 });
 
 test("F5-3 四组两两互斥（A14）", () => {
@@ -215,7 +215,7 @@ test("F5-5 facadeTypes 视图成员与映射常量同源（源码契约，空白
 	);
 });
 
-test("F5-6 fixture 工厂按组 pick：输出键并集 ≡ 107 方法全集（SubPick 缺席静默语义）", () => {
+test("F5-6 fixture 工厂按组 pick：输出键并集 ≡ 110 方法全集（SubPick 缺席静默语义）", () => {
 	let counter = 0;
 	const fixture = {};
 	for (const name of sessionsNames) fixture[name] = () => counter++;
@@ -254,7 +254,7 @@ test("F5-7 DSH 方法归属按 PLAN.md S5 裁定（查询→runtime、importDsh*
 	assert.deepEqual(problems, [], "DSH 归属与 S5 裁定不符——映射数据待返工，证据见消息");
 });
 
-test("F5-8 CONFIG_SUBSTORES 十组并集 ≡ config 命名空间 47 方法全集 + 方法族口径（FIND-4）", () => {
+test("F5-8 CONFIG_SUBSTORES 十组并集 ≡ config 命名空间 48 方法全集 + 方法族口径（FIND-4）", () => {
 	assert.equal(configNames.length, CONFIG_METHOD_TOTAL, `源码解析得 ${configNames.length} 个方法`);
 	assert.deepEqual(Object.keys(CONFIG).sort(), CONFIG_GROUP_KEYS);
 	assert.deepEqual(validateGroupingStructure(CONFIG, CONFIG_GROUP_KEYS), []);

@@ -74,7 +74,7 @@ test("F6-2 每行 preloadNamespaces 均存在于 preload 64 命名空间暴露�
 	}
 });
 
-test("F6-3 每行 channelPrefix 均存在于真实通道面前的 77 前缀", () => {
+test("F6-3 每行 channelPrefix 均存在于真实通道面前的 84 前缀", () => {
 	for (const row of CATALOG) {
 		for (const prefix of row.channelPrefix) assert.ok(actualPrefixes.has(prefix), `${row.id}: 未知前缀 ${prefix}`);
 	}
