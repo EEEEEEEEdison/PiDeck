@@ -17,8 +17,7 @@ import { buttonVariants } from "../ui-shadcn/button";
 import { useVisionBridgeDraft } from "./settings/visionDraft.ts";
 import { dirtySettingsTabIds, type SettingsUnsavedTabId } from "./settings/unsavedChangesSummary";
 import { computeDirtyFields } from "./settings/settingsDirtyFields.ts";
-import { SETTINGS_TAB_IDS, SETTINGS_TAB_LABEL_KEYS, SETTINGS_TAB_LAYOUT } from "./settings/settingsTabLayout";
-import { acpChannelAvailableAtom } from "../../atoms/acp-atoms";
+import { SETTINGS_TAB_IDS, SETTINGS_TAB_LABEL_KEYS } from "./settings/settingsTabLayout";
 import { isSettingsTabHidden, resolveInitialSettingsTab, resolveVisibleSettingsTabs } from "./settings/settingsTabVisibility";
 import { BridgeGuiSlot, useBridgeSessionId } from "../bridge/BridgeSlot";
 import { showNotice } from "../../utils/notice";
@@ -67,9 +66,6 @@ const SETTINGS_LAST_PANE_KEY = "pideck-settings-last-pane";
 
 /** 旧 settings.json 缺 hiddenModules 时的稳定空值：避免每次渲染新建数组让侧栏过滤 effect 空转。 */
 const NO_HIDDEN_MODULES: readonly string[] = [];
-
-/** 开发构建下无硬隐藏 tab 的稳定空值：与 NO_HIDDEN_MODULES 同理由，避免 useMemo 每次新建 Set。 */
-const EMPTY_TAB_SET: ReadonlySet<string> = new Set();
 
 /**
  * 读取上次打开的设置 tab；localStorage 不可用、无记录或值已失效时回退默认值 "common"。
@@ -278,13 +274,10 @@ function SettingsModalContent(props: SettingsModalProps) {
 	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容）。
 	// 深链（如 Git「去设置」）优先于上次记住的 tab，否则会停在外观/开发等其它页。
 	const hasPendingUpdate = useAtomValue(hasPendingUpdateAtom);
-	// ACP 仅开发构建可见：stable 把 acp tab 从设置页硬隐藏（侧栏列表 + 初始记忆值 + 深链都回退）。
-	const acpChannelAvailable = useAtomValue(acpChannelAvailableAtom);
-	const unavailableTabs = useMemo<ReadonlySet<string>>(() => (acpChannelAvailable ? EMPTY_TAB_SET : new Set<SettingsTabId>(["acp"])), [acpChannelAvailable]);
 	// GUI 扩展桥：设置弹窗是应用级单实例 chrome，由当前聚焦会话的 pi 进程供给内容（不做回落）。
 	const bridgeSessionId = useBridgeSessionId();
 	// 开弹窗时的隐藏模块快照只用于算初始 tab；侧栏过滤读草稿（下方 draftSettings.hiddenModules），开关一切即预览。
-	const [activeTab, setActiveTab] = useState<SettingsTabId>(() => resolveInitialSettingsTab(getDefaultStore().get(settingsFocusAtom)?.tab, loadLastSettingsTab(), props.settings.hiddenModules ?? NO_HIDDEN_MODULES, getDefaultStore().get(acpChannelAvailableAtom) ? undefined : new Set(["acp"])));
+	const [activeTab, setActiveTab] = useState<SettingsTabId>(() => resolveInitialSettingsTab(getDefaultStore().get(settingsFocusAtom)?.tab, loadLastSettingsTab(), props.settings.hiddenModules ?? NO_HIDDEN_MODULES));
 	/**
 	 * 本次弹窗内临时显示的已隐藏 tab：深链（Git「去设置」、命令面板「已隐藏，点击显示」）
 	 * 指向隐藏 tab 时不阻断也不改持久化，只让它在侧栏临时出现；弹窗关闭即失效。
@@ -594,9 +587,8 @@ function SettingsModalContent(props: SettingsModalProps) {
 	);
 
 	// 侧栏条目 = 布局模块定义的顺序/分组边界，经隐藏模块过滤（按草稿，开关即预览），再拼上面的图标文案元数据
-	// unavailableTabs（stable 的 acp）比用户隐藏更硬：深链/临时显示都救不回来，直接不渲染。
 	const hiddenModules = draftSettings.hiddenModules ?? NO_HIDDEN_MODULES;
-	const tabs = resolveVisibleSettingsTabs(hiddenModules, revealedTabs, SETTINGS_TAB_LAYOUT, unavailableTabs).map((entry) => ({
+	const tabs = resolveVisibleSettingsTabs(hiddenModules, revealedTabs).map((entry) => ({
 		id: entry.id,
 		dividerBefore: entry.dividerBefore ?? false,
 		label: t(TAB_META[entry.id].labelKey),

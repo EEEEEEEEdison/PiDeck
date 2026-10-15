@@ -46,7 +46,7 @@ import { readDataEnvDecision, validateStartupDataEnv, writeDataEnvDecision } fro
 import { registerDataEnvIpc } from "./ipc/dataEnvIpc";
 import { ChannelSwitchService } from "./update/ChannelSwitchService";
 import { registerChannelSwitchIpc } from "./ipc/channelSwitchIpc";
-import { isDevChannelBuild, resolveUpdateChannel } from "./update/channelIdentity";
+import { resolveUpdateChannel } from "./update/channelIdentity";
 import { APP_DEEP_LINK_SCHEME } from "./utils/deepLinkScheme";
 import { APP_DISPLAY_NAME, initializeAppBrand } from "./utils/appBrand";
 import { migrateDevUserData } from "./projects/devUserDataMigration";
@@ -2639,8 +2639,6 @@ function registerIpc() {
 	// quitApp 先置 isQuitting，与托盘「退出」菜单同一写法，避免 closeToTray 把退出吞成隐藏到托盘。
 	registerAcpIpc({
 		settingsStore,
-		// ACP 仅供开发构建（未打包 dev / dev 通道包）：stable 隐藏全部入口，工具域 IPC 拒绝。
-		isDevChannel: () => isDevChannelBuild(),
 		// 会话级配置桥惰性取 manager:注册时(此处)尚未实例化(4786 行 opt-in 段),
 		// 与生命周期依赖同一条惰性模式。
 		getSessionManager: () => acpAgentManager,
@@ -5094,9 +5092,8 @@ app
 		ensurePiResourceMigration = ensureResourceMigration;
 		agentManager.configureResourceMigrationGate(ensureResourceMigration);
 		// 多后端网关装配：pi + dsh + acp（DSH 在窗口创建后后台预热，失败时按需重试）。
-		// ACP 是 opt-in（settings.acpEnabled，默认 false）且仅限开发构建（未打包 dev 或 dev 通道包，
-		// isDevChannelBuild）：网关常驻注册，但开关与通道都是运行时读的（deps.isEnabled），
-		// 任一不满足时 create 直接拒绝——既保证「stable 渠道/stable 构建不 spawn 任何 ACP CLI」，
+		// ACP 是 opt-in（settings.acpEnabled，默认 false）：网关常驻注册，开关是运行时读的（deps.isEnabled），
+		// 关闭时 create 直接拒绝——保证「未开启的构建不 spawn 任何 ACP CLI」，
 		// 又让设置页开关立即生效（不必重启）。
 		// 不按启动时的开关决定是否注册：合成器的事件订阅（onOutput）与能力并集在启动时一次成形，
 		// 启动后才补注册的网关收不到事件转发，ACP 时间线会静默无输出；
@@ -5106,7 +5103,7 @@ app
 			piLocator,
 			getProject: (projectId) => projectStore.get(projectId),
 			getTools: () => settingsStore.get().acpTools ?? [],
-			isEnabled: () => settingsStore.get().acpEnabled === true && isDevChannelBuild(),
+			isEnabled: () => settingsStore.get().acpEnabled === true,
 			// configOptions 变更推送：set_config_option 响应/config_option_update 通知都走同一事件,
 			// 渲染层按 agentId 隔离(旧 agent 迟到事件写旧 atom,不再被读)。
 			onConfigOptionsChanged: (tab, options) => {

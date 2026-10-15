@@ -13,7 +13,6 @@ export function resolveUpdateChannel(): UpdateChannel {
 
 /**
  * 开发构建：未打包 npm run dev 或 dev 通道安装包（PIDECK_DEV_BUILD=1）。
- * 开发中功能（ACP 后端）的入口只在开发构建可见，stable 安装包隐藏；
  * 与 index.ts 的 isDevBuild 同口径（含未打包运行），集中在此避免两处漂移。
  */
 export function isDevChannelBuild(): boolean {

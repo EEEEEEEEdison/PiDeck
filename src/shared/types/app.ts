@@ -326,7 +326,7 @@ export type UpdateChannel = "stable" | "dev";
 export interface UpdateChannelInfo {
 	channel: UpdateChannel;
 	currentVersion: string;
-	/** 开发构建（未打包 npm run dev 或 dev 通道安装包）：开发中功能（ACP）据此限定入口，stable 恒 false。 */
+	/** 开发构建（未打包 npm run dev 或 dev 通道安装包）：仅用于呈现当前构建身份，不再作为功能入口门控。 */
 	devBuild: boolean;
 }
 

@@ -138,7 +138,6 @@ import {
 	upsertSessionAtom,
 	acpToolsAtom,
 	acpEnabledAtom,
-	acpChannelAvailableAtom,
 } from "./atoms";
 import { isSameSessionPath } from "./agentListDisplay";
 import { t } from "./i18n";
@@ -629,8 +628,6 @@ export function App() {
 
 	// 通道切换状态订阅：初拉当前通道 + 切换快照，AppUpdateCard 徽章/切换向导消费。
 	useChannelSwitchWatch({ api });
-	// ACP 入口仅开发构建可见（stable 隐藏新建会话菜单里的 ACP 组；设置页/模块可见性另在各自组件过滤）。
-	const acpChannelAvailable = useAtomValue(acpChannelAvailableAtom);
 
 	// 数据环境事件订阅：dev 首启模式选择 / 目录标记警告 / 导入进度（弹窗由 dataEnvAtoms 驱动）。
 	useDataEnvWatch({ api });
@@ -2392,15 +2389,10 @@ export function App() {
 			void createSessionDraftWithTab(projectId);
 		},
 		// ACP 工具会话入口（Tab 栏 + 下拉尾部，工具→项目二级）：走 sidebarActions.createAcp，
-		// 与设置页共用同一条创建链（backend=acp + acpToolId）。stable 通道不传 → SessionTabsBar
-		// 的 acpVisible（Boolean(onNewAcpSession) && …）自然隐藏整个 ACP 菜单组。
-		...(acpChannelAvailable
-			? {
-					onNewAcpSession: (projectId: string, toolId: string) => {
-						void sidebarActions.sessions.createAcp(projectId, toolId);
-					},
-				}
-			: {}),
+		// 与设置页共用同一条创建链（backend=acp + acpToolId）。
+		onNewAcpSession: (projectId: string, toolId: string) => {
+			void sidebarActions.sessions.createAcp(projectId, toolId);
+		},
 		onTogglePin: workspaceChrome.togglePin,
 		onReorder: workspaceChrome.reorderTab,
 		// 分屏组胶囊：分屏内会话聚合为组（颜色标记 + 展开/收起）

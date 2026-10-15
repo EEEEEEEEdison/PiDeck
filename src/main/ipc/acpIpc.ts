@@ -22,20 +22,12 @@ export function registerAcpIpc(deps: {
 	settingsStore: SettingsStore;
 	getLifecycleDeps?: () => AcpToolLifecycleDeps;
 	getSessionManager?: () => { getSessionConfigOptions(agentId: string): AcpSessionConfigOption[] | undefined; applyConfigOption(agentId: string, optionId: string, value: string | boolean): Promise<AcpSessionConfigOption[]> };
-	/** 开发渠道判定（isDevChannelBuild）：ACP 仅供开发构建，stable 渲染层已隐藏全部入口，这里是边界防御。 */
-	isDevChannel: () => boolean;
 }): void {
 	const { settingsStore } = deps;
-	// stable 渄属的直接拒绝（渲染层入口已隐藏，正常到不了这里）：
-	// 工具表读退空数组（App 挂载无条件初拉，拒绝会制造无意义噪音），写/校验/生命周期直接拒绝。
-	const devOnly = (action: string): void => {
-		if (!deps.isDevChannel()) throw new Error(`ACP ${action} is only available in the PiDeck dev channel`);
-	};
 
-	ipcMain.handle(ipcChannels.acpToolsList, () => (deps.isDevChannel() ? (settingsStore.get().acpTools ?? []) : []));
+	ipcMain.handle(ipcChannels.acpToolsList, () => settingsStore.get().acpTools ?? []);
 
 	ipcMain.handle(ipcChannels.acpToolsSave, (_event, tools: unknown): AcpToolConfig[] => {
-		devOnly("tool management");
 		// 整表替换语义(渲染层持有完整列表):消毒在 SettingsStore.update 再做一次,
 		// 这里先粗校验形状,让非数组入参在 IPC 边界直接报错而不是静默清表。
 		if (!Array.isArray(tools)) throw new Error("acp:tools-save expects an array of tools");
@@ -45,7 +37,6 @@ export function registerAcpIpc(deps: {
 	});
 
 	ipcMain.handle(ipcChannels.acpToolValidate, (_event, input: unknown): ReturnType<typeof validateAcpTool> => {
-		devOnly("tool management");
 		if (!input || typeof input !== "object") return { ok: false, reasonKey: "acp.toolNameRequired" };
 		const record = input as Record<string, unknown>;
 		return validateAcpTool(
@@ -76,13 +67,11 @@ export function registerAcpIpc(deps: {
 	};
 
 	ipcMain.handle(ipcChannels.acpToolDetect, async (_event, presetId: unknown): Promise<AcpToolStatus> => {
-		devOnly("tool management");
 		const preset = requirePreset(presetId);
 		return detectAcpPreset(getLifecycleDeps(), preset);
 	});
 
 	const runAction = async (presetId: unknown, action: "install" | "uninstall", sender: Electron.WebContents): Promise<{ ok: boolean; output: string }> => {
-		devOnly("tool management");
 		const preset = requirePreset(presetId);
 		const lifecycleDeps = getLifecycleDeps();
 		// manual 形态(claude/cursor 官网脚本)不经 npm:拒绝执行,渲染层拿 error 引导用户去官网。

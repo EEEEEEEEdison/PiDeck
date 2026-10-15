@@ -3,7 +3,7 @@ import { useAtomValue } from "jotai";
 import type { AppSettings } from "../../../../../shared/types";
 import { HIDEABLE_MODULE_IDS, isModuleHidden, toggleHiddenModule, type HideableModuleId } from "../../../../../shared/hiddenModules";
 import { t, type TranslationKey } from "../../../i18n";
-import { imageGenConfigAtom, videoGenConfigAtom, sessionRecordsAtom, sessionRuntimeByIdAtom, acpChannelAvailableAtom } from "../../../atoms";
+import { imageGenConfigAtom, videoGenConfigAtom, sessionRecordsAtom, sessionRuntimeByIdAtom } from "../../../atoms";
 import { useFeishuBridge } from "../../../hooks/useFeishuBridge";
 import { Badge } from "../../ui-shadcn/badge";
 import { SettingsSection } from "./SettingsStorageTab";
@@ -74,8 +74,6 @@ export const ModuleVisibilitySection = memo(function ModuleVisibilitySection(pro
 	const videoGenConfig = useAtomValue(videoGenConfigAtom);
 	const sessionRecords = useAtomValue(sessionRecordsAtom);
 	const runtimeById = useAtomValue(sessionRuntimeByIdAtom);
-	// ACP 仅开发构建可见：stable 不列「ACP 工具」开关行（模块本身不存在，隐藏/显示无意义）。
-	const acpChannelAvailable = useAtomValue(acpChannelAvailableAtom);
 	// 会话目录里带 DSH 后端且进程未关闭的会话数：closed/detached 的不算「还在跑」
 	const dshActive = useMemo(() => Object.values(sessionRecords).some((record) => record.backend === "dsh" && runtimeById[record.id] !== undefined && runtimeById[record.id]?.status !== "closed" && runtimeById[record.id]?.status !== "detached"), [sessionRecords, runtimeById]);
 
@@ -120,7 +118,7 @@ export const ModuleVisibilitySection = memo(function ModuleVisibilitySection(pro
 			}
 			description={t("settings.modules.sectionDesc")}
 		>
-			{HIDEABLE_MODULE_IDS.filter((moduleId) => moduleId !== "acp" || acpChannelAvailable).map((moduleId) => {
+			{HIDEABLE_MODULE_IDS.map((moduleId) => {
 				const hidden = isModuleHidden(hiddenModules, moduleId);
 				const label = t(MODULE_LABEL_KEYS[moduleId]);
 				const badgeKey = activeBadge(moduleId);

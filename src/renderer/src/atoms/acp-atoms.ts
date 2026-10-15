@@ -1,6 +1,5 @@
 import { atom } from "jotai";
 import type { AcpToolConfig } from "../../../shared/types/acp";
-import { updateChannelInfoAtom } from "./channelSwitchAtoms";
 
 /**
  * 已登记的 ACP CLI 工具表(settings.acpTools 的只读快照)。
@@ -18,10 +17,3 @@ export const acpToolsAtom = atom<AcpToolConfig[]>([]);
  * 也不注册 ACP 网关);变更重启生效,快照只在挂载时拉一次,频率与工具表同级。
  */
 export const acpEnabledAtom = atom<boolean>(false);
-
-/**
- * ACP 是否在本构建可见（update:get-channel 的 devBuild，App 挂载时经 useChannelSwitchWatch 拉取）。
- * ACP 仅供开发构建（未打包 dev / dev 通道包）：stable 隐藏新建会话菜单、设置页 ACP tab、
- * 模块可见性行等全部入口；未拉取到通道信息前先按 false 隐藏（菜单还需工具表非空，无闪烁问题）。
- */
-export const acpChannelAvailableAtom = atom<boolean>((get) => get(updateChannelInfoAtom)?.devBuild === true);

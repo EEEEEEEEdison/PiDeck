@@ -1190,7 +1190,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.appGetChannel, () => ({
 		channel: resolveUpdateChannel(),
 		currentVersion: app.getVersion(),
-		// 开发中功能（ACP）入口可见性依据：未打包 dev 或 dev 通道包为 true，stable 恒 false。
+		// 构建身份：未打包 dev 或 dev 通道包为 true，stable 安装包恒 false（不作为功能入口门控）。
 		devBuild: isDevChannelBuild(),
 	}));
 	ipcMain.handle(ipcChannels.appDownloadUpdate, async () => {
