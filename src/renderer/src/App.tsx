@@ -40,6 +40,7 @@ import {
 	effectiveAgentBackendAtom,
 	busySendDeliveryAtom,
 	hiddenModulesAtom,
+	hiddenComposerFeaturesAtom,
 	imageGenConfigAtom,
 	enhanceModelAtom,
 	enhanceIncludeContextAtom,
@@ -673,6 +674,13 @@ export function App() {
 	useEffect(() => {
 		setHiddenModules(settings.hiddenModules ?? []);
 	}, [settings.hiddenModules, setHiddenModules]);
+
+	// 隐藏的输入框功能入口同步给不持有 settings props 的消费方（ComposerBottomBar 的模式选择器），
+	// 与 hiddenModules 同一模式。
+	const setHiddenComposerFeatures = useSetAtom(hiddenComposerFeaturesAtom);
+	useEffect(() => {
+		setHiddenComposerFeatures(settings.hiddenComposerFeatures ?? []);
+	}, [settings.hiddenComposerFeatures, setHiddenComposerFeatures]);
 
 	// 启动预热：应用起来后把「已开启用量查询」的供应商各查一次（串行错峰），
 	// 打开模型/认证页即可直接看到徽章数值，不必先手动刷新。

@@ -11,14 +11,17 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const { HIDEABLE_COMPOSER_FEATURE_IDS, isComposerFeatureHidden, toggleHiddenComposerFeature } = loadTsCommonJs("src/shared/composerFeatures.ts");
 
-test("清单包含全部五个可关入口且顺序稳定（外观设置行的展示顺序）", () => {
-	assert.deepEqual([...HIDEABLE_COMPOSER_FEATURE_IDS], ["security", "quickMessages", "gitBranch", "enhance", "voice"]);
+test("清单包含全部六个可关入口且顺序稳定（外观设置行的展示顺序）", () => {
+	assert.deepEqual([...HIDEABLE_COMPOSER_FEATURE_IDS], ["composerModes", "security", "quickMessages", "gitBranch", "enhance", "voice"]);
 });
 
 test("isComposerFeatureHidden：空清单 = 全显示；按 id 判定成员关系", () => {
 	assert.equal(isComposerFeatureHidden([], "enhance"), false);
 	assert.equal(isComposerFeatureHidden(["enhance"], "enhance"), true);
 	assert.equal(isComposerFeatureHidden(["enhance"], "voice"), false);
+	// 模式选择器从「功能模块」迁来后仍按同一份清单判定（旧数据由 SettingsStore 迁移搬运）
+	assert.equal(isComposerFeatureHidden(["composerModes"], "composerModes"), true);
+	assert.equal(isComposerFeatureHidden(["enhance"], "composerModes"), false);
 	// 未知 id（来自更新版本的 settings.json）不影响既有判定
 	assert.equal(isComposerFeatureHidden(["composer:future"], "enhance"), false);
 });

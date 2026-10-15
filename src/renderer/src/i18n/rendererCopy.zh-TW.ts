@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 6eeafbf1177d7f54a8defb60d9c442e6c9184883e6789a8e952b0085734e05e0（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 2968e7190c1f33f79eaa5b878f7ce29fc5a94842c454fb1544a5a862f3e152af（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4911,6 +4911,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.modules.title": "功能模組",
 	"settings.composer.title": "輸入框功能顯示",
 	"settings.composer.sectionDesc": "關閉對應入口的顯示，不影響功能本身與快捷鍵；隨時可回這裡重新開啟。",
+	"settings.composer.modes": "模式選擇器",
+	"settings.composer.modesDesc": "輸入框底欄的普通/目標/規劃模式切換入口（進行中的特殊模式仍可退出）",
 	"settings.composer.security": "權限",
 	"settings.composer.quickMessages": "快捷訊息",
 	"settings.composer.gitBranch": "Git 分支",
@@ -4919,8 +4921,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.modules.sectionDesc": "關掉不用的模組可收起它的設定頁與入口；只隱藏介面，不清除配置、不停止已啟用的功能。命令面板（Ctrl+P）仍可搜到已隱藏的頁面。",
 	"settings.modules.dsh": "DSH 後端",
 	"settings.modules.dshDesc": "配置管理的 DSH 分頁、輸入框的 DSH 後端選項",
-	"settings.modules.composerModes": "模式選擇器",
-	"settings.modules.composerModesDesc": "輸入框底欄的普通/目標/規劃模式切換入口（進行中的特殊模式仍可退出）",
 	"settings.modules.imDesc": "飛書 / 微信等外部連線設定頁",
 	"settings.modules.petDesc": "桌面寵物設定頁",
 	"settings.modules.visionDesc": "視覺橋設定頁",

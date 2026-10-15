@@ -22,7 +22,7 @@ export const SETTINGS_SECTION_ANCHORS = [
 	{ tab: "appearance", slug: "appearance-fonts", labelKey: "settings.sectionFonts", keywords: ["字体", "字号", "界面字体", "font", "font size"] },
 	{ tab: "appearance", slug: "appearance-chat-layout", labelKey: "settings.sectionChatLayout", keywords: ["聊天排版", "消息排版", "行距", "正文宽度", "chat layout", "spacing"] },
 	{ tab: "appearance", slug: "appearance-window-style", labelKey: "settings.sectionWindowStyle", keywords: ["窗口样式", "标题栏", "圆角", "window style", "title bar"] },
-	{ tab: "appearance", slug: "appearance-composer-features", labelKey: "settings.composer.title", keywords: ["输入框功能", "输入框工具", "输入框按钮", "composer"] },
+	{ tab: "appearance", slug: "appearance-composer-features", labelKey: "settings.composer.title", keywords: ["输入框功能", "输入框工具", "输入框按钮", "输入框底栏", "模式选择器", "composer"] },
 	{ tab: "common", slug: "common-session", labelKey: "settings.sectionSession", keywords: ["会话设置", "会话列表", "session"] },
 	{ tab: "common", slug: "common-quick-messages-section", labelKey: "settings.quickMessagesSection", keywords: ["快捷消息", "常用语", "预设短语", "quick messages"] },
 	{ tab: "common", slug: "common-reply-actions-section", labelKey: "settings.replyActionsSection", keywords: ["回复快捷操作", "回复动作", "reply actions"] },

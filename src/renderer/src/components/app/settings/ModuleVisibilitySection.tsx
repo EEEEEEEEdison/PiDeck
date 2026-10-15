@@ -32,7 +32,6 @@ const MODULE_LABEL_KEYS: Record<HideableModuleId, TranslationKey> = {
 	git: SETTINGS_TAB_LABEL_KEYS.git,
 	usage: SETTINGS_TAB_LABEL_KEYS.usage,
 	process: SETTINGS_TAB_LABEL_KEYS.process,
-	composerModes: "settings.modules.composerModes",
 	dsh: "settings.modules.dsh",
 };
 
@@ -49,7 +48,6 @@ const MODULE_DESC_KEYS: Record<HideableModuleId, TranslationKey> = {
 	git: "settings.modules.gitDesc",
 	usage: "settings.modules.usageDesc",
 	process: "settings.modules.processDesc",
-	composerModes: "settings.modules.composerModesDesc",
 	dsh: "settings.modules.dshDesc",
 };
 
@@ -58,6 +56,7 @@ const MODULE_DESC_KEYS: Record<HideableModuleId, TranslationKey> = {
  *
  * 隐藏只收起 UI 入口，不清配置、不停后台功能，所以模块仍在运行/已启用时在标题旁挂
  * 「运行中 / 已启用」徽标——用户关掉入口后不至于忘了它还在跑（issue #248 维护者要求）。
+ * 输入框底栏的入口（含模式选择器）归「输入框功能显示」分区，不列在这里。
  * 活动状态取自各模块现成的数据源，不新增 IPC：
  * - 飞书：Bridge 连接态（useFeishuBridge 内部订阅 IPC 推送）
  * - DSH：有 backend=dsh 且 runtime 未关闭的会话
@@ -100,7 +99,6 @@ export const ModuleVisibilitySection = memo(function ModuleVisibilitySection(pro
 			case "process":
 			case "acp":
 			case "hostplugins":
-			case "composerModes":
 				return null;
 		}
 	};
