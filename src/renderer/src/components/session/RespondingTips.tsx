@@ -1,8 +1,10 @@
 import { Lightbulb } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useAtomValue } from "jotai";
 import { formatAccelerator, resolveShortcutBindings } from "../../../../shared/shortcuts";
 import { useShortcutBindings } from "../../hooks/useShortcutBindings";
 import { t } from "../../i18n";
+import { respondingTipsHiddenAtom } from "../../atoms";
 import { SESSION_FEATURE_TIPS } from "./sessionFeatureTips";
 
 /** 每条提示的停留时长：状态条自身 1.8s 轮一句，提示必须明显更慢，否则两处文字同时跳会很吵。 */
@@ -14,8 +16,12 @@ const TIP_INTERVAL_MS = 7000;
  * 视觉：一个灯泡图标 + 一行次要色小字，与状态文案之间用左侧细分割线区分层级，
  * 不做卡片、不加背景——它必须在消息流里保持"顺手看一眼"的存在感，不能抢状态本身。
  * 限宽 + 截断：提示是单行 nowrap 的旁注，窄窗口下宁可截断也不能把消息流撑宽。
+ *
+ * 可在设置 → 外观 → 功能模块里关掉（默认显示）：该开关只停提示本身，不影响提示里
+ * 提到的任何功能，与其他「隐藏模块」一致。
  */
 export function RespondingTips() {
+	const hidden = useAtomValue(respondingTipsHiddenAtom);
 	const { bindings, platform } = useShortcutBindings();
 	// 随机起点：短回复往往撑不过一轮轮播，固定从第一条开始等于只有第一条有曝光
 	const [index, setIndex] = useState(() => Math.floor(Math.random() * SESSION_FEATURE_TIPS.length));
@@ -24,6 +30,10 @@ export function RespondingTips() {
 		const timer = window.setInterval(() => setIndex((current) => (current + 1) % SESSION_FEATURE_TIPS.length), TIP_INTERVAL_MS);
 		return () => window.clearInterval(timer);
 	}, []);
+
+	// 提前返回必须放在全部 hook 之后：开关在响应过程中被改时，hook 数量变化会直接抛
+	// 「Rendered fewer hooks than expected」
+	if (hidden) return null;
 
 	const tip = SESSION_FEATURE_TIPS[index % SESSION_FEATURE_TIPS.length];
 	// 设置未到手时用平台默认键位兜底：带 {shortcut} 的文案不能空着，否则会露出占位符

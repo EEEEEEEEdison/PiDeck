@@ -54,18 +54,18 @@ export function registerWeChatIpc(deps: WeChatIpcDeps): void {
 	// 信封必须带 ok: true：渲染层按 WeChatIpcResult 判定是否应用快照，漏掉会让设置页永远停在
 	// 「未登录 + 开关关闭」，扫码成功后点开关也看不出变化。显式标注返回类型让契约在 typecheck 阶段暴露。
 	ipcMain.handle(ipcChannels.wechatGetSettings, () =>
-		guard<{ ok: true } & WeChatSettingsSnapshot>("get-settings", () => ({
+		guard<{ ok: true } & WeChatSettingsSnapshot>("get-settings", async () => ({
 			ok: true,
 			settings: wechatService.getSettings(),
 			status: wechatService.getStatus(),
-			bindings: wechatService.getBindings(),
+			bindings: await wechatService.bindingsWithModel(),
 			projects: deps.getProjects(),
 		})),
 	);
 
 	ipcMain.handle(ipcChannels.wechatGetStatus, () => guard("get-status", () => wechatService.getStatus()));
 
-	ipcMain.handle(ipcChannels.wechatGetBindings, () => guard("get-bindings", () => wechatService.getBindings()));
+	ipcMain.handle(ipcChannels.wechatGetBindings, () => guard("get-bindings", () => wechatService.bindingsWithModel()));
 
 	ipcMain.handle(ipcChannels.wechatGetLoginState, () => guard("get-login-state", () => wechatService.getLoginState()));
 
@@ -142,6 +142,6 @@ export function registerWeChatIpc(deps: WeChatIpcDeps): void {
 	ipcMain.handle(ipcChannels.wechatUnbindChat, (_event, chatId: unknown) => {
 		const id = readText(chatId);
 		if (id === null) return { ok: false, message: "chatId is invalid" };
-		return guard("unbind-chat", () => ({ ok: true, removed: wechatService.unbindChat(id), bindings: wechatService.getBindings() }));
+		return guard("unbind-chat", async () => ({ ok: true, removed: wechatService.unbindChat(id), bindings: await wechatService.bindingsWithModel() }));
 	});
 }

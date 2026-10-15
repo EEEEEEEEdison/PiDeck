@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 2968e7190c1f33f79eaa5b878f7ce29fc5a94842c454fb1544a5a862f3e152af（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 7f88290748b6f8184250484d3ab2513102d8139073740a04b80dbe8d1e76e1e9（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -3604,7 +3604,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.im.hideSecret": "隱藏",
 	"config.im.editOpenId": "編輯 Open ID",
 	"config.im.backend": "會話後端",
-	"config.im.backendHint": "該 Bot 新建會話使用的後端；只影響新會話（已有繫結保持自己的後端）。",
+	"config.im.backendHint": "該 Bot 新建會話使用的後端；已有繫結在下一條訊息時會換綁成新會話（原會話保留在側欄）。",
 	"config.im.expandHint": "點選展開配置與關聯 Agent",
 	"config.im.openIdHint": "在飛書中向 Bot 傳送 /whoami 即可檢視你的 open_id，用於自動拉群",
 	"config.im.noBindings": "暫無活躍繫結",
@@ -3656,10 +3656,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.wechat.workspaceAuto": "自動（最近使用）",
 	"config.wechat.workspaceHint": "微信訊息會在該工作區下建立/恢復 pi 會話；選「自動」時用專案列表第一項（約等於最近使用）。",
 	"config.wechat.backend": "會話後端",
-	"config.wechat.backendHint": "新建會話使用的後端；只影響新會話（已有繫結保持自己的後端），與「通用 → 預設 Agent 後端」互相獨立。",
+	"config.wechat.backendHint": "新建會話使用的後端；已有繫結在下一條訊息時會換綁成新會話（原會話保留在側欄），與「通用 → 預設 Agent 後端」互相獨立。",
 	"config.wechat.modelChainDshHint": "當前後端是 DSH：這條優先順序鏈只對 pi 生效；DSH 會話請在微信裡用 /model 切換模型。",
 	"config.wechat.modelChain": "模型優先順序",
 	"config.wechat.modelChainAdd": "新增模型",
+	"config.wechat.currentSessionModel": "當前會話模型：{model}",
 	"config.wechat.modelChainEmpty": "未指定模型：使用會話當前模型（不干預）。",
 	"config.wechat.modelChainHint": "微信回覆從第一條開始嘗試，執行失敗（供應商報錯）自動順延到下一條；全部失敗才回錯誤提示。鏈首也是新會話的預設模型。",
 	"config.wechat.modelChainUp": "上移",
@@ -4921,6 +4922,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.modules.sectionDesc": "關掉不用的模組可收起它的設定頁與入口；只隱藏介面，不清除配置、不停止已啟用的功能。命令面板（Ctrl+P）仍可搜到已隱藏的頁面。",
 	"settings.modules.dsh": "DSH 後端",
 	"settings.modules.dshDesc": "配置管理的 DSH 分頁、輸入框的 DSH 後端選項",
+	"settings.modules.respondingTips": "功能提示",
+	"settings.modules.respondingTipsDesc": "流式響應狀態條右側輪播的功能提示；只關掉這幾行提示本身，不影響提示裡提到的任何功能",
 	"settings.modules.imDesc": "飛書 / 微信等外部連線設定頁",
 	"settings.modules.petDesc": "桌面寵物設定頁",
 	"settings.modules.visionDesc": "視覺橋設定頁",

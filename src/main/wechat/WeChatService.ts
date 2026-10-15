@@ -13,7 +13,7 @@
 
 import type { BrowserWindow } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import type { ImChannelBackend, WeChatBridgeStatus, WeChatChatBinding, WeChatLoginState, WeChatModelChainEntry, WeChatSettings } from "../../shared/types";
+import type { ImChannelBackend, WeChatBindingView, WeChatBridgeStatus, WeChatLoginState, WeChatModelChainEntry, WeChatSettings } from "../../shared/types";
 import type { SessionRuntimeBindingGateway } from "../sessions/sessionRuntimeBinding";
 import { IlinkClient, type IlinkLogFn } from "./IlinkClient";
 import { ILINK_CHANNEL_VERSION } from "./ilinkProtocol";
@@ -45,7 +45,7 @@ export class WeChatService {
 			botAgent: deps.botAgent,
 			logger: deps.logger,
 			onStatusChange: (status) => this.broadcast(ipcChannels.wechatStatus, status),
-			onBindingsChange: () => this.broadcast(ipcChannels.wechatBindingsChanged, loadBindings()),
+			onBindingsChange: () => this.pushBindings(),
 		});
 	}
 
@@ -74,8 +74,20 @@ export class WeChatService {
 		return this.bridge.getStatus();
 	}
 
-	getBindings(): WeChatChatBinding[] {
-		return loadBindings();
+	/**
+	 * 绑定快照 + 会话当前模型。设置页据此显示「现在用的是哪个模型」——链为空时仅凭
+	 * 设置里的模型链说不出模型名。
+	 *
+	 * 只读视图：多出来的 currentModel 按运行时现算，不写进 wechat-bindings.json。
+	 */
+	async bindingsWithModel(): Promise<WeChatBindingView[]> {
+		const bindings = loadBindings();
+		return Promise.all(
+			bindings.map(async (binding) => {
+				const currentModel = await this.bridge.getBindingModel(binding);
+				return currentModel ? { ...binding, currentModel } : { ...binding };
+			}),
+		);
 	}
 
 	async setEnabled(enabled: boolean): Promise<WeChatSettings> {
@@ -107,7 +119,7 @@ export class WeChatService {
 		clearAccount();
 		this.setLoginState({ phase: "idle" });
 		this.broadcast(ipcChannels.wechatStatus, this.bridge.getStatus());
-		this.broadcast(ipcChannels.wechatBindingsChanged, loadBindings());
+		this.pushBindings();
 		return getSettings();
 	}
 
@@ -171,7 +183,7 @@ export class WeChatService {
 		// 换了账号（或重新扫码）后必须重启桥接：轮询循环持有的是旧 token 与旧游标。
 		await this.bridge.stop();
 		if (account) await this.bridge.start();
-		this.broadcast(ipcChannels.wechatBindingsChanged, loadBindings());
+		this.pushBindings();
 	}
 
 	// ===== 绑定 =====
@@ -179,7 +191,7 @@ export class WeChatService {
 	/** 解绑单个 chat。绑定记录刻意保留到用户手动解绑，重扫后同一个人还能接回原会话。 */
 	unbindChat(chatId: string): boolean {
 		const removed = removeBinding(chatId);
-		if (removed) this.broadcast(ipcChannels.wechatBindingsChanged, loadBindings());
+		if (removed) this.pushBindings();
 		return removed;
 	}
 
@@ -192,6 +204,16 @@ export class WeChatService {
 	}
 
 	// ===== 广播 =====
+
+	/**
+	 * 绑定变化推送。读运行时模型是异步的（每绑定一次 get_state），所以推送 fire-and-forget：
+	 * 拿不到模型只影响展示，不能让广播失败把绑定/解绑这些业务动作带崩。
+	 */
+	private pushBindings(): void {
+		void this.bindingsWithModel()
+			.then((bindings) => this.broadcast(ipcChannels.wechatBindingsChanged, bindings))
+			.catch((error) => this.deps.logger?.("warn", "微信绑定快照推送失败", error instanceof Error ? error.message : String(error)));
+	}
 
 	private setLoginState(state: WeChatLoginState): void {
 		// confirmed 后二维码内容已作废，留在界面状态里会让人以为还能扫。

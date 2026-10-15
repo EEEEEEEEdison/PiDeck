@@ -33,6 +33,7 @@ const MODULE_LABEL_KEYS: Record<HideableModuleId, TranslationKey> = {
 	usage: SETTINGS_TAB_LABEL_KEYS.usage,
 	process: SETTINGS_TAB_LABEL_KEYS.process,
 	dsh: "settings.modules.dsh",
+	respondingTips: "settings.modules.respondingTips",
 };
 
 /** 每个模块隐藏后受影响的入口说明（行描述）。 */
@@ -49,6 +50,7 @@ const MODULE_DESC_KEYS: Record<HideableModuleId, TranslationKey> = {
 	usage: "settings.modules.usageDesc",
 	process: "settings.modules.processDesc",
 	dsh: "settings.modules.dshDesc",
+	respondingTips: "settings.modules.respondingTipsDesc",
 };
 
 /**
@@ -99,6 +101,7 @@ export const ModuleVisibilitySection = memo(function ModuleVisibilitySection(pro
 			case "process":
 			case "acp":
 			case "hostplugins":
+			case "respondingTips":
 				return null;
 		}
 	};

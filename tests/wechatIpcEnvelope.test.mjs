@@ -28,7 +28,9 @@ function makeService(overrides = {}) {
 	return {
 		getSettings: () => settings,
 		getStatus: () => ({ status: "connected", account: ACCOUNT, activeBindings: 0 }),
-		getBindings: () => [],
+		// 绑定快照改为带「当前模型」的视图方法（WeChatService.bindingsWithModel）：get-settings / get-bindings
+		// 都用它，桩里保留旧名会让 handler 直接 TypeError。
+		bindingsWithModel: async () => [],
 		getLoginState: () => ({ phase: "idle" }),
 		setEnabled: async () => settings,
 		updateSettings: (patch) => ({ ...settings, ...patch }),
