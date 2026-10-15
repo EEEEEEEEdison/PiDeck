@@ -119,7 +119,7 @@ export function collectDisplayedSessionIds(visibleChildren: readonly ProjectChil
 	return ids;
 }
 
-// native 路径不区分大小写；WSL 路径保留大小写，并使用环境前缀防止跨来源碰撞。
+// Windows native 路径不区分大小写；POSIX/WSL 保留大小写，环境前缀防止跨来源碰撞。
 export function normalizeSessionPathForCompare(sessionPath?: string, environment: SessionEnvironment = "native") {
 	return sessionPath ? canonicalizeSessionPath(sessionPath, environment) : undefined;
 }
@@ -171,6 +171,21 @@ function chooseAgentForSession(current: AgentTab, candidate: AgentTab) {
 		return candidate.createdAt > current.createdAt ? candidate : current;
 	}
 	return candidate.status === "running" ? candidate : current;
+}
+
+/** #354：重复路径优先采用 runtime 明确绑定的稳定身份，否则按最近活跃选择，不能让数组尾部旧标题获胜。 */
+function chooseSessionForPath(current: SessionSummary, candidate: SessionSummary, runtimeBySessionId: ReadonlyMap<string, AgentTab>, agents: readonly AgentTab[]): SessionSummary {
+	const currentRuntime = runtimeBySessionId.get(current.id);
+	const candidateRuntime = runtimeBySessionId.get(candidate.id);
+	if (currentRuntime && candidateRuntime) {
+		// 同毫秒创建的 runtime 也沿用 agents 的原始顺序决胜，和下面的行装饰完全一致。
+		const currentFirst = agents.indexOf(currentRuntime) < agents.indexOf(candidateRuntime);
+		const preferred = currentFirst ? chooseAgentForSession(currentRuntime, candidateRuntime) : chooseAgentForSession(candidateRuntime, currentRuntime);
+		return preferred === candidateRuntime ? candidate : current;
+	}
+	if (currentRuntime || candidateRuntime) return candidateRuntime ? candidate : current;
+	if (candidate.updatedAt !== current.updatedAt) return candidate.updatedAt > current.updatedAt ? candidate : current;
+	return candidate.id < current.id ? candidate : current;
 }
 
 /** 查找某个历史 Session 当前关联的 Pending/真实 Agent，供侧栏展示 runtime 状态。 */
@@ -234,6 +249,12 @@ export function getProjectAgentSessionDisplay({
 	/** 排序模式（settings.sessionSortMode）；缺省维持历史「最近活跃」行为。 */
 	sortMode?: SessionSortModeId;
 }): ProjectAgentSessionDisplay {
+	const runtimeBySessionId = new Map<string, AgentTab>();
+	for (const agent of agents) {
+		if (!agent.deckSessionId) continue;
+		const current = runtimeBySessionId.get(agent.deckSessionId);
+		runtimeBySessionId.set(agent.deckSessionId, current ? chooseAgentForSession(current, agent) : agent);
+	}
 	const sessionByKey = new Map<string, SessionSummary>();
 	const unkeyedSessions: SessionSummary[] = [];
 	const codexSubagentsByParent = new Map<string, SessionSummary[]>();
@@ -264,8 +285,10 @@ export function getProjectAgentSessionDisplay({
 		}
 
 		const sessionKey = getSummaryKey(session);
-		if (sessionKey) sessionByKey.set(sessionKey, session);
-		else unkeyedSessions.push(session);
+		if (sessionKey) {
+			const current = sessionByKey.get(sessionKey);
+			sessionByKey.set(sessionKey, current ? chooseSessionForPath(current, session, runtimeBySessionId, agents) : session);
+		} else unkeyedSessions.push(session);
 	}
 
 	const agentBySessionKey = new Map<string, AgentTab>();
