@@ -9,7 +9,12 @@
  *
  * 协议参考：https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol
  * 需要设置响应头 x-vercel-ai-ui-message-stream: v1 才能被 useChat 识别。
+ *
+ * DSH 后端没有 pi 的 RPC 事件（agent_start/message_update/agent_settled），它的流式
+ * 数据走自己的 IPC 通道，由 DshChannelToPiEvents 先翻译成同形状的 pi 事件再进同一套
+ * 适配器（见 bindChannelSource），因此 Web 线协议与前端零分支。
  */
+import { DshChannelToPiEvents } from "./DshChannelToPiEvents";
 
 /** AI SDK UIMessageStream 单个 SSE 帧（data: 后的 JSON 对象）。 */
 export type UiMessageStreamFrame = Record<string, unknown>;
@@ -17,8 +22,14 @@ export type UiMessageStreamFrame = Record<string, unknown>;
 /** 事件来源 agentId → 目标 sessionId 的路由函数，由装配方注入。 */
 export type AgentToSessionRouter = (agentId: string) => string | undefined;
 
+/** 非 pi 后端（DSH）的 agent 通道事件源：由装配方提供订阅句柄。 */
+export type AgentChannelEventSource = (handler: (agentId: string, channel: string, payload: unknown) => void) => () => void;
+
 /** SSE 帧写出函数；返回 false 表示连接已失效（对方已断开）。 */
 export type SseWriter = (frame: UiMessageStreamFrame) => boolean;
+
+/** 会话级收口基准的保留条数上限（只服务重连窗口，不需要长期记忆）。 */
+const CLOSED_RUN_SESSIONS_MAX = 64;
 
 /** 单个 pi 事件（与 AgentManager.handlePiEvent 收到的结构一致）。 */
 export type PiEvent = {
@@ -305,6 +316,8 @@ export const SSE_DONE = "data: [DONE]\n\n";
 export type SessionStreamEntry = {
 	sessionId: string;
 	adapter: PiEventToUiMessageStream;
+	/** 非 pi 后端（DSH）通道载荷 → pi 事件 的翻译器；连接建立时创建，随连接销毁。 */
+	channels: DshChannelToPiEvents;
 	/** 写出原始 wire 文本（含 data: 前缀）；返回是否成功。 */
 	writeRaw: (wire: string) => boolean;
 	closed: boolean;
@@ -323,6 +336,14 @@ export type SessionStreamEntry = {
 export class WebEventStreamRouter {
 	private readonly sessionStreams = new Map<string, Set<SessionStreamEntry>>();
 	private unsubscribePi: (() => void) | null = null;
+	private unsubscribeChannels: (() => void) | null = null;
+	/**
+	 * 会话级「已收口正文」基准：每条连接一份翻译器，连接重建时基准必须延续——
+	 * 停止的握手是「abort 先收口，host 迟到的 turn/end 再带同一份全文收一次」，
+	 * 中间断开重连（Web 端 stop 后外部流重建）会让新翻译器把重复收口当成新一轮上屏。
+	 * key 按会话保留，值在下一轮 turn/start（reset）时被翻译器清空。
+	 */
+	private readonly closedRunTextBySession = new Map<string, string>();
 
 	constructor(private readonly resolveSession: AgentToSessionRouter) {}
 
@@ -331,6 +352,7 @@ export class WebEventStreamRouter {
 		const entry: SessionStreamEntry = {
 			sessionId,
 			adapter: new PiEventToUiMessageStream(),
+			channels: new DshChannelToPiEvents(this.closedRunTextBySession.get(sessionId) ?? null),
 			writeRaw,
 			closed: false,
 			keepAlive: options?.keepAlive === true,
@@ -370,6 +392,26 @@ export class WebEventStreamRouter {
 		this.unsubscribePi = null;
 	}
 
+	/**
+	 * 供后端绑定：订阅非 pi 后端（DSH）的 agent 通道事件。
+	 * 没有这一层时 DSH 会话在 Web 端只能靠状态轮询 + 磁盘重拉追赶（输出很慢），
+	 * 且整轮没有 finish 帧（察觉不到结束/停止）。
+	 */
+	bindChannelSource(subscribe: AgentChannelEventSource | undefined): void {
+		this.unsubscribeChannels?.();
+		if (!subscribe) {
+			this.unsubscribeChannels = null;
+			return;
+		}
+		this.unsubscribeChannels = subscribe((agentId, channel, payload) => this.onChannelEvent(agentId, channel, payload));
+	}
+
+	/** 解绑通道事件源（服务停止时调用）。 */
+	unbindChannelSource(): void {
+		this.unsubscribeChannels?.();
+		this.unsubscribeChannels = null;
+	}
+
 	private onPiEvent(agentId: string, event: PiEvent): void {
 		const sessionId = this.resolveSession(agentId);
 		if (!sessionId) return;
@@ -378,36 +420,78 @@ export class WebEventStreamRouter {
 
 		for (const entry of set) {
 			if (entry.closed) continue;
-			const frames = entry.adapter.push(event);
-			for (const frame of frames) {
-				if (!entry.writeRaw(serializeSseFrame(frame))) {
-					// 写出失败（对方断开）：立即标记关闭，避免持续写已失效的 socket。
-					entry.closed = true;
-					set.delete(entry);
-					break;
-				}
-				// AI SDK 协议：finish 帧后必须跟 [DONE] 终止标记，前端据此关闭连接。
-				if (frame.type === "finish") {
-					if (!entry.writeRaw(SSE_DONE)) {
-						entry.closed = true;
-						set.delete(entry);
-						break;
-					}
-					// keepAlive（外部流）：连接保留，换新翻译器等下一轮；客户端在下一轮的
-					// start 帧上自行重置合并器。非 keepAlive（/api/chat）：[DONE] 后显式 end，
-					// 否则 useChat 可能继续等待 HTTP body 关闭，界面会一直显示运行中。
-					if (entry.keepAlive) {
-						entry.adapter = new PiEventToUiMessageStream();
-						break;
-					}
-					entry.closed = true;
-					set.delete(entry);
-					entry.onFinish?.();
-					break;
-				}
-			}
+			this.emitFrames(entry, set, entry.adapter.push(event));
 		}
 		if (set.size === 0) this.sessionStreams.delete(sessionId);
+	}
+
+	/**
+	 * 非 pi 后端的通道事件：先翻译成 pi 事件形状，再走同一个适配器产出 UI 帧。
+	 * 没有订阅者时直接返回（不翻译 = 零开销，事件风暴期不给主进程添负担）。
+	 */
+	private onChannelEvent(agentId: string, channel: string, payload: unknown): void {
+		if (this.sessionStreams.size === 0) return;
+		const sessionId = this.resolveSession(agentId);
+		if (!sessionId) return;
+		const set = this.sessionStreams.get(sessionId);
+		if (!set || set.size === 0) return;
+
+		let baseline: string | null = null;
+		let connected = false;
+		for (const entry of set) {
+			if (entry.closed) continue;
+			connected = true;
+			for (const event of entry.channels.push(channel, payload)) {
+				if (entry.closed) break;
+				this.emitFrames(entry, set, entry.adapter.push(event));
+			}
+			baseline = entry.channels.baseline();
+		}
+		// 会话级记住收口基准，供重连后的新翻译器 seed（见字段注释）。
+		if (connected) {
+			if (baseline === null) this.closedRunTextBySession.delete(sessionId);
+			else this.rememberClosedRun(sessionId, baseline);
+		}
+		if (set.size === 0) this.sessionStreams.delete(sessionId);
+	}
+
+	/** 记录会话的收口基准；上限只兜底（真实场景是少量活跃会话）。 */
+	private rememberClosedRun(sessionId: string, text: string): void {
+		if (!this.closedRunTextBySession.has(sessionId) && this.closedRunTextBySession.size >= CLOSED_RUN_SESSIONS_MAX) {
+			const oldest = this.closedRunTextBySession.keys().next().value;
+			if (oldest !== undefined) this.closedRunTextBySession.delete(oldest);
+		}
+		this.closedRunTextBySession.set(sessionId, text);
+	}
+
+	/** 把一批 UI 帧写到连接上；finish 帧按 keepAlive 语义收尾或保活。 */
+	private emitFrames(entry: SessionStreamEntry, set: Set<SessionStreamEntry>, frames: UiMessageStreamFrame[]): void {
+		for (const frame of frames) {
+			if (!entry.writeRaw(serializeSseFrame(frame))) {
+				// 写出失败（对方断开）：立即标记关闭，避免持续写已失效的 socket。
+				entry.closed = true;
+				set.delete(entry);
+				return;
+			}
+			// AI SDK 协议：finish 帧后必须跟 [DONE] 终止标记，前端据此关闭连接。
+			if (frame.type !== "finish") continue;
+			if (!entry.writeRaw(SSE_DONE)) {
+				entry.closed = true;
+				set.delete(entry);
+				return;
+			}
+			// keepAlive（外部流）：连接保留，换新翻译器等下一轮；客户端在下一轮的
+			// start 帧上自行重置合并器。非 keepAlive（/api/chat）：[DONE] 后显式 end，
+			// 否则 useChat 可能继续等待 HTTP body 关闭，界面会一直显示运行中。
+			if (entry.keepAlive) {
+				entry.adapter = new PiEventToUiMessageStream();
+				return;
+			}
+			entry.closed = true;
+			set.delete(entry);
+			entry.onFinish?.();
+			return;
+		}
 	}
 }
 

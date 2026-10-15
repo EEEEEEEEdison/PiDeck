@@ -42,7 +42,7 @@ import type { PendingUiRequestSnapshot } from "../sessions/SessionRuntimeCoordin
 import type { SessionForkResult } from "../sessions/sessionForkCommands";
 import { replaceExpandedRefBlocksWithLabels } from "../../shared/expandedRefBlocks";
 import { serializeWebClientDictionaries, webEnUS } from "./WebI18n";
-import { WebEventStreamRouter, serializeSseFrame, type PiEvent } from "./WebEventStream";
+import { WebEventStreamRouter, serializeSseFrame, type AgentChannelEventSource, type PiEvent } from "./WebEventStream";
 import { rewriteWebHtmlAssetUrls } from "./webHtmlAssetUrls";
 
 type WebServiceSettings = Pick<AppSettings, "webServiceEnabled" | "webServiceHost" | "webServicePort" | "webServiceRequiresAuth" | "webServiceToken" | "webServiceTokenGeneratedAt" | "webServiceTokenExpiresIn">;
@@ -134,6 +134,11 @@ type WebServiceDependencies = {
 	persistToken?: (state: { token: string; generatedAt: number; expiresIn: number }) => void;
 	/** 订阅主进程内部的 pi agent 事件流（agentId, event），返回退订函数。 */
 	subscribePiEvents: (handler: (agentId: string, event: PiEvent) => void) => () => void;
+	/**
+	 * 订阅非 pi 后端（DSH）的 agent 通道事件（agentId, 通道名, 载荷），返回退订函数。
+	 * 未注入时该后端在 Web 端退化为「状态轮询 + 磁盘重拉」的旧行为（fail-safe）。
+	 */
+	subscribeAgentChannelEvents?: AgentChannelEventSource;
 	/** agentId → sessionId 路由，用于把 pi 事件导向对应 session 的 SSE 连接。 */
 	getSessionIdForAgent: (agentId: string) => string | undefined;
 	listProjects: () => Project[];
@@ -394,8 +399,9 @@ export class WebServiceManager {
 	}
 
 	async stop() {
-		// 解绑 pi 事件源，避免服务关闭后仍在转发事件到已失效的 SSE 连接。
+		// 解绑 pi 事件源与 DSH 等非 pi 后端的通道事件源，避免服务关闭后仍在转发事件到已失效的 SSE 连接。
 		this.eventStreamRouter.unbindPiSource();
+		this.eventStreamRouter.unbindChannelSource();
 		// /api/events：停定时器、断开全部状态订阅者（避免向已关服务的 socket 写数据）。
 		if (this.statePushTimer) {
 			clearTimeout(this.statePushTimer);
@@ -458,6 +464,19 @@ export class WebServiceManager {
 						});
 						return unsubscribe;
 					}
+				: undefined,
+		);
+		// DSH 后端的流式事件（正文/思考/工具）走自己的 IPC 通道，不在 pi 事件源里：
+		// 不接这一层时 Web 端只能靠状态轮询 + 磁盘重拉追赶（输出很慢），且整轮没有
+		// finish 帧（察觉不到结束/停止）。这里也顺手触发状态推送，让 runtime 忙闲翻转即时可达。
+		const subscribeChannels = this.deps.subscribeAgentChannelEvents;
+		this.eventStreamRouter.bindChannelSource(
+			subscribeChannels
+				? (handler) =>
+						subscribeChannels((agentId, channel, payload) => {
+							handler(agentId, channel, payload);
+							this.scheduleStatePush();
+						})
 				: undefined,
 		);
 		// 5s 兑底 tick：捕捉不经 pi 事件的目录变更（桌面端改名/删除/导入等）。

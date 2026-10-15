@@ -741,6 +741,9 @@ export class DshAgentManager implements SessionAgentGateway {
 	private async recoverAfterHostRestart(): Promise<void> {
 		for (const runtime of this.runtimes.values()) {
 			const agentId = runtime.tab.id;
+			// host 崩溃时在跑的回合不可能再有事件：记下来，恢复完用正文通道收口。
+			// 不收口时渲染层 live 槽与 Web SSE（turnEnded → finish + [DONE]）会永远停在「运行中」。
+			const wasStreaming = runtime.isStreaming === true;
 			try {
 				const client = this.requireClient();
 				runtime.isStreaming = false;
@@ -784,6 +787,14 @@ export class DshAgentManager implements SessionAgentGateway {
 					);
 				}
 				await this.refreshModelDirectory(runtime, client).catch(() => undefined);
+				if (wasStreaming) {
+					this.emit(ipcChannels.agentsTextStream, {
+						agentId,
+						text: lastAssistantText(runtime.messages),
+						done: true,
+						turnEnded: true,
+					});
+				}
 				this.emit(ipcChannels.agentsState, this.list());
 				this.emitMessages(runtime);
 				this.emitRuntimeState(agentId);
@@ -822,10 +833,13 @@ export class DshAgentManager implements SessionAgentGateway {
 		await client.sessionsCancel({ sessionId: runtime.sessionId }).catch(() => undefined);
 		this.logRpc(agentId, "recv", "sessions.cancel done");
 		// 停止时立刻收口正文通道：带上已累积字，避免空 done 把屏幕抹空白。
+		// turnEnded 标记「这一轮真的结束了」：Web SSE 靠它产出 finish/[DONE]（停止后
+		// useChat 的 status 才能从 streaming 收回 ready；desktop 渲染层不读该字段）。
 		this.emit(ipcChannels.agentsTextStream, {
 			agentId: runtime.tab.id,
 			text: lastAssistantText(runtime.messages) || runtime.projection.pendingAssistantText || "",
 			done: true,
+			turnEnded: true,
 		});
 		this.emitRuntimeState(agentId);
 		this.emit(ipcChannels.agentsState, this.list());
@@ -2289,10 +2303,12 @@ export class DshAgentManager implements SessionAgentGateway {
 				runtime.projection = projectDshEvent(runtime.projection, event, runtime.tab.id, undefined, { skipErrorTurnEnd: true });
 				runtime.messages = mergeDshProjectedMessages(runtime.messages, runtime.projection.messages);
 				// 收口时带上已累积正文，避免空 done 把渲染层 live 槽抹成空白。
+				// turnEnded：停止后迟到的 turn/end 同样是「本轮终点」，Web SSE 在此收流。
 				this.emit(ipcChannels.agentsTextStream, {
 					agentId: runtime.tab.id,
 					text: lastAssistantText(runtime.messages),
 					done: true,
+					turnEnded: true,
 				});
 				this.emitMessages(runtime);
 				if (runtime.isCompacting) {
@@ -2373,10 +2389,12 @@ export class DshAgentManager implements SessionAgentGateway {
 				// /compact 回合正常收口后，清掉之前的超限恢复态；普通回答收口不改写该标记。
 				runtime.contextOverflow = false;
 			}
+			// turnEnded：正常回合终点（含被停止的 cancelled 收口），Web SSE 在此收流。
 			this.emit(ipcChannels.agentsTextStream, {
 				agentId: runtime.tab.id,
 				text: lastAssistantText(runtime.messages),
 				done: true,
+				turnEnded: true,
 			});
 			this.emitMessages(runtime);
 			// 回合结束必须推 runtime：sessionStats 投影帧可能稍后才到，

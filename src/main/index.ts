@@ -4641,6 +4641,15 @@ app
 			subscribePiEvents: (handler) => agentManager.addLocalEventListener((agentId, event) => handler(agentId, event as never)),
 			// agentId → sessionId 路由：pi 事件只有 agentId，SSE 连接按 session 订阅。
 			getSessionIdForAgent: (agentId) => sessionRuntimeCoordinator.getSessionId(agentId),
+			// 非 pi 后端（DSH）的通道事件：正文/思考/工具卡不在 pi 事件流里。只订 DSH 网关，
+			// 不能订 compositeAgentGateway（它把 pi 的 agents:text-stream 一并转发，会与上面
+			// 的 pi 事件源重复推帧）。agents:state 是数组无 agentId，天然被过滤。
+			subscribeAgentChannelEvents: (handler) =>
+				dshAgentManager.onOutput((channel, payload) => {
+					const agentId = payload && typeof payload === "object" && "agentId" in payload ? (payload as { agentId?: unknown }).agentId : undefined;
+					if (typeof agentId !== "string") return;
+					handler(agentId, channel, payload);
+				}),
 			listProjects: () => projectStore.list(),
 			createProject: (path) => projectStore.add(path, undefined, settingsStore.get().wslEnabled ? "wsl" : "windows"),
 			deleteProject: async (projectId) => {
