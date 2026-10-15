@@ -30,6 +30,50 @@ export function localServiceInvocation(command: string, args: string[]): { comma
 	return { command: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", [command, ...args].join(" ")], windowsVerbatimArguments: true };
 }
 
+/** 启动器程序从这两个环境变量取真正的命令（值来自适配器常量，不来自外部输入）。 */
+export const LOCAL_SERVICE_LAUNCH_COMMAND_ENV = "PIDECK_LOCAL_SERVICE_COMMAND";
+export const LOCAL_SERVICE_LAUNCH_ARGS_ENV = "PIDECK_LOCAL_SERVICE_ARGS";
+
+/**
+ * Windows 长驻命令的 GUI 启动器程序（`-e` 注入，见 localServiceDetachedInvocation）。
+ *
+ * 为什么需要它：长驻服务必须 `detached` 才能活过 PiDeck 退出（非 detached 的子进程挂在 libuv 的
+ * job 上，PiDeck 一退就被连坐杀掉）；但 detached 的**控制台子系统**子进程由 Windows 新建控制台，
+ * 而 `windowsHide` 对「新建的」控制台不生效，于是 `cmd.exe /c bili start` 会闪一个黑框（2026-02 实测）。
+ *
+ * 解法：让直接子进程换成 GUI 子系统二进制（app 自己的 electron.exe / PiDeck.exe，
+ * `ELECTRON_RUN_AS_NODE=1` 当 Node 跑，`-e` 只支持这种形态）：GUI 进程自己不带控制台、也不会新建
+ * 窗口，它再以 `windowsHide` 拉起真正的 CLI，CLI 拿到的是「没有窗口的可继承控制台」，孙进程
+ * （bili 里的 node 代理）继承它，全程不出现窗口。
+ *
+ * 启动器必须**活到 CLI 退出**（不能 unref 后自己先撤）：非 detached 的子进程落在启动器自己的
+ * libuv job 上，启动器一退就被 KILL_ON_JOB_CLOSE 连坐杀掉（实测如此）；它退出时机与 CLI 同步。
+ */
+export const LOCAL_SERVICE_LAUNCHER_PROGRAM = [
+	"const{spawn}=require('node:child_process')",
+	"const env={...process.env}",
+	`delete env.ELECTRON_RUN_AS_NODE;delete env.${LOCAL_SERVICE_LAUNCH_COMMAND_ENV};delete env.${LOCAL_SERVICE_LAUNCH_ARGS_ENV}`,
+	`const child=spawn(process.env.${LOCAL_SERVICE_LAUNCH_COMMAND_ENV},JSON.parse(process.env.${LOCAL_SERVICE_LAUNCH_ARGS_ENV}||'[]'),{env,stdio:'ignore',windowsHide:true,windowsVerbatimArguments:true})`,
+	"child.on('error',()=>process.exit(1))",
+	"child.on('exit',(code)=>process.exit(code??0))",
+].join(";");
+
+/** 长驻命令最终 spawn 的形态（纯函数，便于断言）。 */
+export function localServiceDetachedInvocation(
+	invocation: { command: string; args: string[]; windowsVerbatimArguments: boolean },
+	options: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv; runtimePath?: string } = {},
+): { command: string; args: string[]; env: NodeJS.ProcessEnv; windowsVerbatimArguments: boolean } {
+	const baseEnv = options.env ?? process.env;
+	if ((options.platform ?? process.platform) !== "win32") return { command: invocation.command, args: invocation.args, env: baseEnv, windowsVerbatimArguments: invocation.windowsVerbatimArguments };
+	return {
+		command: options.runtimePath ?? process.execPath,
+		args: ["-e", LOCAL_SERVICE_LAUNCHER_PROGRAM],
+		env: { ...baseEnv, ELECTRON_RUN_AS_NODE: "1", [LOCAL_SERVICE_LAUNCH_COMMAND_ENV]: invocation.command, [LOCAL_SERVICE_LAUNCH_ARGS_ENV]: JSON.stringify(invocation.args) },
+		// 启动器程序由 libuv 按 argv 规则加引号（不是 verbatim 整行），CLI 那一层才是 verbatim。
+		windowsVerbatimArguments: false,
+	};
+}
+
 export function createLocalServiceCli(options: { command: string; env?: () => NodeJS.ProcessEnv | undefined }): LocalServiceCli {
 	return {
 		run(args, timeoutMs) {
@@ -57,7 +101,9 @@ export function createLocalServiceCli(options: { command: string; env?: () => No
 				return { ok: false, reason: "start-failed" };
 			}
 			try {
-				const child = spawn(invocation.command, invocation.args, { env: options.env?.(), detached: true, stdio: "ignore", windowsHide: true, windowsVerbatimArguments: invocation.windowsVerbatimArguments });
+				// win32 经 GUI 启动器拉起（消掉 detached 新控制台的黑框），其他平台直接 detached。
+				const launch = localServiceDetachedInvocation(invocation, { env: options.env?.(), runtimePath: process.execPath });
+				const child = spawn(launch.command, launch.args, { env: launch.env, detached: true, stdio: "ignore", windowsHide: true, windowsVerbatimArguments: launch.windowsVerbatimArguments });
 				// 未处理的 error 事件会直接崩主进程；spawn 失败在回调里同步返回不可靠，这里兜住。
 				child.on("error", () => undefined);
 				child.unref();

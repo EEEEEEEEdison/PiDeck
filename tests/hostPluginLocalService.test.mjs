@@ -24,7 +24,7 @@ const { HostPluginBroker } = loadTsCommonJs("src/main/plugins/HostPluginBroker.t
 const { HostPluginManager } = loadTsCommonJs("src/main/plugins/HostPluginManager.ts");
 const { LocalServiceRegistry } = loadTsCommonJs("src/main/localServices/LocalServiceRegistry.ts");
 const { BillionContextService, parseBillionContextReport } = loadTsCommonJs("src/main/localServices/billionContextService.ts");
-const { localServiceInvocation, killLocalServiceInvocation } = loadTsCommonJs("src/main/localServices/localServiceCli.ts");
+const { localServiceInvocation, localServiceDetachedInvocation, killLocalServiceInvocation, LOCAL_SERVICE_LAUNCHER_PROGRAM, LOCAL_SERVICE_LAUNCH_COMMAND_ENV, LOCAL_SERVICE_LAUNCH_ARGS_ENV } = loadTsCommonJs("src/main/localServices/localServiceCli.ts");
 const { LOCAL_SERVICE_IDS, isLocalServiceId } = loadTsCommonJs("src/shared/localServices.ts");
 
 const SERVICE_ID = LOCAL_SERVICE_IDS[0];
@@ -291,6 +291,27 @@ test("local service cli: commands and arguments are character-allowlisted, never
 	assert.throws(() => localServiceInvocation("bili", ["$(whoami)"]), /invalid-service-argument/);
 	assert.throws(() => localServiceInvocation("bili", ["start | tee /tmp/x"]), /invalid-service-argument/);
 	assert.throws(() => localServiceInvocation("bili", ["a".repeat(200)]), /invalid-service-argument/);
+	// 长驻命令：win32 必须换成 GUI 子系统启动器。
+	// 直接 detached 的控制台子系统子进程会被 Windows 新建控制台，`windowsHide` 对「新建的」控制台不生效 → 闪黑框；
+	// 换成 GUI 子系统二进制（app 自己的 runtime，`ELECTRON_RUN_AS_NODE` + `-e` 启动器程序）后全程无窗口，
+	// 同时靠 detached 活过 PiDeck 退出（消窗与存活两个都不能丢）。
+	const detachBase = { command: "cmd.exe", args: ["/d", "/s", "/c", "bili start"], windowsVerbatimArguments: true };
+	const win = plain(localServiceDetachedInvocation(detachBase, { platform: "win32", runtimePath: "C:\\app\\PiDeck.exe", env: { PATH: "x" } }));
+	assert.equal(win.command, "C:\\app\\PiDeck.exe");
+	assert.deepEqual(win.args, ["-e", LOCAL_SERVICE_LAUNCHER_PROGRAM]);
+	// 启动器程序本身走 argv 引号（不是 verbatim 整行），CLI 那一层才是 verbatim。
+	assert.equal(win.windowsVerbatimArguments, false);
+	assert.equal(win.env.ELECTRON_RUN_AS_NODE, "1");
+	assert.equal(win.env[LOCAL_SERVICE_LAUNCH_COMMAND_ENV], "cmd.exe");
+	assert.deepEqual(JSON.parse(win.env[LOCAL_SERVICE_LAUNCH_ARGS_ENV]), detachBase.args);
+	// 适配器清洗过的 env 原样继承，不多带别的。
+	assert.equal(win.env.PATH, "x");
+	// 启动器必须与 CLI 同生共死：非 detached 的子进程落在启动器自己的 libuv job 上，启动器一退就被连坐杀掉。
+	assert.equal(LOCAL_SERVICE_LAUNCHER_PROGRAM.includes("unref"), false);
+	// 启动器专用的环境变量不能漏给被拉起的服务（尤其 ELECTRON_RUN_AS_NODE）。
+	for (const key of ["ELECTRON_RUN_AS_NODE", LOCAL_SERVICE_LAUNCH_COMMAND_ENV, LOCAL_SERVICE_LAUNCH_ARGS_ENV]) assert.equal(LOCAL_SERVICE_LAUNCHER_PROGRAM.includes(`delete env.${key}`), true, key);
+	// 非 Windows 维持原样：electron 在那两个平台当 Node 跑没有 GUI 子系统问题，直接 detached。
+	assert.deepEqual(plain(localServiceDetachedInvocation(detachBase, { platform: "darwin", env: { PATH: "y" } })), { command: "cmd.exe", args: detachBase.args, env: { PATH: "y" }, windowsVerbatimArguments: true });
 	// 终止：参数永远是数组，Windows 走 taskkill 真 exe（不经 cmd.exe、不拼 shell 字符串）。
 	assert.deepEqual(plain(killLocalServiceInvocation(23704, "win32")), { command: "taskkill", args: ["/pid", "23704", "/t", "/f"] });
 	assert.deepEqual(plain(killLocalServiceInvocation(23704, "linux")), { command: "kill", args: ["-TERM", "23704"] });
