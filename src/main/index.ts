@@ -309,6 +309,7 @@ import { SessionCommandIpcError } from "./sessions/SessionCommandIpcError";
 import { appendSessionForkSuffix } from "./sessions/sessionForkTitle";
 import { sanitizeAutomaticTitle } from "./sessions/sessionTitleSanitize";
 import { createSessionForkCommands } from "./sessions/sessionForkCommands";
+import { registerAllDomains } from "./api/domainAssembly";
 import { CodexSessionImporter } from "./sessions/CodexSessionImporter";
 import { ClaudeSessionImporter } from "./sessions/ClaudeSessionImporter";
 import { QoderSessionImporter } from "./sessions/QoderSessionImporter";
@@ -5402,6 +5403,8 @@ app
 				void appLogger?.warn("app", "GUI bridge endpoint startup failed", error);
 			});
 		registerIpc();
+		// 统一接口聚合层：注册全部域与导入器并冻结（deps 缺省在 domainAssembly.ts 收集，FIND-5）
+		registerAllDomains();
 		registerFeishuIpc({
 			getMainWindow: () => mainWindow,
 			feishuBridgeRef,
