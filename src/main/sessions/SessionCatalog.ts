@@ -1442,6 +1442,8 @@ export class SessionCatalog {
 					// 手动导入钉住的归属：别的项目扫描不得改回去（见 SessionCatalogEntry 注释）；
 					// 用户再一次手动导入（manualAssignment）表示明确改主意，允许迁移到新项目。
 					const nextProjectId = entry.manualProjectAssignment && !options?.manualAssignment && entry.projectId !== projectId ? entry.projectId : projectId;
+					// 扫描快照可能早于排队期间完成的改名或新一轮活动；保留较新时间，但不因标题锁定挡住后续文件活动。
+					const nextUpdatedAt = Math.max(entry.updatedAt, summary.updatedAt);
 					if (
 						entry.projectId !== nextProjectId ||
 						entry.filePath !== summary.filePath ||
@@ -1456,7 +1458,7 @@ export class SessionCatalog {
 						entry.status !== "active" ||
 						entry.parentSessionPath !== nextParent ||
 						entry.forked !== nextForked ||
-						entry.updatedAt !== summary.updatedAt
+						entry.updatedAt !== nextUpdatedAt
 					) {
 						entry.projectId = nextProjectId;
 						entry.filePath = summary.filePath;
@@ -1477,7 +1479,7 @@ export class SessionCatalog {
 						// 故此处只增补、不清空——新值优先，其次保留旧值。
 						entry.parentSessionPath = summary.parentSessionPath ?? fetchedParent ?? entry.parentSessionPath;
 						entry.forked = nextForked;
-						entry.updatedAt = summary.updatedAt;
+						entry.updatedAt = nextUpdatedAt;
 						changed = true;
 					}
 					// 只有本次是手动导入才置位（自动扫描不得清除既有置位，否则归属又会被抢走）。
@@ -1633,7 +1635,8 @@ export class SessionCatalog {
 			acpSessionId: entry.acpSessionId,
 			proxy: entry.proxy ? { ...entry.proxy } : undefined,
 			createdAt: entry.createdAt,
-			updatedAt: summary?.updatedAt ?? entry.updatedAt,
+			// 返回记录与持久化活动时间同口径，不能让旧扫描摘要把刚保住的排序时间又投影回去。
+			updatedAt: Math.max(entry.updatedAt, summary?.updatedAt ?? entry.updatedAt),
 			wsl: summary?.wsl,
 			codexSessionId: summary?.codexSessionId,
 			codexThreadSource: summary?.codexThreadSource,

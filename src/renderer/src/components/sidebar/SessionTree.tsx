@@ -222,10 +222,16 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 			</div>
 		);
 	};
+	/** 子会话折叠胶囊：紧贴右侧邻居左缘，自身不预留空白——留白归属由「谁在它右边」决定：
+	 *  - 历史会话行后面跟着相对时间戳 → margin 0，胶囊贴住时间戳（用户要求把标签右移，别再空 28px）；
+	 *  - 运行中 Agent 行没有时间戳，胶囊是行内最后一个元素 → `last:mr-7` 自己预留 28px（= size-6
+	 *    「⋯」按钮 + right-1），否则 hover 让位 padding 长出前的 150ms 里它会正压在「⋯」上。
+	 *   实例代价：两种行非 hover 态的胶囊右缘相差 18px（会话行多让出时间戳宽度 + 间距），
+	 *   但落点都由本行右侧邻居决定，视觉上一致。 */
 	const renderToggle = (key: string, count: number) =>
 		count > 0 ? (
 			<span
-				className={cn("subagent-inline-toggle px-1 py-0.5 mr-7")}
+				className="subagent-inline-toggle px-1 py-0.5 last:mr-7"
 				title={t("app.piSubagentCount", { count })}
 				onClick={(event) => {
 					event.stopPropagation();
@@ -354,8 +360,18 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 									{child.session.sideTask && <SideTaskMark />}
 									{renderToggle(groupKey, childCount)}
 									{/* 相对时间常显：会话更新于多久前一目了然；hover 行时让位给右侧「⋯」按钮。
-                  窄侧栏时间可能被截断，title 提示完整相对时间。 */}
-									<span className="shrink-0 text-caption tabular-nums text-muted-foreground group-hover/row:hidden group-focus-within/row:hidden" title={formatRelativeTime(child.session.updatedAt)}>
+                  窄侧栏时间可能被截断，title 提示完整相对时间。
+                  hover 用「宽度收拢」而不是 display:none：时间瞬时消失会让左侧胶囊一步跳到行尾
+                  （那一刻正好压在「⋯」上，150ms 后才被 padding 带回左边），改成与 padding 同步
+                  （同为 150ms 默认时长）收拢后胶囊是缓慢滑过去，任何一帧都不会越过「⋯」左缘。
+                  w-max 保证非 hover 态宽度与 auto 完全一致（不写魔法宽度，「3 天前」这类文案不会被截）；
+                  interpolate-size 让 max-content→0 可插值（Electron 43 / Chromium 142 支持）。
+                  不支持该属性的旧浏览器退化为瞬时收拢，胶囊在该帧会短暂压到「⋯」左缘——仅降级路径，
+                  比时间直接 display:none 时「整颗胶囊跳到行尾」轻得多，故不额外加延迟。 */}
+									<span
+										className="w-max shrink-0 overflow-hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground transition-[width,opacity] [interpolate-size:allow-keywords] group-hover/row:w-0 group-hover/row:opacity-0 group-focus-within/row:w-0 group-focus-within/row:opacity-0"
+										title={formatRelativeTime(child.session.updatedAt)}
+									>
 										{formatRelativeTime(child.session.updatedAt)}
 									</span>
 								</div>

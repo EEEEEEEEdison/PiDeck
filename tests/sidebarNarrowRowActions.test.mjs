@@ -104,3 +104,19 @@ test("hover yield classes survive tailwind-merge", () => {
 	assert.match(rowMerged, /group-hover\/workspace-row:pr-\[52px\]/);
 	assert.match(rowMerged, /group-focus-within\/workspace-row:pr-\[52px\]/);
 });
+
+test("subagent pill never lands on the row ⋯ while the timestamp yields", () => {
+	const src = read("src/renderer/src/components/sidebar/SessionTree.tsx");
+	// 2027-02 用户反馈：胶囊右移到时间戳旁边后，hover 时行尾的「⋯」看不到/被压住。
+	// 实测成因（真实 Chromium + 编译后 CSS 量测）：时间戳 display:none 是瞬时生效的，
+	// 而 hover 让位 padding 要走 150ms，中间那段胶囊正落在「⋯」的 28px 槽位上（重叠 19px，
+	// 「⋯」字符被压在胶囊盒内）。修复两半，缺一不可：
+	//   ① 胶囊后面没有时间戳时（运行中 Agent 行）由胶囊自己 last:mr-7 预留槽位——它本来就是行内最后一个元素；
+	//   ② 有时间戳时把「消失」换成与 padding 同步的宽度收拢，胶囊缓慢滑过去而不是跳过去。
+	// 量测结论：会话行全程胶囊右缘 ≤ 1360（「⋯」盒左缘 1372），Agent 行恒 ≥ 9px 间距，任意帧都不重叠。
+	assert.match(src, /subagent-inline-toggle\s+px-1\s+py-0\.5\s+last:mr-7/);
+	assert.match(src, /w-max\s+shrink-0\s+overflow-hidden\s+whitespace-nowrap[^"]*transition-\[width,opacity\][^"]*\[interpolate-size:allow-keywords\]/);
+	assert.match(src, /group-hover\/row:w-0[^"]*group-hover\/row:opacity-0/);
+	// 时间戳不得回退成 display:none：瞬时消失 = 胶囊一步跳到行尾压在「⋯」上
+	assert.doesNotMatch(src, /text-muted-foreground group-hover\/row:hidden/);
+});
