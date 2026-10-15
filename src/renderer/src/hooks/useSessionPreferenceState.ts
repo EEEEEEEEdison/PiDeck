@@ -235,6 +235,7 @@ export function useSessionPreferenceState(options: {
 		record: record?.thinkingLevel,
 		// 无 record（引导页）：显式点选 > 每模型默认 > 配置默认 > 模型默认（与底栏同规则）。
 		fallback: welcomeThinking ?? perModelThinkingDefault ?? options.defaultThinkingLevel ?? currentModelEntry?.defaultEffort,
+		allowedLevels: thinkingLevels,
 	});
 
 	function setModelPending(pending: ModelPending | undefined) {

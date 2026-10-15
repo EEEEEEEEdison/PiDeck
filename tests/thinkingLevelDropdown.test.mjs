@@ -67,6 +67,17 @@ test("仅展示当前模型档位，保留未知未来 id、标签与说明", ()
 	assert.doesNotMatch(html, /data-picker-value="off"|data-picker-value="max"/);
 });
 
+test("当传入超出模型支持档位（如 max）时，按钮展示 clamp 后的支持档位（如 high）而不泄露", () => {
+	const levels = [
+		{ value: "low", labelKey: "thinking.levelLabel.low" },
+		{ value: "medium", labelKey: "thinking.levelLabel.medium" },
+		{ value: "high", labelKey: "thinking.levelLabel.high" },
+	];
+	const html = renderToStaticMarkup(createElement(ThinkingLevelDropdown, { ...baseProps, current: "max", levels }));
+	assert.ok(html.includes("thinking.levelLabel.high"));
+	assert.doesNotMatch(html, /thinking\.levelLabel\.max/);
+});
+
 test("后端明确返回空档位时展示不可用提示，不回退静态档位", () => {
 	const html = renderToStaticMarkup(createElement(ThinkingLevelDropdown, { ...baseProps, levels: [] }));
 	assert.ok(html.includes("app.thinkingPickerUnsupported"));
