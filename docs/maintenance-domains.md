@@ -48,6 +48,13 @@
 - 安全底线：先下载校验、后原子替换（tmp → `.bak` 换位 → rename，失败回滚）；`invalidateBuiltInExtensionsOverlayCache()` 必须在写盘/还原后调用，否则本次更新要等重启才参与注入。
 - 三处磁盘根（`ExtensionManager` 列表/版本、热更新器写盘、`-e` 注入解析）必须同源，统一走 `src/main/index.ts` 的 `resolveBuiltInExtensionRoots()`；各拼一次路径迟早漂移成「更新成功但会话仍加载旧扩展」。
 
+## 会话索引身份修复（#354）
+
+- `sessionCatalogIdentityRepair.ts` 在 catalog 启动加载、恢复运行时前修复身份；`filePath` 即使已是正确绝对路径，也要按当前路径规则重算 `originKey`。native POSIX 保留大小写，不能继续使用早期全小写的持久化键。
+- 只归并已经确认路径、且完整 origin（来源、环境、WSL 发行版/用户、导入源 ID、路径）相同的记录；无法解析的记录与其他后端不归并。旧小写键记录优先保留稳定 ID，无此证据时保留最早 `createdAt` 的记录；人工标题优先于自动/兜底名，同类取最近 `updatedAt`。
+- 归并补齐原记录缺失的偏好/结构元数据，并改写 catalog 内 `supersededBy` 引用；不改写或删除 JSONL。误生成的重复 ID 不再作为独立会话，其 Tab/pin 由既有缺失记录清理路径移除，不新增跨层身份别名协议。
+- 修复沿用 catalog 的 `.bak` + 原子快照；写失败记日志、内存修复仍生效，下次启动重试。回归：`node --test tests/sessionCatalogIdentityRepair.test.mjs tests/sessionDuplicateDisplay.test.mjs`。
+
 ## 会话消息编辑/删除/重发（原生 context_edit + 重发墓碑，与 pi 的跨系统契约）
 
 - **普通编辑/删除写 pi 原生 `context_edit`**（`{type:"context_edit", id, parentId, timestamp, targetId, replacement}`）：删除用 `replacement: null`，编辑用 `replacement: {content}`。原文行一字不改，模型上下文由 pi 的 `buildSessionProjection` 投影得出。因此「删了但原始历史里还在」是设计而非 bug：**已发生的 token/费用不回退，已被压缩摘要转述的内容也不会因这条记录消失**（原始文件、导出、计费仍能看到它）。

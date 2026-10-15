@@ -9,6 +9,7 @@ import { renameWithRetry } from "../utils/fsRetry";
 import { buildSessionOriginKey, buildSummaryOriginKey, canonicalizeSessionPath, collectSessionSubtreeIds, getImportedSessionSourceId, getSessionEnvironment, isInSubagentArtifactsDir, looksLikeCodexSessionFileStem, looksLikePiSessionFileStem, looksLikeToolMarkerTitle } from "../../shared/sessionIdentity";
 import { looksLikeExpandedRefBlockTitle } from "../../shared/expandedRefBlocks";
 import { createSessionModelPreference } from "../../shared/modelDisplayName";
+import { repairSessionCatalogIdentities } from "./sessionCatalogIdentityRepair";
 
 /**
  * 会话标题所有权来源（#266 时序抽奖修复）：
@@ -436,17 +437,18 @@ export class SessionCatalog {
 			}
 		}
 
-		// 兼容旧数据：早期版本可能存有相对 filePath（pi 返回相对 cwd 的 sessionFile，
-		// 如 sessionDir 配置为 ".pi/sessions"）。相对路径与扫描器绝对路径的 originKey
-		// 不同 → 同一文件出现两条记录（侧栏重复显示），且文件操作落到错误位置。
-		// 加载时用注入的 resolver 统一修正为绝对路径并重算 originKey。
-		const repaired = this.repairRelativeFilePaths(this.entries);
+		// 路径与派生身份键一起修复：#354 的旧 POSIX 键是全小写，即使绝对路径
+		// 本身没变也需要重算。启动时归并已产生的重复索引，保留原始会话 ID。
+		const repaired = repairSessionCatalogIdentities(this.entries, this.resolveFilePath, (entry) => this.originKeyForEntry(entry));
 		if (repaired) {
 			this.entries = repaired;
 			try {
 				await this.writeSnapshot(this.entries);
-			} catch {
-				// 修复是 best-effort；内存已生效，下一次启动仍会重试。
+			} catch (error) {
+				// 内存修复仍生效，写盘失败不阻断启动；原索引保持完整，下次启动重试。
+				void getAppLogger()?.warn("session-catalog", "Identity repair snapshot write failed on startup", {
+					cause: error instanceof Error ? error.message : String(error),
+				});
 			}
 		}
 
@@ -1038,8 +1040,8 @@ export class SessionCatalog {
 			}
 			let mergedDuplicate = false;
 			if (entry.filePath) {
-				const pathUnchanged = Boolean(before.filePath && canonicalizeSessionPath(before.filePath, entry.environment) === canonicalizeSessionPath(entry.filePath, entry.environment));
-				const nextOriginKey = pathUnchanged && entry.originKey ? entry.originKey : this.originKeyForEntry(entry);
+				// 身份键是路径/来源的派生值，不因路径字符串未变而复用旧规则的键（#354）。
+				const nextOriginKey = this.originKeyForEntry(entry);
 				entry.originKey = nextOriginKey;
 				entry.status = "active";
 
@@ -1568,30 +1570,6 @@ export class SessionCatalog {
 			wslUser: entry.wslUser ?? this.identityContext.wslUser,
 			importedSourceId: entry.importedSourceId,
 		});
-	}
-
-	/**
-	 * 把条目中的相对 filePath 修正为绝对路径（通过注入的 resolver）。
-	 * 返回新数组表示有变更；未注入 resolver 或无需修正时返回 undefined。
-	 */
-	private repairRelativeFilePaths(entries: SessionCatalogEntry[]): SessionCatalogEntry[] | undefined {
-		const resolve = this.resolveFilePath;
-		if (!resolve) return undefined;
-		let changed = false;
-		const next = entries.map((entry) => {
-			if (!entry.filePath) return entry;
-			const resolved = resolve(entry.projectId, entry.filePath, entry.environment);
-			if (!resolved || resolved === entry.filePath) return entry;
-			changed = true;
-			const repaired = { ...entry, filePath: resolved };
-			// originKey 必须无条件重算：早期 catalog 不落 originKey（旧字段缺失），
-			// 只在「已有 originKey」时重算会让这类存量条目修完路径仍带 undefined key，
-			// mergeScanned 无法按 origin 折叠 → 同一文件双记录 + 标题所有权被扫描
-			// 重新初始化为弱兑底（2026-10-08 fork/copy 现场的重复/坏标题根源之一）。
-			repaired.originKey = this.originKeyForEntry(repaired);
-			return repaired;
-		});
-		return changed ? next : undefined;
 	}
 
 	private requireEntry(entries: SessionCatalogEntry[], id: string): SessionCatalogEntry {
