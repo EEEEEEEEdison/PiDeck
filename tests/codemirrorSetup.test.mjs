@@ -86,3 +86,16 @@ test("editorTheme is a valid theme extension without legacy merge classes", () =
 	// theme() 不支持 &light/&dark 选择器（仅 baseTheme 支持），出现会抛 "Unsupported selector"
 	assert.doesNotMatch(src, /"&light|"&dark/);
 });
+
+// 回归守卫：当前行用实色 --color-bg-active 铺满整行时，正文会被压进同色相底色，
+// 在 Windows ClearType 下笔画发虚、字符发糊（用户实测反馈「这行看不清」）。
+// 选区同理：drawSelection 只接管背景，::selection 必须显式给前景色，
+// 否则 GTK/Linux 的 UA 样式会把选区文字反白，叠在浅色选区块上直接失读。
+test("editor active line stays a light accent wash and selection pins its foreground", () => {
+	const src = readFileSync("src/renderer/src/utils/codemirrorSetup.ts", "utf8");
+	// 空白容忍：格式化/换行不得让守卫失效（见 AGENTS.md 正则扫描契约要求）
+	assert.doesNotMatch(src, /\.cm-activeLine["']?\s*:\s*\{[^}]*backgroundColor:\s*"var\(--color-bg-(active|hover)\)"/);
+	assert.match(src, /\.cm-activeLine["']?\s*:\s*\{\s*backgroundColor:\s*"color-mix\(in srgb, var\(--color-accent\) \d+%, transparent\)"/);
+	assert.doesNotMatch(src, /\.cm-activeLineGutter["']?\s*:\s*\{[^}]*backgroundColor:\s*"var\(--color-bg-(active|hover)\)"/);
+	assert.match(src, /::selection["']?\s*:\s*\{[^}]*color:\s*"currentColor"/);
+});
