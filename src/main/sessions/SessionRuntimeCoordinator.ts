@@ -42,6 +42,11 @@ import { sessionFileSizeMb } from "./sessionFileSizeCopy";
 export interface SessionCatalogGateway {
 	get(sessionId: string): SessionCatalogEntry | undefined;
 	getRecord(sessionId: string): SessionRecord | undefined;
+	/**
+	 * #354：把已被身份归并掉的**历史**会话 ID 归一化为现存 ID。
+	 * 可选：测试里的极简网关可以缺它，缺失时按原 ID 处理。
+	 */
+	resolveSessionId?(sessionId: string): string;
 	update(
 		sessionId: string,
 		patch: {
@@ -330,7 +335,11 @@ export class SessionRuntimeCoordinator {
 		}
 
 		this.pruneDeliveryCache();
-		const cacheKey = `${sessionId}\u0000${requestId}`;
+		// #354：渲染层可能还抱着已被身份归并的历史会话 ID。投递去重与后续整个状态机
+		// （activation gate / dispatch lease / catalog attach）必须统一用现存 ID，否则同一
+		// requestId 经别名与现存 ID 各投递一次，且 acquireDispatchLease 会在旧 ID 上失败。
+		const canonicalSessionId = this.canonicalSessionId(sessionId);
+		const cacheKey = `${canonicalSessionId}\u0000${requestId}`;
 		const existing = this.deliveryByRequest.get(cacheKey);
 		if (existing) return existing.promise;
 
@@ -339,7 +348,7 @@ export class SessionRuntimeCoordinator {
 			settled: false,
 			promise: Promise.resolve(this.rejected(input, "Request was not started")),
 		};
-		cacheEntry.promise = this.sendOnce({ ...input, sessionId, requestId }).finally(() => {
+		cacheEntry.promise = this.sendOnce({ ...input, sessionId: canonicalSessionId, requestId }).finally(() => {
 			cacheEntry.settled = true;
 		});
 		this.deliveryByRequest.set(cacheKey, cacheEntry);
@@ -354,23 +363,25 @@ export class SessionRuntimeCoordinator {
 	 * 输入草稿丢失、发送另起新进程）。
 	 */
 	hasLiveRuntime(sessionId: string): boolean {
-		const agentId = this.agentIdBySession.get(sessionId);
+		const canonicalSessionId = this.canonicalSessionId(sessionId);
+		const agentId = this.agentIdBySession.get(canonicalSessionId);
 		if (!agentId) return false;
 		const tab = this.agents.list().find((candidate) => candidate.id === agentId);
 		if (!tab) return false;
 		if (!isTerminalAgent(tab)) return true;
 		// 与 getAgentId 同口径：回复级错误（Issue #218）的进程仍活着、待用户答问时同样保护。
-		return tab.status === "error" && this.hasPendingUiRequest(sessionId, agentId);
+		return tab.status === "error" && this.hasPendingUiRequest(canonicalSessionId, agentId);
 	}
 
 	getAgentId(sessionId: string): string | undefined {
-		const agentId = this.agentIdBySession.get(sessionId);
+		const canonicalSessionId = this.canonicalSessionId(sessionId);
+		const agentId = this.agentIdBySession.get(canonicalSessionId);
 		if (!agentId) return undefined;
 		const tab = this.agents.list().find((candidate) => candidate.id === agentId);
 		if (tab && !isTerminalAgent(tab)) return agentId;
 		// pi may emit an interactive recovery request immediately before reporting
 		// an error. Keep that runtime addressable until the user answers the request.
-		if (tab?.status === "error" && this.hasPendingUiRequest(sessionId, agentId)) return agentId;
+		if (tab?.status === "error" && this.hasPendingUiRequest(canonicalSessionId, agentId)) return agentId;
 		// Issue #218：回复级错误（API 400/模型报错/投递未知）不会杀进程。error 终态
 		// 但进程仍存活时先复活（error → idle），让激活/发送复用原进程，而不是在此
 		// 解绑后走 stop+create 重建——重建在扩展有问题时还会触发无插件回退。
@@ -436,16 +447,17 @@ export class SessionRuntimeCoordinator {
 	}
 
 	getTarget(sessionId: string): SessionRuntimeTarget | undefined {
-		const agentId = this.getAgentId(sessionId);
+		const canonicalSessionId = this.canonicalSessionId(sessionId);
+		const agentId = this.getAgentId(canonicalSessionId);
 		if (!agentId) return undefined;
 		const binding = this.getRuntimeBinding(agentId);
-		if (!binding || binding.sessionId !== sessionId) return undefined;
-		return { sessionId, agentId, runtimeGeneration: binding.runtimeGeneration };
+		if (!binding || binding.sessionId !== canonicalSessionId) return undefined;
+		return { sessionId: canonicalSessionId, agentId, runtimeGeneration: binding.runtimeGeneration };
 	}
 
 	/** A pending activation owns the Session even before AgentManager binding completes. */
 	isActivating(sessionId: string): boolean {
-		return this.activationBySession.has(sessionId);
+		return this.activationBySession.has(this.canonicalSessionId(sessionId));
 	}
 
 	/**
@@ -457,7 +469,7 @@ export class SessionRuntimeCoordinator {
 	 * the already-created process instead of creating a second one.
 	 */
 	registerPendingRuntime(sessionId: string, activation: Promise<AgentTab>): void {
-		const normalizedSessionId = sessionId.trim();
+		const normalizedSessionId = this.canonicalSessionId(sessionId.trim());
 		if (!normalizedSessionId) throw new Error("Session ID is required");
 		if (this.activationBySession.has(normalizedSessionId)) return;
 
@@ -482,22 +494,23 @@ export class SessionRuntimeCoordinator {
 	 * 运行中会话也允许删——用户不必先点停止。stop 失败也不挡 catalog 删除。
 	 */
 	async releaseRuntimeForDelete(sessionId: string): Promise<void> {
-		this.deletingSessions.add(sessionId);
-		const activating = this.activationBySession.get(sessionId);
+		const requestedSessionId = this.canonicalSessionId(sessionId);
+		this.deletingSessions.add(requestedSessionId);
+		const activating = this.activationBySession.get(requestedSessionId);
 		if (activating) await activating.catch(() => undefined);
 		// 先读原始映射：getTarget 会把 error/closed 当终态解绑，
 		// 失败一次卡在 error 的会话也必须先解绑再杀进程。
-		const mappedAgentId = this.agentIdBySession.get(sessionId);
+		const mappedAgentId = this.agentIdBySession.get(requestedSessionId);
 		const mappedGeneration = mappedAgentId ? (this.getRuntimeBinding(mappedAgentId)?.runtimeGeneration ?? 0) : 0;
-		const liveTarget = this.getTarget(sessionId);
-		const target = liveTarget ?? (mappedAgentId ? { sessionId, agentId: mappedAgentId, runtimeGeneration: mappedGeneration } : undefined);
+		const liveTarget = this.getTarget(requestedSessionId);
+		const target = liveTarget ?? (mappedAgentId ? { sessionId: requestedSessionId, agentId: mappedAgentId, runtimeGeneration: mappedGeneration } : undefined);
 		// 会话删除 = 代数作废：generationBySession 按 sessionId 累积且仅随删除回收，
 		// 否则反复创建/删除会话会让键集无界增长（2026 内存排查：慢泄漏）。
 		// 注意不能放到 unbindAgentUnchecked：restart 流程 unbind 旧 agent 后要
 		// bind 新 agent 并代数 +1，提前删会导致旧 runtime 的迟到结果被误接受。
-		this.generationBySession.delete(sessionId);
+		this.generationBySession.delete(requestedSessionId);
 		if (!target) {
-			this.deletingSessions.delete(sessionId);
+			this.deletingSessions.delete(requestedSessionId);
 			return;
 		}
 		this.unbindAgentUnchecked(target.agentId);
@@ -505,7 +518,7 @@ export class SessionRuntimeCoordinator {
 		void this.agents
 			.stop(target.agentId)
 			.catch(() => undefined)
-			.finally(() => this.deletingSessions.delete(sessionId));
+			.finally(() => this.deletingSessions.delete(requestedSessionId));
 	}
 
 	getRuntimeMessages(sessionId: string): SessionTargetedValue<ChatMessage[]> | undefined {
@@ -519,14 +532,17 @@ export class SessionRuntimeCoordinator {
 	}
 
 	async activateRuntime(sessionId: string): Promise<SessionCommandResult<SessionRuntimeInfo>> {
+		// #354：别名归一化必须覆盖返回值构造——ensureRuntime 内部归一化只保证 runtime 建在
+		// 现存 ID 上，runtimeInfo 仍拿旧 ID 查询就会误报 SESSION_RUNTIME_CHANGED。
+		const canonicalSessionId = this.canonicalSessionId(sessionId);
 		try {
-			const tab = await this.ensureRuntime(sessionId);
+			const tab = await this.ensureRuntime(canonicalSessionId);
 			void this.logger?.info("session-runtime", "Runtime activated", {
-				sessionId,
+				sessionId: canonicalSessionId,
 				agentId: tab.id,
 				status: tab.status,
 			});
-			return { ok: true, value: this.runtimeInfo(sessionId, tab) };
+			return { ok: true, value: this.runtimeInfo(canonicalSessionId, tab) };
 		} catch (error) {
 			return this.commandFailure(error);
 		}
@@ -538,26 +554,28 @@ export class SessionRuntimeCoordinator {
 	 * would otherwise create a second runtime and a persisted pi session.
 	 */
 	bindAnonymousRuntime(sessionId: string, agentId: string): SessionRuntimeInfo {
-		const entry = this.catalog.get(sessionId);
-		if (!entry?.noSession) throw new Error(`Anonymous session not found: ${sessionId}`);
+		const canonicalSessionId = this.canonicalSessionId(sessionId);
+		const entry = this.catalog.get(canonicalSessionId);
+		if (!entry?.noSession) throw new Error(`Anonymous session not found: ${canonicalSessionId}`);
 		const tab = this.agents.list().find((candidate) => candidate.id === agentId);
 		if (!tab?.noSession || isTerminalAgent(tab)) {
 			throw new Error(`Anonymous runtime is not available: ${agentId}`);
 		}
-		const runtimeGeneration = this.bind(sessionId, agentId);
+		const runtimeGeneration = this.bind(canonicalSessionId, agentId);
 		tab.runtimeGeneration = runtimeGeneration;
 		void this.logger?.info("session-runtime", "Anonymous runtime bound", {
-			sessionId,
+			sessionId: canonicalSessionId,
 			agentId,
 			runtimeGeneration,
 		});
-		return this.runtimeInfo(sessionId, tab);
+		return this.runtimeInfo(canonicalSessionId, tab);
 	}
 
 	validateTarget(target: SessionRuntimeTarget): SessionCommandResult<SessionRuntimeTarget> {
 		try {
-			this.requireTarget(target);
-			return { ok: true, value: target };
+			const canonical = this.canonicalTarget(target);
+			this.requireTarget(canonical);
+			return { ok: true, value: canonical };
 		} catch (error) {
 			return this.commandFailure(error);
 		}
@@ -929,22 +947,23 @@ export class SessionRuntimeCoordinator {
 
 	async restartRuntime(target: SessionRuntimeTarget): Promise<SessionCommandResult<SessionRuntimeReplacement>> {
 		try {
-			this.requireTarget(target);
-			const tab = await this.restartSession(target.sessionId, target.agentId);
-			const session = this.catalog.getRecord(target.sessionId);
+			const canonical = this.canonicalTarget(target);
+			this.requireTarget(canonical);
+			const tab = await this.restartSession(canonical.sessionId, canonical.agentId);
+			const session = this.catalog.getRecord(canonical.sessionId);
 			if (!session) {
 				throw new SessionRuntimeCommandError("SESSION_NOT_FOUND", "Session no longer exists");
 			}
 			void this.logger?.info("session-runtime", "Runtime restarted", {
-				sessionId: target.sessionId,
-				agentId: target.agentId,
-				runtimeGeneration: target.runtimeGeneration,
+				sessionId: canonical.sessionId,
+				agentId: canonical.agentId,
+				runtimeGeneration: canonical.runtimeGeneration,
 			});
 			return {
 				ok: true,
 				value: {
-					previousTarget: target,
-					runtime: this.runtimeInfo(target.sessionId, tab),
+					previousTarget: canonical,
+					runtime: this.runtimeInfo(canonical.sessionId, tab),
 					session: { ...session },
 				},
 			};
@@ -1381,13 +1400,28 @@ export class SessionRuntimeCoordinator {
 	}
 
 	private ensureRuntime(sessionId: string): Promise<AgentTab> {
-		const existing = this.activationBySession.get(sessionId);
+		// #354：渲染层可能还抱着已被身份归并的历史会话 ID（持久化置顶/Tab 引用迁移到位前的
+		// 迟到请求）。先进原有激活/绑定状态机前统一归一化，否则同一会话会在旧 ID 上另起一个
+		// runtime（两个进程、两份历史，且旧 ID 在 catalog 里已经不存在）。
+		const canonicalSessionId = this.canonicalSessionId(sessionId);
+		const existing = this.activationBySession.get(canonicalSessionId);
 		if (existing) return existing;
-		const activation = this.activate(sessionId).finally(() => {
-			this.activationBySession.delete(sessionId);
+		const activation = this.activate(canonicalSessionId).finally(() => {
+			this.activationBySession.delete(canonicalSessionId);
 		});
-		this.activationBySession.set(sessionId, activation);
+		this.activationBySession.set(canonicalSessionId, activation);
 		return activation;
+	}
+
+	/** 归并别名的归一化入口（网关未提供时按原 ID）。 */
+	private canonicalSessionId(sessionId: string): string {
+		return this.catalog.resolveSessionId?.(sessionId) ?? sessionId;
+	}
+
+	/** 目标里的会话 ID 同样要归一化：target 命令的路由、绑定校验与返回的 target 都用同一个 ID。 */
+	private canonicalTarget(target: SessionRuntimeTarget): SessionRuntimeTarget {
+		const sessionId = this.canonicalSessionId(target.sessionId);
+		return sessionId === target.sessionId ? target : { ...target, sessionId };
 	}
 
 	private async activate(sessionId: string): Promise<AgentTab> {
@@ -1945,9 +1979,11 @@ export class SessionRuntimeCoordinator {
 	private async runTargetCommand<T>(target: SessionRuntimeTarget, operation: (agentId: string) => Promise<T>): Promise<SessionCommandResult<SessionTargetedValue<T>>> {
 		let lease: DispatchLease | undefined;
 		try {
-			this.requireTarget(target);
-			lease = this.acquireDispatchLease(target.sessionId, target.agentId);
-			if (lease.runtimeGeneration !== target.runtimeGeneration) {
+			// #354：所有 target 命令的唯一入口——先把历史会话 ID 归一化，再走原有绑定/租约状态机。
+			const canonical = this.canonicalTarget(target);
+			this.requireTarget(canonical);
+			lease = this.acquireDispatchLease(canonical.sessionId, canonical.agentId);
+			if (lease.runtimeGeneration !== canonical.runtimeGeneration) {
 				throw new SessionRuntimeCommandError("SESSION_RUNTIME_CHANGED", "Session runtime generation changed before command dispatch");
 			}
 			const value = await operation(lease.agentId);
@@ -1977,7 +2013,7 @@ export class SessionRuntimeCoordinator {
 	 * 运行中改文件再 switch_session 会和用户「先停再改、下次发送才激活」的产品规则冲突。
 	 */
 	private async mutateCatalogMessage(
-		sessionId: string,
+		requestedSessionId: string,
 		messageId: string,
 		operation: "edit" | "delete" | "resend" | "remove-image",
 		newText?: string,
@@ -1986,6 +2022,9 @@ export class SessionRuntimeCoordinator {
 		imageTarget?: SessionMessageImageTarget,
 	): Promise<SessionCommandResult<{ text: string; images?: ImageContent[] } | undefined>> {
 		try {
+			// #354：历史（已被身份归并的）会话 ID 先归一化——requireStoppedForFileMutation 是
+			// 「pi 活着禁改会话文件」的硬闸，拿旧 ID 查绑定会漏过闸门把文件写坏。
+			const sessionId = this.canonicalSessionId(requestedSessionId);
 			const entry = this.catalog.get(sessionId);
 			if (!entry) {
 				throw new SessionRuntimeCommandError("SESSION_NOT_FOUND", `Session not found: ${sessionId}`);

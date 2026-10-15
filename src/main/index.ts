@@ -303,6 +303,7 @@ import { SessionCatalog, canAttachRuntimeMetadata } from "./sessions/SessionCata
 import { waitForSessionRunEnd } from "./sessions/sessionRunWaiter";
 import { aggregateDshProxyMode, buildHostProxyEnvPatch, resolveDshHostProxyMode, resolveEffectiveSessionProxyMode } from "./sessions/sessionProxyPolicy";
 import { SessionRuntimeCoordinator, type SessionRuntimeBinding } from "./sessions/SessionRuntimeCoordinator";
+import { migrateMergedSessionPinnedIds } from "./sessions/sessionPinnedIdsMigration";
 import { IdleAgentReleaser } from "./sessions/IdleAgentReleaser";
 import { StaleDraftReaper } from "./sessions/StaleDraftReaper";
 import { SessionCommandIpcError } from "./sessions/SessionCommandIpcError";
@@ -4995,6 +4996,15 @@ app
 		automationStore = new AutomationStore(join(app.getPath("userData"), "automation.json"));
 		const automationStorePreload = automationStore.load();
 		await Promise.all([sessionCatalog.load(), automationStorePreload]);
+		// #354：身份归并会把被吸收的历史会话 ID 从 catalog 移除，而侧栏置顶按稳定 ID 存在
+		// settings.json 里，不迁移就是死链（用户看到置顶丢失）。必须在本行完成——它早于
+		// createWindow，渲染层首次 settings.get 拿到的就是迁移后的值。
+		await migrateMergedSessionPinnedIds({
+			listCatalogSessions: () => sessionCatalog.listEntries(),
+			readPinnedSessionIds: () => settingsStore.get().pinnedSessionIds,
+			writePinnedSessionIds: (ids) => settingsStore.update({ pinnedSessionIds: ids }),
+			logWarning: (cause) => void appLogger.warn("session-catalog", "Merged session id migration for pinned sessions failed", { cause }),
+		});
 
 		// ── 旧禁用记录 → pi 原生配置迁移（计划 A3/A5）──
 		// 启动期一次性执行：旧列表一旦被清理，原生过滤就是唯一生效来源。

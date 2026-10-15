@@ -163,6 +163,7 @@ import { SessionStatusPanel } from "./components/session/statusPanel/SessionStat
 import { ProjectEmptyState } from "./components/session/ProjectEmptyState";
 import { FileLinkBaseProvider } from "./components/session/FileLinkBase";
 import { useSessionWorkspaceChrome } from "./hooks/useSessionWorkspaceChrome";
+import { useSessionIdAliasMigration } from "./hooks/useSessionIdAliasMigration";
 import { useQuickTask } from "./hooks/useQuickTask";
 import { useSideTasks } from "./hooks/useSideTasks";
 import { QuickTaskSurface } from "./components/app/QuickTaskSurface";
@@ -1132,6 +1133,8 @@ export function App() {
 		currentSessionId,
 		activeProjectId,
 	});
+	// #354：catalog 身份归并后迁移渲染层持久化的「最近活动」引用（Tab 置顶在 chrome hook 内迁移）。
+	useSessionIdAliasMigration();
 
 	const {
 		selectProject: selectProjectCommand,

@@ -5,6 +5,7 @@ import { cycleSessionTab, openPermanentSessionTab, openPreviewSessionTab, reorde
 import { buildSessionTabBarEntries, flattenSessionTabBarEntries } from "../utils/sessionTabGroups";
 import { buildSplitLayoutFromDrop, edgeToOrientation, insertRootPaneFromDrop, nestSplitPaneFromDrop, replaceSplitPaneFromDrop, resolveSplitAfterClose, resolveSplitHostSessionId, splitLayoutSessionIds, type SessionSplitDropTarget, type SessionSplitLayout } from "../utils/sessionSplitEdge";
 import { desktopApi } from "../desktopApi";
+import { buildSessionIdAliasMap, remapSessionIds } from "../../../shared/sessionIdAliases";
 import type { FocusTargetPayload } from "../../../shared/types";
 
 const PINNED_TABS_STORAGE_KEY = "pideck.pinnedSessionTabIds";
@@ -21,6 +22,19 @@ export type SessionWorkspaceFocusHandlers = {
 	/** 文件夹右键打开未收录目录：弹确认框引导新增项目（App 注入） */
 	focusOpenProjectPath?: (path: string) => void;
 };
+
+/**
+ * #354：先把 Tab 列表/置顶里的归并历史 ID 迁移到存活 ID，再剔除**确认已删除**的记录。
+ *
+ * 删除判据是「本次运行加载过（`seenSessionIds`）且当前 `sessionRecords` 里已不在」：项目目录按需
+ * 加载，启动首帧的空记录表和尚未展开的项目都不代表记录被删，不能凭它们清掉用户的置顶/Tab。
+ * 无变化时返回原引用，让 React state 去抖与 localStorage 写入都不白跑。
+ */
+export function migrateAndPruneSessionTabIds(current: string[], aliases: ReadonlyMap<string, string>, sessionRecords: Readonly<Record<string, unknown>>, seenSessionIds: ReadonlySet<string>): string[] {
+	const remapped = remapSessionIds(current, aliases);
+	const next = remapped.filter((id) => !seenSessionIds.has(id) || Boolean(sessionRecords[id]));
+	return remapped === current && next.length === current.length ? current : next;
+}
 
 /**
  * 会话工作区 chrome：Tab 列表 / 预览 / Pin / 分屏 / 拖拽落点。
@@ -50,6 +64,8 @@ export function useSessionWorkspaceChrome(options: { currentSessionId: string | 
 		}
 	});
 	const [previewSessionTabId, setPreviewSessionTabId] = useState<string | null>(null);
+	/** 本次运行加载过的会话记录 id：Tab/pin 只清理「见过又消失」的项，详见下方清理 effect。 */
+	const seenSessionIdsRef = useRef<Set<string>>(new Set());
 	const [splitLayout, setSplitLayout] = useState<SessionSplitLayout | null>(null);
 	const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
 	/** 分屏组胶囊在 Tab 栏的收起状态（持久化） */
@@ -103,17 +119,20 @@ export function useSessionWorkspaceChrome(options: { currentSessionId: string | 
 		}
 	}, [pinnedSessionTabIds]);
 
-	// 会话记录消失时清理 Tab / pin / preview / 分屏
+	// 会话记录消失时清理 Tab / pin / preview / 分屏。
+	// #354：先按 catalog 归并别名把持久化的稳定 ID 引用（Tab 列表 / Tab 置顶 / 预览）迁移到
+	// 存活 ID 再做存在性清理——否则被归并掉的历史 ID 会被当成「记录已删除」，用户在迁移
+	// 之前就丢掉置顶并把清理结果写回 localStorage。
+	// 清理只在「见过这条记录（本次运行加载过它的项目）」时才删；分屏布局不参与：它只活在内存里。
 	useEffect(() => {
-		setSessionTabIds((current) => {
-			const next = current.filter((id) => Boolean(sessionRecords[id]));
-			return next.length === current.length ? current : next;
+		for (const id of Object.keys(sessionRecords)) seenSessionIdsRef.current.add(id);
+		const aliases = buildSessionIdAliasMap(Object.values(sessionRecords));
+		setSessionTabIds((current) => migrateAndPruneSessionTabIds(current, aliases, sessionRecords, seenSessionIdsRef.current));
+		setPinnedSessionTabIds((current) => migrateAndPruneSessionTabIds(current, aliases, sessionRecords, seenSessionIdsRef.current));
+		setPreviewSessionTabId((current) => {
+			const migrated = current ? (aliases.get(current) ?? current) : current;
+			return migrated && !sessionRecords[migrated] ? null : migrated;
 		});
-		setPinnedSessionTabIds((current) => {
-			const next = current.filter((id) => Boolean(sessionRecords[id]));
-			return next.length === current.length ? current : next;
-		});
-		setPreviewSessionTabId((current) => (current && !sessionRecords[current] ? null : current));
 		setSplitLayout((layout) => {
 			// 任一栏会话记录消失则整个退出分屏（存活栏会话由 closeTab 的
 			// resolveSplitAfterClose 负责晋升单栏，这里只处理记录删除的场景）
