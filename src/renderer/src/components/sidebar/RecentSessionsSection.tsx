@@ -10,7 +10,7 @@ import type { SidebarController } from "../../hooks/useSidebarController";
 import type { SidebarActions } from "./SidebarContent";
 import { Button } from "../ui-shadcn/button";
 import { PendingAskBadge } from "./PendingAskBadge";
-import { AcpBackendMark, SessionBackendMark, SessionChannelMark, SessionSourceBadge } from "../session/SessionSourceBadge";
+import { AcpBackendMark, SessionBackendMark, SessionChannelMark, SessionSourceBadge, SideTaskMark } from "../session/SessionSourceBadge";
 import { SessionActivityIndicator } from "../session/SessionActivityIndicator";
 import { SessionHoverCard } from "./SessionHoverCard";
 import { TitleScrollText } from "./TitleScrollText";
@@ -159,6 +159,7 @@ function RecentSessionRowItem(props: { row: RecentSessionRow; projectName?: stri
 							{pendingAsk && <PendingAskBadge count={1} />}
 							{row.session.source && row.session.source !== "pi" && <SessionSourceBadge source={row.session.source} />}
 							{row.session.channel && <SessionChannelMark channel={row.session.channel} />}
+							{row.session.sideTask && <SideTaskMark />}
 							{/* 相对时间常显，hover 行时让位给右侧「⋯」按钮（与上方活动行一致）。 */}
 							<span className="shrink-0 text-caption tabular-nums text-muted-foreground group-hover/row:hidden group-focus-within/row:hidden" title={formatRelativeTime(row.sortAt)}>
 								{formatRelativeTime(row.sortAt)}

@@ -58,7 +58,8 @@ test("stored drawer width is clamped into the min/max drag bounds", () => {
 	// 下限 240：保证抽屉内容（Git 面板/文件树）在最小宽度下不被遮挡；pin 状态更宽
 	assert.equal(widthState.DRAWER_WIDTH_MIN, 240);
 	assert.equal(widthState.DRAWER_WIDTH_MIN_PINNED, 260);
-	assert.equal(widthState.DRAWER_WIDTH_MAX, 560);
+	// 上限 880：抽屉里现在能整块跑会话渲染栈（侧边任务面板），560 会让消息区挤成竖条。
+	assert.equal(widthState.DRAWER_WIDTH_MAX, 880);
 });
 
 test("corrupt stored drawer width falls back to the default", () => {

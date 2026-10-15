@@ -25,6 +25,8 @@ import {
 	Fingerprint,
 	// 抽屉 RPC 日志 Tab 图标
 	ScrollText,
+	// 抽屉侧边任务 Tab 图标
+	PanelRight,
 } from "lucide-react";
 import { configureNoticeDefaults, showNotice, type NoticeKind } from "./utils/notice";
 import { copyTextWithCopiedNotice } from "./utils/clipboardNotice";
@@ -163,6 +165,7 @@ import { FileLinkBaseProvider } from "./components/session/FileLinkBase";
 import { useSessionWorkspaceChrome } from "./hooks/useSessionWorkspaceChrome";
 import { useSessionIdAliasMigration } from "./hooks/useSessionIdAliasMigration";
 import { useQuickTask } from "./hooks/useQuickTask";
+import { useSideTasks } from "./hooks/useSideTasks";
 import { QuickTaskSurface } from "./components/app/QuickTaskSurface";
 import { AskPanelOverlay } from "./components/overlays/AskPanelOverlay";
 import { HostPluginPanelHost } from "./components/plugins/HostPluginPanelHost";
@@ -1226,6 +1229,14 @@ export function App() {
 
 	const quickTask = useQuickTask({ ready: settingsLoaded, backend: effectiveAgentBackend, upsertSession, selectSession: selectSessionCommand, registerSession: workspaceChrome.registerOpenSession, refreshProjects, getSessionRecord });
 
+	// 侧边任务：抽屉「侧边任务」面板持有的轻量会话。创建/切换/释放都在 useSideTasks 里，
+	// App 只负责「建好后把抽屉开到这个面板」，不登记主区 Tab、不改当前会话（面板自己寻址）。
+	const sideTasks = useSideTasks({
+		backend: effectiveAgentBackend,
+		showToast,
+		onCreated: () => workspace.openDrawerForce("sideTask"),
+	});
+
 	// 外部链接与本地服务 Web UI 共用同一个出口：强制打开 browser 抽屉 + 内置浏览器新建 tab。
 	const openInBrowser = (url: string) => {
 		workspace.openDrawerForce("browser");
@@ -2051,6 +2062,11 @@ export function App() {
 			createDraft: async (projectId) => {
 				await createSessionDraftWithTab(projectId);
 			},
+			// 侧边任务：建带标记的会话 + 打开抽屉面板。刻意不选会话、不登记主区 Tab——
+			// 侧边任务与主工作区互不打扰是这条链路的底线（面板自己按 sessionId 寻址）。
+			createSideTask: async (projectId, backend) => {
+				await sideTasks.create({ projectId, backend });
+			},
 			createAnonymous: async (projectId) => {
 				await createAnonymousSessionWithTab(projectId);
 			},
@@ -2293,6 +2309,8 @@ export function App() {
 			canCopySession: canRename && record.backend !== "acp" && (isLive || record.backend !== "dsh"),
 			canExportHtml: canRename && record.backend !== "dsh" && record.backend !== "acp",
 			hasFilePath: Boolean(record.filePath),
+			// 侧边任务：目标会话的项目与后端原样带过去；不登记主区常驻 Tab、不改当前会话焦点。
+			onCreateSideTask: () => void sideTasks.create({ projectId: record.projectId, backend: record.backend }),
 			onCopySession: () => {
 				if (isLive && agentId) {
 					void cloneAgentSession(agentId);
@@ -3065,6 +3083,19 @@ export function App() {
 									onTogglePinned: () => workspace.toggleDrawerPanelPinned("browser"),
 									onClick: () => handleToolDrawerAction("browser"),
 								},
+								// 侧边任务 Tab：点了「新建侧边任务」才出现（面板正打开时也保留，
+								// 否则空态面板会挂在没有归属 tab 的内容上）。
+								...(sideTasks.ids.length > 0 || drawer === "sideTask"
+									? [
+											{
+												id: "sideTask",
+												label: t("sideTask.title"),
+												icon: <PanelRight size={16} />,
+												active: drawer === "sideTask",
+												onClick: () => handleToolDrawerAction("sideTask"),
+											},
+										]
+									: []),
 								{
 									id: "scratchPad",
 									label: t("scratchPad.title"),
@@ -3110,6 +3141,7 @@ export function App() {
 							files={drawerPorts.files}
 							rpcLog={drawerPorts.rpcLog}
 							scratchPad={scratchPad}
+							sideTask={{ controller: sideTasks, paneServices: sessionPaneServices }}
 							branchTree={{ forkAtEntry: (entryId, fallbackText) => void forkAtEntry(entryId, fallbackText, `branch:${entryId}`) }}
 						/>
 					)}

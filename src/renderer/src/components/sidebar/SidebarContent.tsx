@@ -1,6 +1,6 @@
 import { Activity, Bolt, CirclePlus, Clock, Folder, Globe, MessageSquare, Monitor, Moon, Search, Sun } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import type { AgentTab, AppThemeMode, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
+import type { AgentBackend, AgentTab, AppThemeMode, ArchivedDshSession, ArchivedPiSession, Project, SessionRecord, SessionSummary, WorktreeEntry } from "../../../../shared/types";
 import { AgentContextMenu, DraftSessionContextMenu, ProjectContextMenu, SessionContextMenu, SessionManagerModal, SessionSourceFilterMenu, WorktreeCreateDialog } from "./SidebarParts";
 import { sessionRecordToSummary } from "../../atoms";
 import { hasPendingUpdateAtom, pendingAppUpdateAtom, pendingCatalogUpdateAtom, pendingPiUpdateAtom, updateStatusAtom } from "../../atoms/update-atoms";
@@ -70,6 +70,8 @@ export type SidebarActions = {
 		beginDrag?: (sessionId: string) => void;
 		endDrag?: () => void;
 		createDraft: (projectId: string) => Promise<void>;
+		/** 新建侧边任务：在该会话所属项目建一条带标记的会话，由右侧抽屉「侧边任务」面板承载。 */
+		createSideTask: (projectId: string, backend?: AgentBackend) => Promise<void>;
 		createAnonymous: (projectId: string) => Promise<void>;
 		/** 新建 ACP 工具会话(toolId → settings.acpTools 条目);后端固定 acp。 */
 		createAcp: (projectId: string, toolId: string) => Promise<void>;
@@ -647,6 +649,14 @@ export function SidebarContent(props: SidebarContentProps) {
 								}
 							: undefined
 					}
+					onCreateSideTask={
+						menuAgent.projectId
+							? () => {
+									controller.closeMenu();
+									void actions.sessions.createSideTask(menuAgent.projectId, menuAgent.backend);
+								}
+							: undefined
+					}
 					onToggleRpcLogging={() => {
 						// 兜底：置灰的菜单项点击不触发 onSelect，这里防御 agent 状态在菜单打开期间变化的情况
 						if (!menuAgentCanRpcLog) {
@@ -740,6 +750,11 @@ export function SidebarContent(props: SidebarContentProps) {
 					onOpenProxySetting={() => {
 						controller.closeMenu();
 						actions.sessions.openProxySetting(menuSession.id);
+					}}
+					// 侧边任务：项目归属优先取会话自己的（分屏/worktree 栏可能与菜单所在项目不同）
+					onCreateSideTask={() => {
+						controller.closeMenu();
+						void actions.sessions.createSideTask(menuSession.projectId ?? menu.projectId, menuSession.backend);
 					}}
 					// 运行控制全状态：未启动的历史会话主控项即「启动 Agent」
 					runControl={buildSidebarRunControl(menuSession.id)}

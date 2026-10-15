@@ -15,3 +15,4 @@ export * from "./rpc-log-atoms";
 export * from "./announcement-atoms";
 export * from "./automation-atoms";
 export * from "./right-sidebar-atoms";
+export * from "./side-task-atoms";

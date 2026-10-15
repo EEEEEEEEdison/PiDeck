@@ -15,7 +15,7 @@ import { filterSidebarSessions, getBoundSidebarRuntimeAgent, type SidebarControl
 import { Button } from "../ui-shadcn/button";
 import type { SidebarActions } from "./SidebarContent";
 import { PendingAskBadge } from "./PendingAskBadge";
-import { AcpBackendMark, SessionBackendMark, SessionChannelMark, SessionSourceBadge } from "../session/SessionSourceBadge";
+import { AcpBackendMark, SessionBackendMark, SessionChannelMark, SessionSourceBadge, SideTaskMark } from "../session/SessionSourceBadge";
 import { SessionActivityIndicator } from "../session/SessionActivityIndicator";
 import { SessionHoverCard } from "./SessionHoverCard";
 import { TitleScrollText } from "./TitleScrollText";
@@ -289,6 +289,7 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 										{child.agent.backend === "acp" ? <AcpBackendMark acpToolId={agentSession?.acpToolId} /> : <SessionBackendMark backend={child.agent.backend} />}
 										{/* 待确认 ask：运行中 Agent 行同样按会话粒度标记，避免多会话同时等待时分不清。 */}
 										{hasPendingAskForSession(agentSession?.id, sessionRuntimeUiById) && <PendingAskBadge count={1} />}
+										{agentSession?.sideTask && <SideTaskMark />}
 										{child.agent.noSession && (
 											<span className="anonymous-indicator" title={t("app.anonymousChat")}>
 												<HatGlasses size={11} aria-hidden="true" />
@@ -356,6 +357,7 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 									{child.session.backend !== "imagegen" && child.session.hasImageGen && <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
 									{child.session.source && child.session.source !== "pi" && <SessionSourceBadge source={child.session.source} />}
 									{child.session.channel && <SessionChannelMark channel={child.session.channel} />}
+									{child.session.sideTask && <SideTaskMark />}
 									{renderToggle(groupKey, childCount)}
 									{/* 相对时间常显：会话更新于多久前一目了然；hover 行时让位给右侧「⋯」按钮。
                   窄侧栏时间可能被截断，title 提示完整相对时间。
@@ -431,6 +433,8 @@ export function SessionTree(props: { project: Project; sessions: readonly Sessio
 												{session.backend === "acp" ? <AcpBackendMark acpToolId={session.acpToolId} /> : <SessionBackendMark backend={session.backend} />}
 												{/* 草稿会话同样按会话粒度标记待确认 ask。 */}
 												{hasPendingAskForSession(session.id, sessionRuntimeUiById) && <PendingAskBadge count={1} />}
+												{/* 侧边任务的草稿期也要认得出来：面板与左栏是同一会话，标记缺失会让人以为建了两条 */}
+												{session.sideTask && <SideTaskMark />}
 											</div>
 										</div>
 									</button>

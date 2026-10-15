@@ -12,7 +12,7 @@ import type { SidebarController } from "../../hooks/useSidebarController";
 import type { SidebarActions } from "./SidebarContent";
 import { Button } from "../ui-shadcn/button";
 import { PendingAskBadge } from "./PendingAskBadge";
-import { AcpBackendMark, SessionBackendMark } from "../session/SessionSourceBadge";
+import { AcpBackendMark, SessionBackendMark, SideTaskMark } from "../session/SessionSourceBadge";
 import { SessionHoverCard } from "./SessionHoverCard";
 import { TitleScrollText } from "./TitleScrollText";
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
@@ -162,6 +162,7 @@ export function ActiveSessionsTree(props: { controller: SidebarController; actio
 											{agent.backend === "acp" ? <AcpBackendMark acpToolId={record?.acpToolId} /> : <SessionBackendMark backend={agent.backend} />}
 											{/* 待确认标记：该会话正在等用户回答 ask，与项目行徽章共用同一组件 */}
 											{pendingAsk && <PendingAskBadge count={1} />}
+											{record?.sideTask && <SideTaskMark />}
 											{/* 相对时间常显：hover 时被右侧「⋯」浮层盖住（与历史会话行同一策略） */}
 											<span className="shrink-0 text-caption tabular-nums text-muted-foreground group-hover/row:hidden">{formatRelativeTime(sortAt)}</span>
 										</div>

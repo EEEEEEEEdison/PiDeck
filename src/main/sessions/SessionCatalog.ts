@@ -57,6 +57,8 @@ export type SessionCatalogEntry = {
 	environment: SessionEnvironment;
 	/** 外部连接渠道（微信/飞书桥建的会话）；缺省 = 桌面端创建，列表据此显示渠道标志。 */
 	channel?: SessionChannel;
+	/** 侧边任务会话标记（右侧抽屉面板持有，不登记主区常驻 Tab）；缺省 = 普通会话，旧存档无需迁移。 */
+	sideTask?: boolean;
 	/** 运行时后端；缺省 "pi"（旧 catalog 数据兼容）。 */
 	backend?: AgentBackend;
 	filePath?: string;
@@ -778,6 +780,8 @@ export class SessionCatalog {
 		 * 标题所有权由 titleOrigin 决定（IM 桥想要自动命名就不要传 titleOrigin）。
 		 */
 		channel?: SessionChannel;
+		/** 侧边任务会话（右侧抽屉「侧边任务」面板持有）：与 channel 一样只是归属标志，不改变会话身份与运行时语义。 */
+		sideTask?: boolean;
 		/** 外部（dsh-web 等）会话导入：host 会话已存在，条目直接置 active（重启不清理）。 */
 		dshSessionId?: string;
 		/**
@@ -842,6 +846,8 @@ export class SessionCatalog {
 				source: input.source ?? "pi",
 				environment: input.environment,
 				channel: input.channel,
+				// 只落 true：false 与缺省同义，不写进存档省得 JSON 里堆噪声字段
+				sideTask: input.sideTask ? true : undefined,
 				backend: input.backend,
 				wslDistro: input.environment === "wsl" ? this.identityContext.wslDistro : undefined,
 				wslUser: input.environment === "wsl" ? this.identityContext.wslUser : undefined,
@@ -882,6 +888,8 @@ export class SessionCatalog {
 			piSessionId?: string | null;
 			/** fork 标记：仅显式 true 时置位（fork 身份元数据；(fork) 后缀已物理写入标题）。 */
 			forked?: boolean | null;
+			/** 侧边任务标记：true = 收进侧边任务面板，null = 释放回普通会话（会话本身保留）。 */
+			sideTask?: boolean | null;
 		},
 	): Promise<SessionRecord> {
 		this.assertLoaded();
@@ -902,6 +910,7 @@ export class SessionCatalog {
 			if (patch.filePath !== undefined) transient.filePath = patch.filePath ?? undefined;
 			if (patch.piSessionId !== undefined) transient.piSessionId = patch.piSessionId ?? undefined;
 			if (patch.forked === true) transient.forked = true;
+			if (patch.sideTask !== undefined) transient.sideTask = patch.sideTask ? true : undefined;
 			// null = 清除覆盖恢复跟随全局
 			if (patch.proxy !== undefined) transient.proxy = patch.proxy ?? undefined;
 			transient.updatedAt = patch.updatedAt ?? Date.now();
@@ -923,6 +932,7 @@ export class SessionCatalog {
 			if (patch.filePath !== undefined) nextEntry.filePath = patch.filePath ?? undefined;
 			if (patch.piSessionId !== undefined) nextEntry.piSessionId = patch.piSessionId ?? undefined;
 			if (patch.forked === true) nextEntry.forked = true;
+			if (patch.sideTask !== undefined) nextEntry.sideTask = patch.sideTask ? true : undefined;
 			// null = 清除覆盖恢复跟随全局
 			if (patch.proxy !== undefined) nextEntry.proxy = patch.proxy ?? undefined;
 			nextEntry.updatedAt = patch.updatedAt ?? Date.now();
@@ -1603,6 +1613,7 @@ export class SessionCatalog {
 			environment: summary ? getSessionEnvironment(summary) : entry.environment,
 			channel: entry.channel,
 			backend: entry.backend,
+			sideTask: entry.sideTask,
 			filePath: summary?.filePath ?? entry.filePath,
 			wslDistro: entry.wslDistro,
 			wslUser: entry.wslUser,

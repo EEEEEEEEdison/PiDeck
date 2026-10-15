@@ -28,6 +28,7 @@ import {
 	Play,
 	Plus,
 	Power,
+	PanelRight,
 	Radio,
 	RefreshCw,
 	RotateCw,
@@ -51,7 +52,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import type { SessionSummary, Project, AgentTab, ArchivedDshSession, ArchivedPiSession, SessionSortModeId } from "../../../../shared/types";
 import { SESSION_SORT_MODES, resolveSessionSortMode } from "../../sessionSortModes";
 import { worktreeSlugify } from "../../../../shared/worktreeSlug";
-import { SessionSourceBadge, SessionBackendMark, SessionChannelMark, DshSourceBadge, ImageGenSourceBadge } from "../session/SessionSourceBadge";
+import { SessionSourceBadge, SessionBackendMark, SessionChannelMark, SideTaskMark, DshSourceBadge, ImageGenSourceBadge } from "../session/SessionSourceBadge";
 import { Checkbox } from "../ui-shadcn/checkbox";
 import { Input } from "../ui-shadcn/input";
 import { Label } from "../../components/ui-shadcn/label";
@@ -419,6 +420,7 @@ export function SessionManagerModal(props: {
 														)}
 														{/* 外部连接（微信/飞书）入口标志：这类会话 source 恒为 pi，用渠道徽标区分消息从哪来 */}
 														{session.channel && <SessionChannelMark channel={session.channel} />}
+														{session.sideTask && <SideTaskMark />}
 													</div>
 												</TableCell>
 												<TableCell className="w-40 text-right">
@@ -857,6 +859,8 @@ export function AgentContextMenu(props: {
 	runControl?: SidebarRunControl;
 	/** 打开当前 agent 对应会话的代理设置弹框（网络代理）；宿主在 App 层。 */
 	onOpenProxySetting?: () => void;
+	/** 在该 agent 对应会话所属项目新建一条侧边任务（右侧抽屉「侧边任务」面板承载）。 */
+	onCreateSideTask?: () => void;
 	onCloseAgent: () => void;
 	/** 运行中也可删：主进程先停后删，不必先关 Agent。 */
 	onDeleteSession?: () => void;
@@ -872,6 +876,13 @@ export function AgentContextMenu(props: {
 				<DropdownMenuItem disabled={busy} onSelect={props.onTogglePinned}>
 					{props.isPinned ? <PinOff className="size-3.5" aria-hidden="true" /> : <Pin className="size-3.5" aria-hidden="true" />}
 					{t(props.isPinned ? "menu.unpinSession" : "menu.pinSession")}
+				</DropdownMenuItem>
+			)}
+			{/* 侧边任务：与历史会话菜单同源入口，项目归属由宿主按 agent 对应会话算好。 */}
+			{props.onCreateSideTask && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onCreateSideTask}>
+					<PanelRight className="size-3.5" aria-hidden="true" />
+					{t("menu.createSideTask")}
 				</DropdownMenuItem>
 			)}
 			{/* DSH 运行中会话的复制走 clone 分流（fork 无锚点完整副本），保留入口；
@@ -996,6 +1007,8 @@ export function SessionContextMenu(props: {
 	runControl?: SidebarRunControl;
 	/** 打开会话代理设置弹框（菜单项「会话代理」） */
 	onOpenProxySetting?: () => void;
+	/** 在该会话所属项目新建一条侧边任务（右侧抽屉「侧边任务」面板承载）；undefined 时隐藏入口 */
+	onCreateSideTask?: () => void;
 	/** 会话是否有文件路径（DSH 会话无 pi 会话文件：隐藏「复制路径/打开文件」） */
 	hasFilePath?: boolean;
 	/** RPC 日志菜单组（与 AgentContextMenu 同语义）：仅会话有 live runtime 时显示 */
@@ -1029,6 +1042,13 @@ export function SessionContextMenu(props: {
 				<DropdownMenuItem disabled={busy} onSelect={props.onTogglePinned}>
 					{props.isPinned ? <PinOff className="size-3.5" aria-hidden="true" /> : <Pin className="size-3.5" aria-hidden="true" />}
 					{t(props.isPinned ? "menu.unpinSession" : "menu.pinSession")}
+				</DropdownMenuItem>
+			)}
+			{/* 侧边任务：在该会话所属项目另开一条轻量会话，落在右侧抽屉「侧边任务」面板，不动主区 Tab。 */}
+			{props.onCreateSideTask && (
+				<DropdownMenuItem disabled={busy} onSelect={props.onCreateSideTask}>
+					<PanelRight className="size-3.5" aria-hidden="true" />
+					{t("menu.createSideTask")}
 				</DropdownMenuItem>
 			)}
 			{/* 运行控制：全状态可用（历史会话未启动时主控项即「启动 Agent」） */}

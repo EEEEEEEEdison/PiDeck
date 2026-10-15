@@ -733,6 +733,8 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			acpToolId: input.backend === "acp" && typeof input.acpToolId === "string" ? input.acpToolId : undefined,
 			model,
 			thinkingLevel,
+			// 渲染层输入不可信：侧边任务只认显式 true，其余（含任意真值）按普通会话建。
+			sideTask: input.sideTask === true,
 		});
 		void appLogger.info("session", "Session draft created", {
 			sessionId: draft.id,
@@ -782,6 +784,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		return result;
 	});
 	ipcMain.handle(ipcChannels.sessionsCatalogUpdate, async (_event, sessionId: string, patch: UpdateSessionRecordInput) => {
+		// 渲染层输入不可信：侧边任务标记只认真值 true 与 null（清除），其余按「本次不改」处理。
+		if (patch.sideTask !== undefined && patch.sideTask !== true && patch.sideTask !== null) {
+			patch = { ...patch, sideTask: undefined };
+		}
 		const normalizedModel = patch.model === undefined ? undefined : patch.model === null ? null : normalizeSessionModelPreference(patch.model);
 		if (patch.model !== undefined && patch.model !== null && !normalizedModel) {
 			throw new Error(mainCopy("session.invalidModel"));

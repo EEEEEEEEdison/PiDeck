@@ -191,6 +191,11 @@ export type SessionSummary = {
 	 * 由 catalog 记录透传（见 sessionRecordToSummary），扫描摘要不带该字段。
 	 */
 	channel?: SessionChannel;
+	/**
+	 * 侧边任务会话（右侧抽屉「侧边任务」面板持有）：与普通会话唯一的差别是不登记主区
+	 * 常驻 Tab（发消息时抑制 promote）。缺省 = 普通会话，旧 catalog 无此字段天然兼容。
+	 */
+	sideTask?: boolean;
 	/** 标记此会话文件来自 WSL，rename/delete/copy 等操作需走 wsl.exe */
 	wsl?: boolean;
 	/** 从 JSONL 中的 model_change / thinking_level_change 提取的最后值 */
@@ -244,6 +249,8 @@ export type SessionRecord = {
 	environment: SessionEnvironment;
 	/** 外部连接渠道（微信/飞书桥建的会话）；缺省 = 桌面端创建。 */
 	channel?: SessionChannel;
+	/** 侧边任务会话标记（见 SessionSummary.sideTask）；面板归属与主区 Tab 抑制的唯一判据。 */
+	sideTask?: boolean;
 	/** 运行时后端（pi/dsh）；缺省 "pi"，旧 catalog 数据无需迁移。 */
 	backend?: import("./agent").AgentBackend;
 	filePath?: string;
@@ -313,6 +320,8 @@ export type CreateSessionDraftInput = {
 	agentPreset?: string;
 	/** ACP 工具预选（AcpToolConfig.id）：backend=acp 草稿期选哪个 CLI，激活时随 create 应用。 */
 	acpToolId?: string;
+	/** 建为侧边任务会话（右侧抽屉「侧边任务」面板持有）；仅布尔 true 被接受，其余按普通会话。 */
+	sideTask?: boolean;
 };
 
 /** 启动前选择的模型与思考级别；显式值优先于 pi 配置默认值。 */
@@ -377,6 +386,8 @@ export type UpdateSessionRecordInput = {
 	acpToolId?: string | null;
 	/** 会话级代理覆盖；null = 恢复跟随全局（清除已保存覆盖）。 */
 	proxy?: SessionProxyOverride | null;
+	/** 侧边任务标记：true = 收进侧边任务面板，null = 释放回普通会话（面板不再列出，会话本身保留）。 */
+	sideTask?: boolean | null;
 };
 
 export type ForkMessage = {

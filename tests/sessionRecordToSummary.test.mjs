@@ -62,3 +62,13 @@ test("有 filePath 的会话投影保持不变", () => {
 	assert.ok(summary);
 	assert.equal(summary.filePath, "C:\\work\\session.jsonl");
 });
+
+test("侧边任务标记透传给侧栏列表（列表照常收录，只多一枚徽标）", () => {
+	const summary = sessionRecordToSummary({ ...baseRecord, filePath: "C:\\work\\task.jsonl", sideTask: true });
+	assert.equal(summary.sideTask, true);
+});
+
+test("普通会话投影不带 sideTask 字段值", () => {
+	const summary = sessionRecordToSummary({ ...baseRecord, filePath: "C:\\work\\task.jsonl" });
+	assert.equal(summary.sideTask, undefined);
+});

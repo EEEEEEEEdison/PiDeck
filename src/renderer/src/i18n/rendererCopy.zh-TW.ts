@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 0111d2a68ca6155b706bb8a96e5024583d3e1d44809d8a533fc740e53ae96e25（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 6eeafbf1177d7f54a8defb60d9c442e6c9184883e6789a8e952b0085734e05e0（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -3879,6 +3879,12 @@ export const zhTW: Record<TranslationKey, string> = {
 	"drawer.rpcLog": "RPC 日誌",
 	"drawer.expandPanel": "展開右側面板",
 	"drawer.addPanel": "新增常駐面板",
+	"sideTask.title": "側邊任務",
+	"sideTask.create": "新建側邊任務",
+	"sideTask.empty": "暫無側邊任務",
+	"sideTask.emptyHint": "在這裡開一條輕量會話，不打擾主工作區的當前會話。",
+	"sideTask.release": "從側邊任務移除",
+	"sideTask.untitled": "未命名任務",
 	"drawer.removePanel": "移除 {label}",
 	"drawer.fileItems": "{count} 個檔案和目錄",
 	"drawer.fileSort": "檔案排序",
@@ -3954,6 +3960,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"app.sessionSortMode.title": "標題",
 	"menu.copySession": "複製會話",
 	"menu.sessionProxy": "會話代理",
+	"menu.createSideTask": "新建側邊任務",
 	"menu.archiveSession": "歸檔會話",
 	"menu.copying": "複製中…",
 	"menu.group.open": "開啟與定位",

@@ -3,6 +3,9 @@ import { GitDrawerHost, type GitDrawerApi } from "./GitDrawerHost";
 import { RewindPanel } from "./RewindPanel";
 import { RpcLogPanel } from "./RpcLogPanel";
 import { ScratchPadDrawer } from "../scratchPad/ScratchPadDrawer";
+import { SideTaskPanel } from "./SideTaskPanel";
+import type { SideTaskController } from "../../hooks/useSideTasks";
+import type { SessionPaneServices } from "../session/SessionPaneServices";
 import type { useScratchPad } from "../../hooks/useScratchPad";
 import { DrawerContent } from "../app/AppParts";
 import { SessionTrajectoryPanel } from "../session/trajectory/SessionTrajectoryPanel";
@@ -110,15 +113,19 @@ export interface DrawerSurfaceProps {
 	scratchPad: ReturnType<typeof useScratchPad>;
 	/** 分支树面板的 fork 端口：App 从会话变更 hook 传入，面板不自己拥有 fork 语义。 */
 	branchTree: { forkAtEntry: (entryId: string, fallbackText: string) => void };
+	/** 侧边任务面板端口：控制器归 App（useSideTasks），会话栏服务沿用主区同一份供面板复用渲染栈。 */
+	sideTask: { controller: SideTaskController; paneServices: SessionPaneServices };
 }
 
 export function DrawerSurface(props: DrawerSurfaceProps) {
-	const { drawer, drawerCollapsed, git, chrome, browser, files, rpcLog, scratchPad, branchTree } = props;
+	const { drawer, drawerCollapsed, git, chrome, browser, files, rpcLog, scratchPad, branchTree, sideTask } = props;
 
 	return (
 		<>
 			{/* 工具面板共享抽屉开关；草稿本保留自身编辑工具行。 */}
-			{drawer === "scratchPad" && !drawerCollapsed ? (
+			{drawer === "sideTask" && !drawerCollapsed ? (
+				<SideTaskPanel controller={sideTask.controller} paneServices={sideTask.paneServices} />
+			) : drawer === "scratchPad" && !drawerCollapsed ? (
 				<ScratchPadDrawer controller={scratchPad} />
 			) : drawer === "trajectory" && !drawerCollapsed ? (
 				<div className="drawer-content-frame flex min-h-0 flex-1 flex-col overflow-hidden">
