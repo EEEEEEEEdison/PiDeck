@@ -15,7 +15,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { cn } from "../../lib/utils";
-import { AcpBackendMark, SessionBackendBadge, SessionChannelMark } from "./SessionSourceBadge";
+import { AcpBackendMark, SessionBackendBadge, SessionChannelMark, SideTaskMark } from "./SessionSourceBadge";
 import { TitleScrollText } from "../sidebar/TitleScrollText";
 import { SessionHeader } from "./SessionHeader";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
@@ -211,6 +211,8 @@ export type SessionTabActions = {
 	onExportSessionHtml?: () => void;
 	/** 重命名回调；undefined（草稿期）时隐藏入口——草稿自动命名前先钉名字会进 manual 终态 */
 	onRename?: () => void;
+	/** 以目标会话的项目/后端新建一条侧边任务；undefined 时隐藏入口 */
+	onCreateSideTask?: () => void;
 };
 
 export function SessionTabsBar(props: SessionTabsBarProps) {
@@ -602,6 +604,15 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 							{props.sessionActions && (
 								<>
 									{!props.runControl?.capabilities && <DropdownMenuLabel>{t("tabs.currentSessionGroup")}</DropdownMenuLabel>}
+									{/* 侧边任务：在目标会话的项目里开一条轻量会话，结果落在右侧抽屉面板 */}
+									{props.sessionActions.onCreateSideTask && (
+										<DropdownMenuItem onSelect={props.sessionActions.onCreateSideTask}>
+											<span className="inline-flex items-center gap-2">
+												<PanelRight className="size-3.5" aria-hidden="true" />
+												{t("menu.createSideTask")}
+											</span>
+										</DropdownMenuItem>
+									)}
 									{props.sessionActions.onRename && (
 										<DropdownMenuItem onSelect={props.sessionActions.onRename}>
 											<span className="inline-flex items-center gap-2">
@@ -1015,6 +1026,7 @@ function SessionTab(props: {
 								)}
 								{/* 外部连接渠道（微信/飞书）：tab 上带渠道标志，与侧栏同一套徽标 */}
 								{record?.channel && <SessionChannelMark channel={record.channel} className="size-3.5 shrink-0" />}
+								{record?.sideTask && <SideTaskMark className="size-3.5 shrink-0" />}
 								{/* G12：DSH plan 模式 / danger 权限预设全局可见（数据来自 runtime state，tab 级常显） */}
 								{runtime?.state?.planModeActive && (
 									<span className="shrink-0 rounded bg-primary/15 px-1 text-[10px] font-medium leading-4 text-primary" title={t("app.composerModePlan")}>
@@ -1122,6 +1134,15 @@ function SessionTab(props: {
 				{props.sessionActions && (
 					<>
 						<ContextMenuSeparator />
+						{/* 侧边任务入口与 ⋯ 菜单同源：作用目标是被右键 Tab 的会话（装配层按 sessionId 算好）。 */}
+						{props.sessionActions.onCreateSideTask && (
+							<ContextMenuItem onSelect={props.sessionActions.onCreateSideTask}>
+								<span className="inline-flex items-center gap-2">
+									<PanelRight className="size-3.5" aria-hidden="true" />
+									{t("menu.createSideTask")}
+								</span>
+							</ContextMenuItem>
+						)}
 						{props.sessionActions.onRename && (
 							<ContextMenuItem onSelect={props.sessionActions.onRename}>
 								<span className="inline-flex items-center gap-2">

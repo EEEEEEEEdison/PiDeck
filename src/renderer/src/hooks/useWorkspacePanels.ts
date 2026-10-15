@@ -7,7 +7,7 @@ export const EDITOR_TAB_LIMIT = 5;
 export const EDITOR_TAB_TEXT_BUDGET = 24 * 1024 * 1024;
 
 /** rpcLog 是临时面板：绑定 agentId 的实时日志，关闭即还原打开前的面板，不参与项目持久化 */
-export type WorkspaceDrawerPanel = "files" | "sessions" | "browser" | "git" | "trajectory" | "branchTree" | "rewind" | "scratchPad" | "rpcLog";
+export type WorkspaceDrawerPanel = "files" | "sessions" | "browser" | "git" | "trajectory" | "branchTree" | "rewind" | "scratchPad" | "rpcLog" | "sideTask";
 export type WorkspaceEditorMode = "view" | "diff";
 
 export type WorkspaceEditorTab = {
@@ -87,7 +87,7 @@ function readDrawerState(storage: WorkspacePanelOptions["storage"], key: string)
 		if (!parsed || typeof parsed !== "object") return null;
 		const value = parsed as { panel?: unknown; pinned?: unknown; pinnedPanels?: unknown; drawerPinned?: unknown };
 		const panel = value.panel === "editor" ? "files" : value.panel;
-		const validPanels = ["files", "sessions", "browser", "git", "trajectory", "branchTree", "rewind", "scratchPad"];
+		const validPanels = ["files", "sessions", "browser", "git", "trajectory", "branchTree", "rewind", "scratchPad", "sideTask"];
 		const validPanel = panel === null || validPanels.includes(String(panel));
 		const pinnedPanels = Array.isArray(value.pinnedPanels) ? value.pinnedPanels.filter((item): item is WorkspaceDrawerPanel => typeof item === "string" && validPanels.includes(item)) : typeof value.pinned === "boolean" && value.pinned && validPanel && panel ? [panel as WorkspaceDrawerPanel] : undefined;
 		// drawerPinned（工作区钉住）只能来自显式持久化；旧存档无此字段 → false（见下方水合注释）。
@@ -111,11 +111,13 @@ function writeDrawerState(storage: WorkspacePanelOptions["storage"], key: string
  * 下限 240：抽屉承载 Git 面板（repo 切换 + 文件状态列 + 提交区）、文件树、
  * 浏览器等密集内容，180px 时文件名被状态徽标/操作按钮挤压，面板标题也放不下；
  * 240 保证内容面板在最小宽度下仍可完整操作，与左侧分段下限（208）同思路。
- * pin 状态额外要求更宽（MIN_PINNED 220→260）：钉住时是常驻工作区，不能太窄。 */
+ * pin 状态额外要求更宽（MIN_PINNED 220→260）：钉住时是常驻工作区，不能太窄。
+ * 上限 560→880：抽屉现在要承载整条会话渲染栈（侧边任务面板），时间线正文 +
+ * 输入框在 560px 下每行只有几个字，读起来不像会话；880 在 1920 宽屏上仍给主区留 ~900px。 */
 export const DEFAULT_DRAWER_WIDTH = 320;
 export const DRAWER_WIDTH_MIN = 240;
 export const DRAWER_WIDTH_MIN_PINNED = 260;
-export const DRAWER_WIDTH_MAX = 560;
+export const DRAWER_WIDTH_MAX = 880;
 /** 抽屉宽度是全局布局偏好（与项目无关），不按项目拆分存储键。 */
 export const DRAWER_WIDTH_STORAGE_KEY = "pid:drawer-width";
 

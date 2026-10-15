@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { useAtomValue } from "jotai";
+import { PanelRight } from "lucide-react";
 import type { AgentBackend, SessionChannel, SessionSource } from "../../../../shared/types";
 import type { AcpToolConfig } from "../../../../shared/types/acp";
 import { ImageIcon, Terminal as TerminalIcon } from "lucide-react";
@@ -397,6 +398,19 @@ export function SessionChannelMark(props: { channel: SessionChannel; className?:
 	return (
 		<Badge variant="outline" aria-label={label} title={label} data-channel={props.channel} className={cn("size-4 shrink-0 rounded-md p-0", CHANNEL_TONES[props.channel], props.className)}>
 			{props.channel === "wechat" ? <WeChatLogo /> : <FeishuChannelLogo />}
+		</Badge>
+	);
+}
+
+/**
+ * 侧边任务标记：这条会话由右侧抽屉「侧边任务」面板持有。
+ * 左栏列表与 Tab 照常收录（用户口径：不隐藏），只用徽标区分归属，避免临时任务混在工作区里认不出来。
+ */
+export function SideTaskMark(props: { className?: string }) {
+	const label = t("sideTask.title");
+	return (
+		<Badge variant="outline" aria-label={label} title={label} data-side-task="true" className={cn("size-4 shrink-0 items-center justify-center rounded-md border-violet-300/70 p-0 text-violet-700 dark:border-violet-700/70 dark:text-violet-300", props.className)}>
+			<PanelRight size={10} aria-hidden="true" />
 		</Badge>
 	);
 }
