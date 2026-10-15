@@ -186,6 +186,17 @@ function isAbsolutePath(filePath: string, platform: "windows" | "posix"): boolea
 }
 
 /**
+ * 无歧义绝对路径判定（不含单个前导 `\` 的 Windows 盘根形态，也不依赖平台猜测）。
+ *
+ * 用途是「确不确认同源」这类**破坏性**判断：路径解析器（`SessionFilePathResolver`）在项目
+ * 解析不出来时按契约原样返回入参，此时相对路径（如 `.pi/sessions/same.jsonl`）在不同项目下
+ * 会算出同一个身份键——把它当已确认物理位置会把两个项目各自的文件归并成一条（#354）。
+ */
+export function isUnambiguousAbsoluteSessionPath(filePath: string): boolean {
+	return filePath.startsWith("/") || hasWindowsDrivePrefix(filePath) || hasWindowsUncPrefix(filePath);
+}
+
+/**
  * 相对路径拼接：Windows 用 `\`，POSIX/WSL 用 `/`（基址与相对部分的分隔符都按目标平台归一）。
  *
  * 基址也要归一：pi/catalog/项目设置里同一个 Windows 目录可能以 `D:/Project` 或

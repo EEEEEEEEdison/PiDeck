@@ -51,9 +51,16 @@
 ## 会话索引身份修复（#354）
 
 - `sessionCatalogIdentityRepair.ts` 在 catalog 启动加载、恢复运行时前修复身份；`filePath` 即使已是正确绝对路径，也要按当前路径规则重算 `originKey`。native POSIX 保留大小写，不能继续使用早期全小写的持久化键。
-- 只归并已经确认路径、且完整 origin（来源、环境、WSL 发行版/用户、导入源 ID、路径）相同的记录；无法解析的记录与其他后端不归并。旧小写键记录优先保留稳定 ID，无此证据时保留最早 `createdAt` 的记录；人工标题优先于自动/兜底名，同类取最近 `updatedAt`。
-- 归并补齐原记录缺失的偏好/结构元数据，并改写 catalog 内 `supersededBy` 引用；不改写或删除 JSONL。误生成的重复 ID 不再作为独立会话，其 Tab/pin 由既有缺失记录清理路径移除，不新增跨层身份别名协议。
-- 修复沿用 catalog 的 `.bak` + 原子快照；写失败记日志、内存修复仍生效，下次启动重试。回归：`node --test tests/sessionCatalogIdentityRepair.test.mjs tests/sessionDuplicateDisplay.test.mjs`。
+- **只有 resolver 返回无歧义绝对路径（`/`、`C:\`、UNC）的条目才参与归并**：生产 resolver（`main/index.ts` 装配）在项目解析不出来时按契约原样返回入参，把相对路径当「已确认物理位置」会让两个项目各自的 `.pi/sessions/x.jsonl`（键不含 projectId）被破坏性归并成一条。无法确认时既不重算键也不归并、不落盘；同层标题冲突又拿不到权威证据的组同样整组保留**原始记录（含旧键）**、不落盘 normalized 克隆，下次启动重试。
+- **归并只在路径与完整 origin（来源、环境、WSL 发行版/用户、导入源 ID、路径）相同时发生**，旧小写键记录优先保留稳定 ID，无此证据时保留最早 `createdAt` 的记录；人工标题优先于自动/兜底名。
+- **标题冲突不得用 `updatedAt` 决胜**：runtime attach、重命名、普通扫描都会刷新它，重开一个旧重复条目就能把陈旧标题选回来，而 manual 锁让扫描永远纠正不了。同优先级（同层）标题不一致时只认有界读取到的 `session_info` 权威名（`SessionTitleFetcher`，`nameFromSessionInfo === true`）且与某一方标题逐字相同；无 fetcher / 读失败 / 权威名不匹配任何候选时**整组保留**（两条记录都不删、下次启动重试），禁止猜一个标题删掉另一条。
+- **物理文件确认必须覆盖所有破坏性操作，运行时归并也不能只看持久化键**：`attachRuntime` 的同源折叠先对 survivor 与每个候选跑与启动修复同一道闸（pi 文件会话 + resolver 返回无歧义绝对路径 + 按完整 origin 现场重算键，`SessionCatalog.confirmedOriginKey`），不能拿持久化 `originKey` 或相对路径派生键当「已确认同一文件」——两个项目各自的 `.pi/sessions/x.jsonl` 键不含 projectId，只比键就会跨项目吸收记录。无法确认时保守保留（不归并、不改写身份键；改写会洗掉「这条是小写旧键」这一唯一证据，下次启动就会按 `createdAt` 错选存活 ID）。
+- **标题归属按整组最高优先级层（manual > legacy > auto > fallback > undefined）**，只有同层标题冲突才读磁盘权威名（`arbitrateRuntimeMergeTitle` → `resolveConflictTitleOwner`）；同层无冲突时也必须在归并时明确把该层三件套（title/titleOrigin/titleLocked）应用到结果上，否则存活条目（往往是刚建的 provisional 草稿，优先级最低）会把自己的临时名留在上面，吞掉被吸收记录的手工名。禁止用 `updatedAt` 仲裁。磁盘证据缺失 / 权威名与任何候选都不匹配时**不得归并**：启动时保守保留的冲突组不能因为用户激活其中一条就在运行时被静默删掉。标题必须在全组 fold **完成后**应用（逐次 merge 会重建对象，按对象 identity 记 owner 会在第二轮失效）。成功归并时吸收**全部**同源条目（不是只删一条），把被吸收 ID 与其历史别名累计进 `mergedSessionIds`（别名索引随快照重建）。
+- 被归并的历史稳定 ID 记入存活条目的 `mergedSessionIds`（可选字段，与 catalog 原子快照一起落盘，多轮归并累积、不重复、不遮蔽真实存在的会话、不产生环）；旧数据没有该字段无需迁移。字段来自用户可手改的 JSON，读侧必须收窄（`readMergedSessionIds`）：非数组、元素非字符串一律按「没有别名表」处理——字符串若直接迭代会被拆成逐字符别名，`mergedSessionIds: 42` 曾让整个 catalog 启动抛 `TypeError`；坏字段只删字段项，不动条目本身。
+- **稳定 ID 引用必须迁移，不能只删重复条目**：`settings.pinnedSessionIds`（侧栏置顶）由主进程在 `sessionCatalog.load()` 之后、建窗口之前经 `sessions/sessionPinnedIdsMigration.ts`（`migrateSessionIdList` 的装配层薄包装，catalog/settings/日志由 `main/index.ts` 注入）重写到存活 ID（幂等、无变化不写、失败只记日志不阻断启动）；渲染层持久化的 Tab 置顶与「最近活动」经 `sessions:catalog-list` 载荷里的同一字段、用 `shared/sessionIdAliases.ts` 的同一套解析迁移，**迁移必须跑在 Tab 存在性清理之前**（否则清理先把被归并 ID 当已删除记录丢掉）。不新增 IPC 通道。
+- 旧 ID 的迟到请求不得报「会话不存在」或另起一个 runtime：`SessionCatalog` 的 `get/getRecord/update/remove/removeWithDescendants/attachRuntime/promoteToActive/claimTitleOwnership/apply*Title/markSuperseded` 统一先经 `resolveSessionId` 归一化；**写队列里的操作必须在事务执行时按最新别名表再归一一次**（`requireEntry`/`findEntryInTransaction`）——入队时的快照会指向排队期间被 attach 折叠吸收掉的旧 ID，真实顺序「attach 先入队 → 在旧 ID 上改名的操作后入队」会以 `Session not found` 被拒。runtime 激活（`ensureRuntime`）、target 命令（`runTargetCommand`/`restartRuntime`）与查询/生命周期入口（`activateRuntime` 的返回值构造、`getTarget`、`getAgentId`、`hasLiveRuntime`、`isActivating`、`releaseRuntimeForDelete`、`bindAnonymousRuntime`）也走同一入口；`send` 的投递缓存 key 用现存 ID，别名与现存 ID 的同一 `requestId` 只投递一次。generation/dispatch lease 守卫语义不变（归一化只改身份，不放宽断言）。
+- 归并补齐原记录缺失的偏好/结构元数据，并改写 catalog 内 `supersededBy` 引用；不改写或删除 JSONL。
+- 修复沿用 catalog 的 `.bak` + 原子快照；写失败记日志、内存修复仍生效，下次启动重试。回归：`node --test tests/sessionCatalogIdentityRepair.test.mjs tests/sessionRuntimeIdAlias.test.mjs tests/sessionIdAliases.test.mjs tests/sessionPinnedIdsMigration.test.mjs tests/sessionDuplicateDisplay.test.mjs`。
 
 ## 会话消息编辑/删除/重发（原生 context_edit + 重发墓碑，与 pi 的跨系统契约）
 

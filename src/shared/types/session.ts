@@ -260,6 +260,12 @@ export type SessionRecord = {
 	forked?: boolean;
 	/** 同 SessionSummary.supersededBy：重发/编辑 fork 化替换后指向子会话 id，列表默认过滤。 */
 	supersededBy?: string;
+	/**
+	 * #354 身份归并别名：启动期修复把历史重复身份记录并入本条时，被吸收记录的历史稳定 ID。
+	 * 这些 ID 仍被 settings 置顶 / 渲染层持久化的 Tab 置顶与最近活动引用，渲染层据此把引用
+	 * 迁移到本条 id（解析入口见 shared/sessionIdAliases.ts）。缺省 = 无归并历史，旧数据无需迁移。
+	 */
+	mergedSessionIds?: string[];
 	projectPath?: string;
 	preview: string;
 	messageCount: number;

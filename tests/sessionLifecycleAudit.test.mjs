@@ -30,14 +30,15 @@ test("SessionRuntimeCoordinator exposes a full lifecycle logger interface", () =
 });
 
 test("session runtime lifecycle events are logged", () => {
-	assert.match(coordinator, /"Runtime activated", \{\s*sessionId,\s*agentId: tab\.id,\s*status: tab\.status,/);
+	// sessionId 在激活入口先归一化成现存会话 ID（#354 归一别名），日志字段与顺序不变。
+	assert.match(coordinator, /"Runtime activated", \{\s*sessionId(?::\s*canonicalSessionId)?,\s*agentId: tab\.id,\s*status: tab\.status,/);
 	// stopTarget：stopTarget 与日志解耦重命名（原始渲染层目标单独入日志），覆盖语义不变
 	assert.match(coordinator, /"Runtime stopped", \{\s*sessionId: stopTarget\.sessionId,\s*agentId: stopTarget\.agentId,\s*runtimeGeneration: stopTarget\.runtimeGeneration,/);
 	assert.match(coordinator, /"Runtime restarted"/);
 	assert.match(coordinator, /"Runtime renamed"/);
 	assert.match(coordinator, /"Runtime model changed", \{\s*sessionId: target\.sessionId,\s*agentId,\s*provider,\s*modelId,/);
 	assert.match(coordinator, /"Runtime thinking changed"/);
-	assert.match(coordinator, /"Anonymous runtime bound", \{\s*sessionId,\s*agentId,\s*runtimeGeneration,/);
+	assert.match(coordinator, /"Anonymous runtime bound", \{\s*sessionId(?::\s*canonicalSessionId)?,\s*agentId,\s*runtimeGeneration,/);
 	assert.match(coordinator, /"Focused session changed", \{ sessionId \}\)/);
 	assert.match(coordinator, /"Agent stopped \(unbound\)", \{ agentId \}\)/);
 });
