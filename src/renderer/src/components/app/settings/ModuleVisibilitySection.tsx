@@ -34,6 +34,7 @@ const MODULE_LABEL_KEYS: Record<HideableModuleId, TranslationKey> = {
 	process: SETTINGS_TAB_LABEL_KEYS.process,
 	composerModes: "settings.modules.composerModes",
 	dsh: "settings.modules.dsh",
+	respondingTips: "settings.modules.respondingTips",
 };
 
 /** 每个模块隐藏后受影响的入口说明（行描述）。 */
@@ -51,6 +52,7 @@ const MODULE_DESC_KEYS: Record<HideableModuleId, TranslationKey> = {
 	process: "settings.modules.processDesc",
 	composerModes: "settings.modules.composerModesDesc",
 	dsh: "settings.modules.dshDesc",
+	respondingTips: "settings.modules.respondingTipsDesc",
 };
 
 /**
@@ -101,6 +103,7 @@ export const ModuleVisibilitySection = memo(function ModuleVisibilitySection(pro
 			case "acp":
 			case "hostplugins":
 			case "composerModes":
+			case "respondingTips":
 				return null;
 		}
 	};

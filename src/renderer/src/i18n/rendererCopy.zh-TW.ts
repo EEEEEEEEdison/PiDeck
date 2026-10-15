@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 6eeafbf1177d7f54a8defb60d9c442e6c9184883e6789a8e952b0085734e05e0（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: e789c0901aa2fede012db9399c5825ab09342447a4b04c863ad2a05324bef9ab（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -4921,6 +4921,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.modules.dshDesc": "配置管理的 DSH 分頁、輸入框的 DSH 後端選項",
 	"settings.modules.composerModes": "模式選擇器",
 	"settings.modules.composerModesDesc": "輸入框底欄的普通/目標/規劃模式切換入口（進行中的特殊模式仍可退出）",
+	"settings.modules.respondingTips": "功能提示",
+	"settings.modules.respondingTipsDesc": "流式響應狀態條右側輪播的功能提示；只關掉這幾行提示本身，不影響提示裡提到的任何功能",
 	"settings.modules.imDesc": "飛書 / 微信等外部連線設定頁",
 	"settings.modules.petDesc": "桌面寵物設定頁",
 	"settings.modules.visionDesc": "視覺橋設定頁",

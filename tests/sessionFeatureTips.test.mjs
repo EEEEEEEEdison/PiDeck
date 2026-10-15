@@ -10,6 +10,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
@@ -60,4 +61,20 @@ test("功能提示文案：单行短句，不会被截断", () => {
 			assert.ok(text.length <= MAX_TIP_LENGTH, `${locale} 的 ${tip.textKey} 过长（${text.length} > ${MAX_TIP_LENGTH}）`);
 		}
 	}
+});
+
+// 设置 → 外观 → 功能模块的 respondingTips 开关：提示组件本身读该开关才叫真能关掉。
+// 组件是 React 组件，测渲染需整套 DOM 环境，这里按仓库既有做法钉源码形状（与 composerModeOption 同款）。
+test("功能提示受「功能模块」开关控制（源码形状）", () => {
+	const component = readFileSync("src/renderer/src/components/session/RespondingTips.tsx", "utf8");
+	assert.match(component, /respondingTipsHiddenAtom/, "读取 respondingTips 隐藏开关");
+	// hook 全部执行完之后才允许提前返回：开关在响应中被改时 hook 数量变化会直接抛错
+	const prematureReturn = component.indexOf("if (hidden) return null;");
+	assert.ok(prematureReturn > component.indexOf("useEffect("), "提前返回必须在全部 hook 之后");
+	assert.ok(prematureReturn < component.indexOf("<span"), "提前返回必须挡在渲染之前");
+
+	const modules = readFileSync("src/renderer/src/components/app/settings/ModuleVisibilitySection.tsx", "utf8");
+	assert.match(modules, /respondingTips: "settings\.modules\.respondingTips"/, "功能模块设置页列出功能提示开关");
+	const atoms = readFileSync("src/renderer/src/atoms/app-ui-atoms.ts", "utf8");
+	assert.match(atoms, /isModuleHidden\(get\(hiddenModulesAtom\), "respondingTips"\)/, "隐藏判定走 hiddenModules 清单");
 });

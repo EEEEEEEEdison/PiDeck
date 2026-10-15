@@ -4934,6 +4934,8 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.modules.dshDesc": "DSH tab in Configuration and the DSH backend option in the composer",
 	"settings.modules.composerModes": "Mode selector",
 	"settings.modules.composerModesDesc": "Normal/Goal/Plan switcher in the composer bar (an active special mode can still be exited)",
+	"settings.modules.respondingTips": "Feature tips",
+	"settings.modules.respondingTipsDesc": "Rotating tips beside the streaming status bar; turning this off only stops the tips — every feature they mention keeps working",
 	"settings.modules.imDesc": "Feishu / WeChat connection settings page",
 	"settings.modules.petDesc": "Desktop Pet settings page",
 	"settings.modules.visionDesc": "Vision Bridge settings page",

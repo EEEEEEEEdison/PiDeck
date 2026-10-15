@@ -124,6 +124,9 @@ export const videoGenModuleHiddenAtom = atom((get) => isModuleHidden(get(hiddenM
 /** 输入框底栏模式选择器是否被隐藏（设置 → 外观 → 功能模块）。 */
 export const composerModesHiddenAtom = atom((get) => isModuleHidden(get(hiddenModulesAtom), "composerModes"));
 
+/** 流式状态条右侧的功能提示轮播是否被隐藏（设置 → 外观 → 功能模块）。 */
+export const respondingTipsHiddenAtom = atom((get) => isModuleHidden(get(hiddenModulesAtom), "respondingTips"));
+
 /**
  * 忙碌时发送消息的默认投递行为（设置项 busySendDelivery 的渲染层快照）。
  * App 在 settings 变化时写入；composer/发送链路在决策时刻读取，

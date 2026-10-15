@@ -4914,6 +4914,8 @@ export const zhCN = {
 	"settings.modules.dshDesc": "配置管理的 DSH 分页、输入框的 DSH 后端选项",
 	"settings.modules.composerModes": "模式选择器",
 	"settings.modules.composerModesDesc": "输入框底栏的普通/目标/规划模式切换入口（进行中的特殊模式仍可退出）",
+	"settings.modules.respondingTips": "功能提示",
+	"settings.modules.respondingTipsDesc": "流式响应状态条右侧轮播的功能提示；只关掉这几行提示本身，不影响提示里提到的任何功能",
 	"settings.modules.imDesc": "飞书 / 微信等外部连接设置页",
 	"settings.modules.petDesc": "桌面宠物设置页",
 	"settings.modules.visionDesc": "视觉桥设置页",
