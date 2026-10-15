@@ -165,7 +165,12 @@ export function HostPluginsTab() {
 					<FolderOpen data-icon="inline-start" />
 					{t("hostPlugins.openDirectory")}
 				</Button>
-				{catalog && <span className="break-all text-xs text-muted-foreground">{catalog.directory}</span>}
+				{/* 路径可能很长：truncate 让它在工具行内收口（overflow:hidden 使 flex 自动最小宽度归 0），完整值放 title */}
+				{catalog && (
+					<span className="min-w-40 truncate text-xs text-muted-foreground" title={catalog.directory}>
+						{catalog.directory}
+					</span>
+				)}
 				<span className="flex-1" />
 				{/* 开发指南外链：指向仓库内的单一数据源（docs/host-plugin-dev-guide.md），与插件作者所见一致 */}
 				<Button
@@ -184,33 +189,39 @@ export function HostPluginsTab() {
 					<AlertDescription>{t("hostPlugins.failed", { code: error })}</AlertDescription>
 				</Alert>
 			)}
+			{/* 三列宽度靠表头约束：插件列吃掉剩余空间、权限列给固定占比、动作列收缩到内容宽，
+			    单元格一律允许换行—— TableCell 基类是 whitespace-nowrap，长描述会把表格顶出横向滚动条。 */}
 			<Table>
 				<TableHeader>
 					<TableRow>
-						<TableHead>{t("hostPlugins.plugin")}</TableHead>
-						<TableHead>{t("hostPlugins.permission")}</TableHead>
-						<TableHead>{t("hostPlugins.actions")}</TableHead>
+						<TableHead className="w-full">{t("hostPlugins.plugin")}</TableHead>
+						<TableHead className="w-[34%]">{t("hostPlugins.permission")}</TableHead>
+						<TableHead className="w-px text-right">{t("hostPlugins.actions")}</TableHead>
 					</TableRow>
 				</TableHeader>
 				<TableBody>
 					{catalog?.plugins.map((plugin) => (
 						<TableRow key={plugin.manifest.id}>
-							<TableCell>
+							<TableCell className="w-full break-words whitespace-normal align-top">
 								<div className="flex flex-col gap-1">
-									<strong>{plugin.manifest.name}</strong>
-									<span className="text-xs text-muted-foreground">
+									<strong className="break-words">{plugin.manifest.name}</strong>
+									<span className="break-all text-xs text-muted-foreground">
 										{plugin.manifest.id} / {plugin.manifest.version}
 									</span>
-									{plugin.manifest.description && <span className="text-xs text-muted-foreground">{plugin.manifest.description}</span>}
+									{plugin.manifest.description && (
+										<span className="line-clamp-3 text-xs leading-relaxed text-muted-foreground" title={plugin.manifest.description}>
+											{plugin.manifest.description}
+										</span>
+									)}
 								</div>
 							</TableCell>
-							<TableCell>
+							<TableCell className="whitespace-normal align-top">
 								<div className="flex flex-col items-start gap-2">
 									<HostPluginPermissionDetails manifest={plugin.manifest} />
 									<Badge variant="secondary">{t(plugin.enabled ? "hostPlugins.enabled" : plugin.requiresConsent ? "hostPlugins.changed" : "hostPlugins.disabled")}</Badge>
 								</div>
 							</TableCell>
-							<TableCell>
+							<TableCell className="text-right align-top">
 								{/* 拆分按钮（split button）形态：主钮直接露出唯一高频且可逆的动作（启用/禁用），
 								    不可逆的卸载与面板入口收进右侧下拉，避免误点卸载、也不必先点开菜单才能启停。 */}
 								<ButtonGroup>
