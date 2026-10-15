@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import test from "node:test";
 import { findMacApps, verifyMacSignature } from "../scripts/verify-mac-signature.mjs";
 
@@ -133,8 +133,9 @@ test("目录发现只认 mac* 输出目录：win/linux 产物目录被忽略", a
 		await createApp(release, "win-unpacked", "PiDeck.exe"); // 非 mac 目录，忽略
 		await createApp(release, "linux-unpacked", "PiDeck.app"); // 名字像 app 但目录不是 mac*
 		const apps = await findMacApps(release);
+		// 用 relative 剥前缀并归一为 /：Windows 上 join 产出反斜杠，硬编码 `${release}/` 剥不掉（2026-10 Windows 全量红）
 		assert.deepEqual(
-			apps.map((app) => app.replace(`${release}/`, "")),
+			apps.map((app) => relative(release, app).split("\\").join("/")),
 			["mac-universal/PiDeck.app"],
 		);
 	});
@@ -142,8 +143,10 @@ test("目录发现只认 mac* 输出目录：win/linux 产物目录被忽略", a
 
 // 接线守卫：门禁脚本必须挂在真正打包 mac 产物的 workflow 上，否则改了脚本也没人跑。
 // 正则空白容忍（AGENTS.md：格式调整不得让契约测试假红）。
-test("三个 mac 打包 workflow 都调用签名门禁脚本", async () => {
-	for (const file of ["release.yml", "build-macos.yml", "mac-test-build.yml"]) {
+// build-dev.yml 同样在 macOS runner 上出包并上传 prerelease——dev 通道只靠 dist-dev.js 浅合并
+// 继承 identity，配置回归时若无门禁会再次静默发坏包（#347 同形态）。
+test("四个 mac 打包 workflow 都调用签名门禁脚本", async () => {
+	for (const file of ["release.yml", "build-macos.yml", "mac-test-build.yml", "build-dev.yml"]) {
 		const workflow = await readFile(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
 		assert.match(workflow, /node\s+scripts\/verify-mac-signature\.mjs/, `${file} 未接入 scripts/verify-mac-signature.mjs`);
 	}
