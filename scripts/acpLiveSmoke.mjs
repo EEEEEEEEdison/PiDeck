@@ -29,6 +29,23 @@ console.log(`[smoke] invocation: ${invocation.command} ${invocation.args.join(" 
 const toolEnv = ACP_SMOKE_ENV_JSON ? (JSON.parse(ACP_SMOKE_ENV_JSON) ?? {}) : {};
 const proc = spawn(invocation.command, invocation.args, { cwd, env: { ...process.env, ...toolEnv }, stdio: ["pipe", "pipe", "pipe"], shell: invocation.shell === true, windowsHide: true });
 let stderrTail = "";
+/** 杀进程树:smoke 经 cmd.exe 垫片起 CLI(npx/opencode .cmd),裸 proc.kill() 只杀垫壳,
+ * 孙进程(codex.exe 等)会孤儿化存活——实测帧序探针泄漏过整夜的 codex.exe。
+ * 与 app 侧 AcpProcessHost.killAcpProcessTree 同策略:win32 taskkill /T /F,其余平台退回 proc.kill。 */
+const killProcessTree = () => {
+	if (process.platform === "win32" && typeof proc.pid === "number") {
+		const killer = spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+		killer.on("error", () => {
+			try {
+				proc.kill();
+			} catch {}
+		});
+		return;
+	}
+	try {
+		proc.kill();
+	} catch {}
+};
 proc.stderr?.on("data", (chunk) => {
 	const text = chunk.toString();
 	stderrTail = (stderrTail + text).slice(-2000);
@@ -61,9 +78,7 @@ const fail = (msg) => {
 	try {
 		conn.close();
 	} catch {}
-	try {
-		proc.kill();
-	} catch {}
+	killProcessTree();
 	rmSync(cwd, { recursive: true, force: true });
 	process.exit(1);
 };
@@ -116,7 +131,7 @@ try {
 	const imageMessages = projection.messages.filter((m) => (m.images?.length ?? 0) > 0);
 	console.log(`[smoke] image-bearing messages: ${imageMessages.length}`);
 	conn.close();
-	proc.kill();
+	killProcessTree();
 	// Windows 下 CLI 子进程可能短暂占用临时目录,清不掉就留给系统临时回收,不影响结果判定
 	try {
 		rmSync(cwd, { recursive: true, force: true });
