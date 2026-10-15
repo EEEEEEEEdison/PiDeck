@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 9f60058489f05df0531921901ebfd43830857ad6dfefbbe710054f178f173527（来自 src/main/feishu/FeishuI18n.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: ba7817973a09b08be898fb39911b9437aa30d598d01cd647685ffec9492fdcbb（来自 src/main/feishu/FeishuI18n.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import type { FeishuTranslationKey } from "./FeishuI18n";
 
@@ -33,6 +33,7 @@ export const feishuZhTW: Record<FeishuTranslationKey, string> = {
 	"session.askDisabled": "ℹ️ 本會話已連線飛書：互動式提問（ask）已停用。Agent 需要確認/選擇時會直接把問題寫進訊息，請直接回復訊息回答。",
 	"session.createFailed": "❌ 建立會話失敗，請重試。",
 	"session.recovered": "🔄 會話已恢復，新 ID: {id}",
+	"session.backendSwitched": "🔄 會話後端已切換為 {backend}，本對話已換用新會話（{id}）；原對話歷史保留在舊會話裡（可在 PiDeck 側欄繼續）。",
 	"session.mirrorWelcome": "🤖 Pi Agent 會話已建立\n會話 ID: {id}\n\n直接發訊息即可與 Agent 對話。",
 	"session.notBound": "當前沒有繫結的會話。",
 	"session.notBoundCreateFirst": "當前沒有繫結的會話，請先發訊息建立會話。",

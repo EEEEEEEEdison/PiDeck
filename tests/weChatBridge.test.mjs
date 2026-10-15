@@ -119,6 +119,7 @@ function makeConfigStub({ account, token = "TOKEN", allowedUsers = [], bindings 
 		cursor: "",
 		relogin: 0,
 		saves: [],
+		settingsPatches: [],
 	};
 	const noop = () => 0;
 	return {
@@ -148,6 +149,12 @@ function makeConfigStub({ account, token = "TOKEN", allowedUsers = [], bindings 
 			setDisplayName: () => undefined,
 			// 模型链与默认工作区：默认空（不干预会话模型、不指定工作区），需要测顺延/工作区的用例自己改 state。
 			getSettings: () => ({ enabled: true, account: state.account, modelChain: state.modelChain ?? [], defaultWorkspaceId: state.defaultWorkspaceId, backend: state.backend }),
+			// 首次绑定会把会话当前模型播种进模型链（见 WeChatBridge.seedModelChain）：桩要真的写回 state，
+			// 否则「链首 = 新会话默认模型」的后续断言看不到播种结果。
+			updateSettings: (patch) => {
+				if (patch.modelChain) state.modelChain = patch.modelChain;
+				state.settingsPatches.push(patch);
+			},
 		},
 	};
 }
@@ -601,6 +608,40 @@ test("without a model chain the session model is left untouched", async () => {
 	await harness.bridge.stop();
 });
 
+test("first binding seeds the model chain with the session's current model", async () => {
+	// 首次配置时链是空的：设置页只有一句「使用会话当前模型」，用户看不到模型名，也不知道
+	// 接下来回复会用哪个。把会话当前模型写进链首——链首本就是新会话的默认模型，语义不变但看得见。
+	const harness = createHarness({ batches: [{ msgs: [userMessage({ text: "默认用啥" })] }] });
+	harness.runtimeBindings.getRuntimeState = async () => ({ provider: "p1", modelId: "fast", modelName: "Fast" });
+	await harness.start();
+
+	await waitFor(() => harness.prompts.length === 1, "the first prompt");
+	assert.equal(JSON.stringify(harness.config.state.modelChain), JSON.stringify([{ provider: "p1", modelId: "fast", modelName: "Fast" }]), "链首必须是会话当前模型");
+	assert.deepEqual(harness.modelSwitches, [], "播种的就是当前模型，不该顺手再切一次");
+	harness.messages.set("a1", [{ role: "assistant", text: "用 Fast" }]);
+	endRun(harness);
+	await waitFor(() => harness.client.calls.sent.length === 1, "the reply");
+	await harness.bridge.stop();
+});
+
+test("an existing binding never writes the chain back (user's clearing wins)", async () => {
+	// 链为空也可能是用户有意清空（就是不想让微信碰模型）。已有绑定的每一条消息都不该把它种回去。
+	const harness = createHarness({
+		batches: [{ msgs: [userMessage({ text: "你好" })] }],
+		bindings: [{ chatId: "wxid_me", userId: "wxid_me", sessionId: "s1", sessionPath: "/tmp/s1.jsonl", workspaceId: "p1", createdAt: 1, agentId: "a1", backend: "pi" }],
+	});
+	harness.runtimeBindings.getRuntimeState = async () => ({ provider: "p1", modelId: "fast", modelName: "Fast" });
+	await harness.start();
+
+	await waitFor(() => harness.prompts.length === 1, "the prompt");
+	assert.equal(harness.config.state.modelChain, undefined, "已有绑定不得把链写回");
+	assert.deepEqual(harness.modelSwitches, [], "链空就不干预会话模型");
+	harness.messages.set("a1", [{ role: "assistant", text: "好" }]);
+	endRun(harness);
+	await waitFor(() => harness.client.calls.sent.length === 1, "the reply");
+	await harness.bridge.stop();
+});
+
 // ===== 默认工作区 =====
 
 test("the configured default workspace decides where a new session is created", async () => {
@@ -801,7 +842,8 @@ test("微信会话登记时带渠道标志并保持可自动命名", async () =>
 });
 
 // ===== 渠道后端（pi / dsh）=====
-// 设置 → 外部连接 → 微信 → 「会话后端」只作用在**新建**会话上；老绑定自带后端。
+// 设置 → 外部连接 → 微信 → 「会话后端」既决定新建会话的后端，也是**换后端**的开关：
+// 判定到绑定后端与设置不一致时必须换绑新会话（否则切了后端也一直在旧引擎里跑）。
 // 后端差异（宿主指令、模型链、失败信号）都在下面钉死，免得以后加 ACP 时又重踩一遍。
 
 test("渠道后端随设置落到新建会话，绑定记住会话自己的后端", async () => {
@@ -881,7 +923,9 @@ test("DSH 运行时不可用：给出可执行的提示，而不是笼统的建�
 	await harness.bridge.stop();
 });
 
-test("老绑定沿用自身后端：设置改成 pi 也不会给它突然塞宿主指令", async () => {
+test("切换渠道后端：老绑定换绑到新会话（不续旧引擎的会话）", async () => {
+	// 用户在设置里把后端从 dsh 改成 pi 之后，同一个聊天窗必须真的换到新引擎上：
+	// 复用旧 sessionId 会让设置形同虚设（消息仍在旧引擎里跑，用户还会以为丢了历史）。
 	const harness = createHarness({
 		batches: [{ msgs: [userMessage({ text: "你好" })] }],
 		bindings: [{ chatId: "wxid_me", userId: "wxid_me", sessionId: "s1", sessionPath: "/tmp/s1.jsonl", workspaceId: "p1", createdAt: 1, agentId: "a1", backend: "dsh" }],
@@ -889,10 +933,37 @@ test("老绑定沿用自身后端：设置改成 pi 也不会给它突然塞宿�
 	harness.config.state.backend = "pi";
 	await harness.start();
 
+	await waitFor(() => harness.sessionCreations.length === 1, "the session creation");
+	assert.equal(harness.sessionCreations[0].backend, "pi", "换绑要按设置里的后端建新会话");
+	assert.equal(harness.sessionCreations[0].existingSessionId, undefined, "换后端不能续旧引擎的会话（跨引擎没有可续的历史）");
+	assert.equal(harness.sessionCreations[0].sessionPath, undefined, "也不能带上旧引擎的会话文件");
+
+	await waitFor(() => harness.client.calls.sent.length === 1, "the switch notice");
+	assert.ok(harness.client.calls.sent[0].text.includes("pi"), "换绑要主动说明后端已切换，否则下一条回复像是莫名失忆");
+
 	await waitFor(() => harness.prompts.length === 1, "the prompt");
-	assert.equal(harness.prompts[0].agentMessage, undefined, "老绑定是 dsh：设置改动不能改变既有会话的后端语义");
+	assert.ok(harness.prompts[0].agentMessage, "换绑到 pi 之后按 pi 的语义提交（宿主指令可用），不能再按 dsh 降级");
+
 	harness.messages.set("a1", [{ role: "assistant", text: "在" }]);
 	endRun(harness);
-	await waitFor(() => harness.client.calls.sent.length === 1, "the reply");
+	await waitFor(() => harness.client.calls.sent.length === 2, "the reply");
+	assert.equal(harness.client.calls.sent[1].text, "在", "换绑后的回信走新会话");
+	await harness.bridge.stop();
+});
+
+test("切换渠道后端（pi → dsh）：跨引擎的模型 pin 不跟着换绑", async () => {
+	const harness = createHarness({
+		batches: [{ msgs: [userMessage({ text: "你好" })] }],
+		bindings: [{ chatId: "wxid_me", userId: "wxid_me", sessionId: "s1", sessionPath: "/tmp/s1.jsonl", workspaceId: "p1", createdAt: 1, agentId: "a1", backend: "pi", modelId: "gpt-5", modelProvider: "openai" }],
+	});
+	harness.config.state.backend = "dsh";
+	await harness.start();
+
+	await waitFor(() => harness.prompts.length === 1, "the prompt");
+	assert.equal(harness.sessionCreations[0].backend, "dsh", "换绑要用设置里的 dsh");
+	assert.equal(harness.prompts[0].agentMessage, undefined, "换绑后是 dsh 语义：不能带宿主指令（会被拒收）");
+	assert.equal(harness.config.state.bindings.get("wxid_me")?.modelId, undefined, "旧引擎的模型 id 在 dsh 目录里不存在，必须丢掉");
+	assert.deepEqual(harness.modelSwitches, [], "换绑不该拿旧模型去新引擎里试选");
+	harness.finishPendingRun();
 	await harness.bridge.stop();
 });
