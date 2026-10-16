@@ -6,8 +6,8 @@
 
 ## 当前基线
 
-- 最近核对版本：`pi 1.2.0`（2026-10-12 发布；依据：npm 包 CHANGELOG + `npm pack` 完整包与本机 `1.1.0` 的 `dist` 逐文件 diff）
-- 核对方式：静态 diff + 源码核对。`dist/modes/rpc/rpc-types.js`、`dist/modes/rpc/rpc-mode.js`、`dist/index.js` 与 1.1.0 **逐字节相同**。**1.2.0 未在真实会话上跑回归**（本机仍是 1.1.0），扩展 API 触发范围变化的真实验收待做（见 1.2.0 矩阵第 6 行）
+- 最近核对版本：`pi 1.3.0`（2026-10-15 发布；依据：npm 包 CHANGELOG + `npm pack` 完整包与本机 `1.2.0` 的 `dist` 逐文件 diff）
+- 核对方式：静态 diff + 源码核对。`dist/modes/rpc/rpc-types.js`、`dist/modes/rpc/rpc-mode.js`、`dist/core/package-manager.js` 与本机 1.2.0 **逐字节相同**；`dist/index.js` / `index.d.ts` 只新增 `formatReadLineRange` 导出。**1.3.0 未在真实会话上跑回归**（本机仍是 1.2.0），1.2.0 的真实回归同样待做（见 1.2.0 矩阵的扩展 API 行）
 - PiDeck 通信方式：`pi --mode rpc`，stdio JSON-RPC
 - 本记录范围：Pi 后端（`src/main/pi/`）以及 PiDeck 对 Pi 配置/事件的适配
 - 不包含：DSH 的 `pwsh_persistent`、Electron 自带终端、PiDeck 自己的应用更新器
@@ -33,6 +33,28 @@
 真实冒烟证据（`scripts/smoke-pi-native-resources.mjs`，对 pi 0.99.2 与 1.0.0 各 19/19）：
 无白名单启动下，原生 `+/-` 规则真实控制技能/扩展加载、`-builtin:mcp` 生效、项目层覆盖生效、
 未信任项目不读项目配置、旧禁用记录迁移后 pi 真的不加载该资源。
+
+## 1.3.0 审计矩阵（2026-10-16，npm 包完整 dist 与本机 1.2.0 逐文件 diff）
+
+核对方式：`npm pack @earendil-works/pi-coding-agent@1.3.0`，与用户机器上已装的 1.2.0 比对；关键文件用 `cmp`/`diff` 判定，非逐行人工阅读。
+
+| 上游变化 | PiDeck 处理 | 状态 | 代码/验证 | 移除条件 |
+|---|---|---|---|---|
+| RPC 命令面与事件面 | `rpc-types.js`、`rpc-mode.js` 与 1.2.0 **逐字节相同** → 会话/模型/思考档/压缩/命令列表等边界无变化 | **已核对无变化** | 逐文件 `cmp` | — |
+| `dist/index.js` / `index.d.ts`（`ModelRuntime` SDK 入口） | 只新增一个导出 `formatReadLineRange`（来自 `core/tools/render-utils`），无签名/行为变更 → `pi-auth-host.mjs`、`pi-enhance-host.mjs` 的入口安全 | **已核对无变化** | `cmp` + `diff` | — |
+| `package-manager.js`（资源过滤/原生规则语义） | 与 1.2.0 **逐字节相同** → 1.2.0 补的 `~` 归一仍是正确口径，资源投影无需再改 | **已核对无变化** | 逐文件 `cmp` | — |
+| 新增 `sessionShareDestination` 设置（`settings-defaults.js` 只加该键，`settings-manager.js` +13 行 get/set，`settings-schema.js` 随发布更新） | PiDeck 设置文件是整份快照往返（`ConfigModal` 持有 settings.json 全量，`pruneModelThinkingLevelOrphans` 返回展开副本），未知顶层键原样保留；`ensurePiSettingsDefaults` 只补主题/思考/信任/压缩/重试，不接管 `/share` 目标 | 无需改动 | `src/main/config/settingsFormPayload.ts`、`src/renderer/src/ConfigModal.tsx`、`src/main/index.ts`（`ensurePiSettingsDefaults`） | — |
+| `/share` 描述改为「Radius artifact 或 GitHub gist」 | PiDeck 没有自己的 `/share` 实现，斜杠命令面板只透传 pi 的 `get_commands`，无硬编码文案 | 无需改动 | `grep /share` 核对（命中项均与共享会话无关） | — |
+| `--model` 的 provider 歧义修复（`model-resolver.js` 重构出 `resolveModelReference` / `findExactModelReferenceMatch`；无凭据的单一匹配也能解析） | PiDeck 探测/列表始终同时传 `--provider` + `--model`，不依赖歧义猜测 | 无需改动 | `src/main/pi/PiModelProber.ts` | — |
+| 恢复会话保留 active tools，`--tools +name/-name` 叠加在恢复的装载结果上 | PiDeck 不向 pi 传 `--tools`（工具选择由用户在 pi 侧配置），恢复会话的工具面仍由 pi 自己决定 | 无需改动 | `grep --tools src/main` 为 0 | — |
+| `models.json` 新增 compat 标记 `supportsMidConvoEffort`（`model-config.d.ts` 联合类型扩展） | 自定义供应商配置整对象往返（`normalizeModelsForPi` 展开 provider/model 对象、只补默认值），未知字段不丢 | 无需改动 | `src/main/config/ConfigManager.ts`（`normalizeModelsForPi`） | — |
+| 工具调用参数 JSON 解析失败改为在校验层直接判失败 | pi 内部行为，不产生新的 RPC 事件形状 | 无需改动 | — | — |
+| `parseCommandArgs` 保留引号内的空参数（`prompt-templates.js`） | PiDeck 提示词库把模板文件交给 pi 解析，自己不解析参数 | 无需改动 | — | — |
+| kimi-coding：`api` 由 `anthropic-messages` 改为 `openai-completions`，baseUrl 由 `api.kimi.com/coding` 改为 `api.kimi.com/coding/v1` | PiDeck 的用量探针用 host 前缀 `api.kimi.com` 匹配，两种形态都命中；catalog 的 `api`/`baseUrl` 只作为 DSH 用量档案与 endpoint 兜底回退，不写死到会话链路 | 无需改动 | `src/main/config/providerUsageProbe.ts`、`ConfigManager`（`profile.api ?? catalogSnapshot?.api`）、`tests/providerUsageProbe.test.mjs` | — |
+| opencode / opencode-go：provider baseUrl 由 `opencode.ai/zen` 改为 `opencode.ai/inference`（catalog 里 82 + 27 条） | 实测两 host 都可访问（别名，`/v1/models` 与 `/go/v1/models` 四种组合均 200），且 DSH 自带的 pi-ai 仍用 `zen`；PiDeck 侧把 `inference` 加入用量探针的 host 白名单、保留 `zen` 兼容既有配置，渲染层预设端点不强制改写 | **本轮已适配** | `src/main/config/providerUsageProbe.ts`、`tests/providerUsageProbe.test.mjs`；`src/renderer/src/config/providerHeaders.ts`（`KNOWN_PROVIDER_ENDPOINTS` 保留 zen） | `zen` 域名彻底下线后删掉 zen 分支 |
+| PiDeck 静态模型目录来源更新 | 构建期 `pi-ai` 精确锁定从 1.2.0 更新到 1.3.0；42 个 provider、1714 条模型（chat 1614 / image 60 / classifier 40），相较 1.2.0 目录新增 84、移除 19、字段变更 185。仅更新静态资源，不改 OpenRouter 联网刷新或 DSH 独立依赖 | 已更新（本轮） | `package.json` / lock、`resources/pi-ai-catalog*.json`、目录生成/读取/打包与能力补全测试 | 无 |
+| TUI 侧变化（`modes/interactive/*`、`core/tools/renderers/read.js` 行号标签、`export-html`、`credential-print`、`bundle/*`、`extensions/codemode/execute.js` 等） | 只影响 TUI/CLI 呈现；PiDeck 走 `pi --mode rpc`，`bundle/rpc-entry.js` 路径未变 | 无需改动 | `diff -rq` 文件清单 | — |
+| 内部 pi 依赖改为精确版本锁定 | pi 自身打包行为，不影响 RPC 协议面 | 无需改动 | — | — |
 
 ## 1.2.0 审计矩阵（2026-10-13，npm 包完整 dist 与本机 1.1.0 逐文件 diff）
 
@@ -285,7 +307,7 @@ PiDeck 当前有三条不同的 pi-ai 使用路径，不能混为一谈：
 
 这份 catalog artifact **不是 Pi 后端 runtime 使用的那一份**。PiDeck 通过 `PiLocator` 执行用户已经安装的 `pi` CLI；Pi CLI 自己携带/解析自己的 pi-ai。PiDeck 不打包 `pi-coding-agent`，也不把 catalog 来源版本注入外部 Pi 进程。
 
-升级记录：PiDeck 主进程 catalog artifact 的来源从 `0.84.4` 起，随上游 pi-ai 发布逐版跟进：`0.85.0` → `0.85.1` → `0.86.0` → `0.86.1` → `0.99.1`（2026-09；0.99.1 对应 42 个源 JSON、1592 条模型，含 OpenAI Codex 默认模型 gpt-6.1-sol）；DSH 仍保留 adapter 兼容的嵌套 `0.82.1`。catalog 与运行时的 Pi 版本解耦——补的是能力字段（contextWindow/maxTokens/thinkingLevelMap），权威闸门仍是 `pi --list-models` 与 RPC `set_model`。只有当 `@deepseek-ai/dsh-llm-pi-ai` 发布明确兼容 `@earendil-works/pi-ai 0.86.x` 的版本后，才升级 DSH adapter/runtime 依赖树，并完成 typecheck、catalog/迁移测试、DSH host smoke、thinking effort、流式请求和 provider catalog 回归。
+升级记录：PiDeck 主进程 catalog artifact 的来源从 `0.84.4` 起，随上游 pi-ai 发布逐版跟进：`0.85.0` → `0.85.1` → `0.86.0` → `0.86.1` → `0.99.1`（2026-09；0.99.1 对应 42 个源 JSON、1592 条模型，含 OpenAI Codex 默认模型 gpt-6.1-sol）→ `1.0.4` → `1.2.0`（1649 条）→ `1.3.0`（2026-10-15，1714 条）；DSH 仍保留 adapter 兼容的嵌套 `0.82.1`。catalog 与运行时的 Pi 版本解耦——补的是能力字段（contextWindow/maxTokens/thinkingLevelMap），权威闸门仍是 `pi --list-models` 与 RPC `set_model`。只有当 `@deepseek-ai/dsh-llm-pi-ai` 发布明确兼容 `@earendil-works/pi-ai 0.86.x` 的版本后，才升级 DSH adapter/runtime 依赖树，并完成 typecheck、catalog/迁移测试、DSH host smoke、thinking effort、流式请求和 provider catalog 回归。
 
 ## 兼容代码移除规则
 

@@ -328,7 +328,7 @@ test("真实生成 catalog：全部条目带 type，且官方字段未被裁剪"
 		const type = entry.type ?? "omitted";
 		typeCounts[type] = (typeCounts[type] ?? 0) + 1;
 	}
-	// pi-ai 1.2.0 的 1649 条全部显式带 type；缺省（undefined）数量为 0。
+	// pi-ai 1.3.0 的 1714 条全部显式带 type；缺省（undefined）数量为 0。
 	assert.equal(typeCounts.omitted, undefined, "官方条目应全部显式带 type");
 	assert.ok(typeCounts.chat > 1000, `chat 条目异常：${typeCounts.chat}`);
 	assert.ok(typeCounts.image > 0, "应包含 image 条目");
