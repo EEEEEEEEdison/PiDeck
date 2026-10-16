@@ -18,7 +18,7 @@
  * 见 parseAccelerator。纯函数实现，node --test 可直接单测，不依赖 electron 运行时。
  */
 
-export type ShortcutId = "openSettings" | "toggleDevTools" | "openNewSession" | "openSearch" | "openCommandPalette" | "cycleModel" | "cycleThinking" | "openQuickMessages" | "toggleVoiceRecording" | "cycleSessionTabs" | "cycleSessionTabsReverse" | "zoomIn" | "zoomOut";
+export type ShortcutId = "openSettings" | "toggleDevTools" | "openNewSession" | "openSearch" | "openCommandPalette" | "cycleModel" | "cycleThinking" | "openQuickMessages" | "toggleVoiceRecording" | "cycleSessionTabs" | "cycleSessionTabsReverse" | "closeSessionTab" | "zoomIn" | "zoomOut";
 
 /** 设置页分组：general=通用（普通用户常用），dev=开发调试 */
 export type ShortcutGroupId = "general" | "dev";
@@ -129,6 +129,16 @@ export const SHORTCUT_DEFS: readonly ShortcutDef[] = [
 		descriptionKey: "settings.shortcuts.cycleSessionTabsReverseDesc",
 		// cycleSessionTabs 的反向（上一个标签页），与浏览器 Ctrl+Shift+Tab 惯例成对。
 		defaultAccelerator: { darwin: "Ctrl+Shift+Tab", other: "Ctrl+Shift+Tab" },
+	},
+	{
+		id: "closeSessionTab",
+		group: "general",
+		labelKey: "settings.shortcuts.closeSessionTabLabel",
+		descriptionKey: "settings.shortcuts.closeSessionTabDesc",
+		// 浏览器/IDE 惯例：Cmd/Ctrl+W 关闭当前标签页（Chrome 同款）。主窗口没有原生菜单
+		// （Menu=null），Chromium 默认不会因该组合关窗，可安全接管；AI 回答进行中由渲染层
+		// 弹确认框（确认 = 停止回答 + 关闭，取消 = 保持），主进程只命中广播。
+		defaultAccelerator: { darwin: "Cmd+W", other: "Ctrl+W" },
 	},
 	{
 		id: "zoomIn",

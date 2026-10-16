@@ -2068,6 +2068,13 @@ function configureBrowserPanelWebviewHost(window: BrowserWindow): void {
 				window.webContents.send(ipcChannels.appShortcutTriggered, "cycleSessionTabsReverse");
 				return;
 			}
+			// Cmd/Ctrl+W 关闭当前会话标签页：目标会话与「回答中先弹确认」由渲染层判定，主进程只命中广播。
+			if (isShortcutInput("closeSessionTab", input)) {
+				event.preventDefault();
+				if (!window || window.isDestroyed()) return;
+				window.webContents.send(ipcChannels.appShortcutTriggered, "closeSessionTab");
+				return;
+			}
 			if (!isShortcutInput("toggleDevTools", input)) return;
 			event.preventDefault();
 			toggleMainWindowDevTools(window);
@@ -2392,6 +2399,13 @@ async function createWindow() {
 		if (isShortcutInput("cycleSessionTabsReverse", input)) {
 			event.preventDefault();
 			mainWindow.webContents.send(ipcChannels.appShortcutTriggered, "cycleSessionTabsReverse");
+			return;
+		}
+		// Cmd/Ctrl+W 关闭当前会话标签页：与 Ctrl+Tab 同链路；「回答中先弹确认、确认后停止并关闭」
+		// 由渲染层判定（main 不持有会话上下文）。
+		if (isShortcutInput("closeSessionTab", input)) {
+			event.preventDefault();
+			mainWindow.webContents.send(ipcChannels.appShortcutTriggered, "closeSessionTab");
 			return;
 		}
 		if (isShortcutInput("toggleDevTools", input)) {

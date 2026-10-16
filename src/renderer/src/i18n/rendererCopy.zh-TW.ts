@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 22a08f37df618ef40396b87997d533675c6bfab312b27d382b55b27d748c6491（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 8c806fcc69816d567e26ad801cf026b51b8d0651fbe67e15da14a542813000cd（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -325,6 +325,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"tabs.close": "關閉標籤頁",
 	"tabs.closeOthers": "關閉其他標籤頁",
 	"tabs.closeAll": "關閉全部標籤頁",
+	"tabs.closeRunningTitle": "關閉正在回答的會話？",
+	"tabs.closeRunningBody": "該會話正在生成回答，關閉標籤頁會停止當前回答。會話記錄與歷史訊息會保留，可隨時重新開啟。",
+	"tabs.closeRunningConfirm": "停止並關閉",
 	"tabs.pin": "固定標籤頁",
 	"tabs.unpin": "取消固定",
 	"tabs.moreActions": "更多操作",
@@ -4139,6 +4142,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.shortcuts.cycleSessionTabsDesc": "按標籤欄順序迴圈切換會話（到末尾回到開頭）；輸入框聚焦時同樣生效。預設 Ctrl+Tab（macOS 為 ⌃Tab）。",
 	"settings.shortcuts.cycleSessionTabsReverseLabel": "切換到上一個會話標籤頁",
 	"settings.shortcuts.cycleSessionTabsReverseDesc": "反向迴圈切換會話標籤頁。預設 Ctrl+Shift+Tab（macOS 為 ⌃⇧Tab）。",
+	"settings.shortcuts.closeSessionTabLabel": "關閉當前會話標籤頁",
+	"settings.shortcuts.closeSessionTabDesc": "關閉當前聚焦的會話標籤頁（Chrome 關標籤頁慣例）。預設 Ctrl+W（macOS ⌘W）；AI 回答進行中會先彈確認框，確認後停止回答並關閉。",
 	"settings.shortcuts.zoomInLabel": "放大視窗",
 	"settings.shortcuts.zoomInDesc": "放大整個視窗介面（含圖示與間距）。預設 Ctrl+=（macOS ⌘=）。",
 	"settings.shortcuts.zoomOutLabel": "縮小視窗",

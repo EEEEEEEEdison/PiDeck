@@ -96,6 +96,7 @@ import { useSidebarArchiveActions } from "./hooks/sidebar/useSidebarArchiveActio
 import { useSettingsUpdater } from "./hooks/settings/useSettingsUpdater";
 import { useTpsDisplayMode } from "./hooks/settings/useTpsDisplayMode";
 import { useSessionRunControl } from "./hooks/session/useSessionRunControl";
+import { useCloseSessionTabShortcut } from "./hooks/useCloseSessionTabShortcut";
 import { useProjectFileTreeController } from "./hooks/files/useProjectFileTreeController";
 import { useSessionDurationTracking } from "./hooks/session/useSessionDurationTracking";
 import { useSessionPromptDispatch } from "./hooks/session/useSessionPromptDispatch";
@@ -1218,6 +1219,10 @@ export function App() {
 		queuedPromptsRef: queue.queuedPromptsRef,
 		suppressQueueAutoDrain: queue.suppressSessionQueueAutoDrain,
 	});
+
+	// Cmd/Ctrl+W 关闭当前会话标签页：回答进行中先弹确认（确认 = 停止 + 关闭），空闲直接关。
+	// 会话目标解析/停止/确认框分别复用 runControl/overlays，本处仅装配。
+	useCloseSessionTabShortcut({ closeTab: workspaceChrome.closeTab, abortAgent, overlays });
 
 	// 终端 IPC 目标：Agent 会话优先绑定当前 runtime；未启动或已停止时回退到项目 cwd。
 	// 该计算必须放在 useSessionRunControl 之后，因为 runtime target resolver 是该 hook 的返回值。
