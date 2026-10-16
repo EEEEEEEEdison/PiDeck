@@ -7,6 +7,7 @@ import {
 	safeJson as sharedSafeJson,
 	truncateDetailWithMeta as truncateSharedDetailWithMeta,
 	truncateForDetail as truncateSharedForDetail,
+	type ToolDetailStatus,
 } from "../../shared/formatToolDetail";
 import { extractMessageText } from "./messageContent";
 import { asRecord } from "./agentUtils";
@@ -179,7 +180,7 @@ export class AgentMessageProjector {
 						const detailsRecord = asRecord(typed.details);
 						const piDeckOriginalContent = typeof detailsRecord?._piDeckOriginalContent === "string" ? detailsRecord._piDeckOriginalContent : undefined;
 						const originalContent = piDeckOriginalContent ?? (filePath ? historicalOriginalContentByPath.get(filePath) : undefined);
-						const detailText = this.formatToolDetail(toolName, historicalCall?.args, result, isError);
+						const detailText = this.formatToolDetail(toolName, historicalCall?.args, result, isError ? "error" : "done");
 						// detailText 整体截断（拼接后可能超单段上限）并标记 truncated/fullLength，
 						// 渲染层据此提供「查看完整输出」按需加载（sessionsCatalogReadMessageFullText）。
 						const detailDelivery = this.truncateDetailWithMeta(detailText);
@@ -324,8 +325,8 @@ export class AgentMessageProjector {
 		return String(typed.path ?? typed.filePath ?? typed.file ?? typed.target_file ?? typed.targetFile ?? "");
 	}
 
-	formatToolDetail(toolName: string, args: unknown, result: unknown, isError: boolean) {
-		return formatSharedToolDetail(toolName, args, result, isError, this.deps.translate);
+	formatToolDetail(toolName: string, args: unknown, result: unknown, status: ToolDetailStatus) {
+		return formatSharedToolDetail(toolName, args, result, status, this.deps.translate);
 	}
 
 	/** 对超长工具文本做首尾截断，保留头部和尾部以兼顾开头信息和错误堆栈。 */

@@ -11,6 +11,13 @@ export const TOOL_DETAIL_MAX_CHARS = 8000;
 
 export type ToolDetailTranslate = (key: MainProcessTranslationKey, params?: Record<string, string | number>) => string;
 
+/**
+ * detailText 里的状态段取真实运行态，而不是「有没有 isError」的二值：
+ * 工具运行中就烘焙「运行中」，否则 start→end 之间（子进程还没吐过 stdout 时无 update 事件）
+ * 展开区会一直印着「完成」，用户会把还在跑的长任务（如重定向到日志的 e2e）读成已结束（2026-10 实测误读）。
+ */
+export type ToolDetailStatus = "running" | "done" | "error";
+
 /** 投影器未注入 translate 时的兜底（中文）；装配层应传入当前主进程 locale。 */
 export function defaultToolDetailTranslate(key: MainProcessTranslationKey, params?: Record<string, string | number>): string {
 	return mainProcessT("zh-CN", key, params);
@@ -120,7 +127,7 @@ export function truncateDetailWithMeta(text: string, translate: ToolDetailTransl
  * 把一次工具调用整理成工具卡展开区可读文案。
  * args 在 end/update 事件里可能已是序列化字符串，先反解再 stringify，避免二次编码。
  */
-export function formatToolDetail(toolName: string, args: unknown, result: unknown, isError: boolean, translate: ToolDetailTranslate): string {
+export function formatToolDetail(toolName: string, args: unknown, result: unknown, status: ToolDetailStatus, translate: ToolDetailTranslate): string {
 	const details = extractToolDetails(result);
 	let argsObj = args;
 	if (typeof args === "string" && args.trim()) {
@@ -135,8 +142,8 @@ export function formatToolDetail(toolName: string, args: unknown, result: unknow
 	const commandText = rawCommand === undefined ? "" : truncateForDetail(rawCommand, translate);
 	const resultText = result ? truncateForDetail(extractToolResultText(result) || safeJson(result), translate) : "";
 	const detailsText = details ? truncateForDetail(safeJson(details), translate) : "";
-	const status = translate(isError ? "mainTool.failed" : "mainTool.done");
+	const statusText = translate(status === "error" ? "mainTool.failed" : status === "running" ? "mainTool.running" : "mainTool.done");
 	const argsSection = args ? (rawCommand !== undefined ? translate("mainTool.command", { command: commandText }) : translate("mainTool.arguments", { value: argsText })) : "";
-	const sections = [translate("mainTool.name", { name: toolName || "tool" }), translate("mainTool.status", { status }), argsSection, result ? translate("mainTool.result", { value: resultText }) : "", details ? translate("mainTool.details", { value: detailsText }) : ""].filter(Boolean);
+	const sections = [translate("mainTool.name", { name: toolName || "tool" }), translate("mainTool.status", { status: statusText }), argsSection, result ? translate("mainTool.result", { value: resultText }) : "", details ? translate("mainTool.details", { value: detailsText }) : ""].filter(Boolean);
 	return sections.join("\n\n");
 }

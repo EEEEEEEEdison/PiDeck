@@ -59,6 +59,8 @@ test("renderer startup reports bootstrap mount and global errors", () => {
 	assert.match(rendererMainSource, /Maximum update depth exceeded/);
 	assert.match(rendererMainSource, /lastUpdateDepthDiagnosticAt/);
 	assert.match(rendererMainSource, /Renderer root element missing/);
+	// 良性 ResizeObserver loop 不按 error 上报（否则也进「最近 7 天报错」顶掉真实信号）
+	assert.match(rendererMainSource, /isBenignResizeObserverLoop \? "info" : "error"/);
 	assert.match(bootOverlaySource, /export function dismissBootOverlay\(\)/);
 	// 挂载帧不得撤遮罩（会露出无会话空态那一帧）；硬兼底必须保留
 	assert.doesNotMatch(rendererMainSource, /requestAnimationFrame\(\s*dismissBootOverlay\s*\)/);

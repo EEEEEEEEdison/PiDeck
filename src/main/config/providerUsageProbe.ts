@@ -3,7 +3,7 @@
  *
  * 设计目标：可扩展——新增 provider 只在此处增补「候选端点 + 响应解析」，不发散到 UI/IPC。
  * 内置策略：
- *   - opencode-go（baseUrl 含 opencode.ai/zen 或 opencode.ai/inference，pi-ai 1.3.0 起改用后者）：GET /usage →
+ *   - opencode-go（baseUrl 含 opencode.ai/zen 或 opencode.ai/inference）：GET /usage →
  *     { usage: { rolling|weekly|monthly: { status, percent, resetsAt } } }
  *   - DeepSeek（baseUrl 含 api.deepseek.com）：GET /user/balance →
  *     { balance_infos: [{ currency, total_balance }] }（total_balance 可能是数字或字符串）
@@ -180,9 +180,9 @@ export type UsageProbeResponse = {
 
 /** 候选端点表：新增 provider 适配器时在此注册（用户探针会追加在之后）。 */
 export const USAGE_PROBE_CANDIDATES: UsageProbeCandidate[] = [
-	// opencode-go：/v1/usage 直接给出三档占用百分比 + 重置时间。pi-ai 1.3.0 把
-	// Zen/Go 端点从 opencode.ai/zen 换到 opencode.ai/inference（上游 #10720），两个
-	// 前缀都命中：老版本的 models.json 覆盖还指向 zen 时用量探测不能静默失效。
+	// opencode / opencode-go 网关：/v1/usage 直接给出三档占用百分比 + 重置时间。
+	// host 路径随上游注册表改名：pi-ai 1.2.0 写 `opencode.ai/zen`，1.3.0 改成 `opencode.ai/inference`
+	// （旧路径仍在服务，DSH 自带依赖与用户 models.json 里普遍还是它），两种都要匹配。
 	{
 		path: "/usage",
 		baseUrlContains: ["opencode.ai/zen", "opencode.ai/inference"],

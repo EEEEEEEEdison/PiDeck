@@ -57,7 +57,6 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 		roundsStarted: 0,
 		maxGoalRounds: DEFAULT_MAX_ROUNDS,
 	};
-	let continuing = false;
 
 	function persistState(): void {
 		pi.appendEntry(GOAL_ENTRY_TYPE, { ...state });
@@ -79,7 +78,6 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 	function setPaused(ctx: ExtensionContext, notify: boolean): void {
 		if (!state.enabled) return;
 		state = { ...state, enabled: true, phase: "paused" };
-		continuing = false;
 		updateWidget(ctx);
 		persistState();
 		if (notify) ctx.ui.notify("PiDeck 目标模式已暂停。切回目标模式后会从当前进度继续。", "info");
@@ -110,7 +108,6 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 
 	function setComplete(ctx: ExtensionContext): void {
 		state = { ...state, enabled: false, phase: "complete" };
-		continuing = false;
 		updateWidget(ctx);
 		persistState();
 		ctx.ui.notify("PiDeck 目标已完成。", "info");
@@ -118,7 +115,6 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 
 	function setBlocked(ctx: ExtensionContext, reason: string): void {
 		state = { ...state, enabled: true, phase: "blocked", blockReason: reason };
-		continuing = false;
 		updateWidget(ctx);
 		persistState();
 		ctx.ui.notify(`PiDeck 目标已阻塞：${reason}`, "warning");
@@ -157,7 +153,6 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 					roundsStarted: 0,
 					maxGoalRounds: DEFAULT_MAX_ROUNDS,
 				};
-				continuing = false;
 				updateWidget(ctx);
 				persistState();
 				ctx.ui.notify("PiDeck 目标已清除。", "info");
@@ -254,9 +249,6 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 
 	pi.on("agent_end", async (event, ctx) => {
 		if (!state.enabled || state.phase !== "active") return;
-		if (continuing) {
-			continuing = false;
-		}
 
 		const lastAssistant = Array.isArray(event?.messages)
 			? [...event.messages].reverse().find(isAssistantMessage)
@@ -296,7 +288,6 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 		persistState();
 
 		// 同一会话自动续轮：不把续轮指令显示在时间线，避免刷屏。
-		continuing = true;
 		kickOffContinuation();
 	});
 
@@ -325,7 +316,6 @@ export default function piDeckGoalModeExtension(pi: ExtensionAPI): void {
 				maxGoalRounds: DEFAULT_MAX_ROUNDS,
 			};
 		}
-		continuing = false;
 		updateWidget(ctx);
 	});
 }

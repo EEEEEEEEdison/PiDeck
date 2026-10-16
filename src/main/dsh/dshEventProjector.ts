@@ -610,7 +610,7 @@ export function projectDshEvent(
 				const toolName = typeof target.meta?.toolName === "string" ? target.meta.toolName : "tool";
 				// 与 PI 同一套 detailText（工具/状态/参数/结果）；结果正文用已截断的 text，
 				// 超长仍走 meta.fullText + truncated，展开区「查看完整输出」契约不变。
-				const detailText = formatToolDetail(toolName, target.meta?.args, text || undefined, isError, translate);
+				const detailText = formatToolDetail(toolName, target.meta?.args, text || undefined, isError ? "error" : "done", translate);
 				const detailDelivery = truncateDetailWithMeta(detailText, translate);
 				const keepFullText = truncated || detailDelivery.truncated;
 				messages[targetIndex] = {

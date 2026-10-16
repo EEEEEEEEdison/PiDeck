@@ -6,6 +6,7 @@ import { createMathPlugin } from "@streamdown/math";
 import { MarkdownLink, remarkLinkifyPaths } from "./MarkdownLink";
 import { markdownUrlTransform } from "./MarkdownLinkCore";
 import { remarkGfmNoSingleTilde } from "../../utils/markdownPlugins";
+import { remarkInlineMathGuard } from "../../utils/markdownInlineMath";
 import { normalizeMathDelimiters } from "../../utils/normalizeMathDelimiters";
 import { FormulaCopyLayer } from "./FormulaCopyLayer";
 import { useSmoothStream } from "../../utils/useSmoothStream";
@@ -19,15 +20,17 @@ import { IncrementalMarkdownFrontier, UNSTABLE_TAIL_BLOCKS } from "./markdown/in
  * 只解析 $$...$$；而 AI 输出行内公式普遍用单美元 $...$（如 $E=mc^2$），
  * 不开则整句原样输出（用户可见的“公式没渲染”）。
  * 开启单美元的安全边界（remark-math 行为）：必须成对的 $...$ 才解析，
- * 单独的 $5、$HOME 等不受影响；副作用是 “$5 and $6” 这类成对美元会被当
- * 行内公式（与 GitHub math 渲染行为一致，可接受）。
+ * 单独的 $5、$HOME 等不受影响；成对但内容不是公式的写法（`报价 $5 元，含税 $6 元`）
+ * 由 remarkInlineMathGuard 在 mdast 层降级为原文，避免被 KaTeX 当公式渲染（2026-10）。
  */
 const mathPlugin = createMathPlugin({ singleDollarTextMath: true });
 
 // 流式精简插件集合：必须是模块级稳定引用（不能每帧内联 []）——
 // pipe 的 useMemo 依赖 resolvedRemarkPlugins，内联新数组会让 pipe 每帧重建，
 // FrozenMarkdownChunk 的 memo 比较 props.pipe 引用变化 → 冻结 prefix 每帧全量重解析。
-const NO_STREAM_REMARK_PLUGINS: Parameters<typeof Streamdown>[0]["remarkPlugins"] = [];
+// 行内公式判别挂在这里的原因：plugins.math 流式期间也生效，不同步会让中文货币文本
+// 流式中被 KaTeX 渲染、settle 后变回原文，出现可见闪变。
+const NO_STREAM_REMARK_PLUGINS: Parameters<typeof Streamdown>[0]["remarkPlugins"] = [remarkInlineMathGuard];
 const NO_STREAM_REHYPE_PLUGINS: Parameters<typeof Streamdown>[0]["rehypePlugins"] = [];
 
 /**
@@ -188,7 +191,7 @@ export const MarkdownStream = memo(function MarkdownStream(props: {
 	const streamPlain = (isStreamingNow && displayText.length > STREAM_LIGHT_MAX_CHARS) || (frozenSplit !== undefined && frozenSplit.prefixEnd === 0 && displayText.length > STREAM_UNFREEZABLE_MIN_CHARS);
 	// 流式中精简插件：gfm/codeMeta/linkifyPaths 与 math 等插件都留到静态渲染；
 	// 外部显式传入的插件（FileDiffViewer 等场景）不受流式精简影响。
-	const resolvedRemarkPlugins = isStreamingNow ? NO_STREAM_REMARK_PLUGINS : (props.remarkPlugins ?? [remarkGfmNoSingleTilde, defaultRemarkPlugins.codeMeta, remarkLinkifyPaths]);
+	const resolvedRemarkPlugins = isStreamingNow ? NO_STREAM_REMARK_PLUGINS : (props.remarkPlugins ?? [remarkGfmNoSingleTilde, remarkInlineMathGuard, defaultRemarkPlugins.codeMeta, remarkLinkifyPaths]);
 	const resolvedRehypePlugins = isStreamingNow ? NO_STREAM_REHYPE_PLUGINS : (props.rehypePlugins ?? [defaultRehypePlugins.raw]);
 	// 显式 Components 标注：让 a 的 props 走上下文类型推断（streamdown 的
 	// Components 是「具名槽位 | 索引签名」联合，直接内联会触发索引签名分支的类型不兼容）

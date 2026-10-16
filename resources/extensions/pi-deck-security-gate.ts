@@ -332,7 +332,13 @@ export default async function securityGateExtension(pi: ExtensionAPI) {
 		if (!level) return undefined;
 		const hint = buildSecurityHint(level);
 		if (!hint) return undefined;
-		return { systemPrompt: (ctx.getSystemPrompt?.() ?? "") + "\n\n" + hint };
+		// 返回 systemPrompt 的语义是「整体替换本轮系统提示」（pi docs/extensions.md:104），
+		// 所以基准必须非空：旧写法 `(ctx.getSystemPrompt?.() ?? "") + "\n\n" + hint` 在拿不到
+		// 基准时会用空串当底，把整条系统提示覆盖成「只剩安全提示」（issue #357-04）。
+		// 宁可不注入这条边界提示，也不能毁掉系统提示。
+		const base = ctx.getSystemPrompt?.();
+		if (!base) return undefined;
+		return { systemPrompt: base + "\n\n" + hint };
 	});
 
 	pi.on("tool_call", async (event: ToolCallEvent, ctx: ExtensionContext) => {

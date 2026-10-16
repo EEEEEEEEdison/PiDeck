@@ -58,16 +58,15 @@ const STAGING_ROOT = "pi-deck-trash-guard";
 
 const LOG_PREFIX = "[pi-deck-trash-guard]";
 
-/** POSIX 删除族：目标参数以 `-` 开头视为标志（rmdir 归入 Windows 族：/ 标志） */
+/** POSIX 删除族：目标参数以 `-` 开头视为标志 */
 const POSIX_DELETE_COMMANDS = new Set(["rm", "unlink"]);
-/** Windows 删除族（cmd/powershell 风格）：目标参数以 `/` 开头视为标志 */
+/** Windows cmd 删除族（del/erase/rd/rmdir）：目标参数以 `/` 开头视为标志（rmdir 见 deleteFlagStyle） */
 const WINDOWS_DELETE_COMMANDS = new Set(["del", "erase", "rd", "rmdir"]);
 /** PowerShell 删除族：目标参数以 `-` 开头视为标志 */
 const POWERSHELL_DELETE_COMMANDS = new Set(["remove-item", "ri"]);
 /**
  * 删除命令前可出现的前缀包装（跳过后继续识别）。
- * 注意：跨平台集合统一小写比较；rmdir 在 POSIX/Windows 都存在，按
- * 「-/ 标志都能匹配」处理（见 isFlagToken）。
+ * 注意：跨平台集合统一小写比较。
  */
 const COMMAND_PREFIXES = new Set(["sudo", "doas", "nohup", "command", "exec"]);
 
@@ -214,14 +213,25 @@ export function tokenizeSegment(segment: string): string[] {
 	return tokens;
 }
 
+/**
+ * 命令族的标志前缀风格。
+ * 归属看命令字而不是运行平台，只有 `rmdir` 例外：POSIX(coreutils) 与 Windows cmd 同名，
+ * 但语义相反（`rmdir -p` vs `rmdir /s /q`）。若一律按 Windows 族处理，POSIX 下
+ * `rmdir /tmp/x` 的绝对路径会被当成 `/` 标志而整个目标漏管（不会被送进回收站）；
+ * 反之按 POSIX 族处理，Windows 下 `/s`、`/q` 只会被当成不存在的路径，
+ * 被 collectDeleteTargets 的存在性过滤丢掉，无副作用。因此按 process.platform 判定。
+ */
+function deleteFlagStyle(command: string): "-" | "/" | "none" {
+	if (POSIX_DELETE_COMMANDS.has(command) || POWERSHELL_DELETE_COMMANDS.has(command)) return "-";
+	if (WINDOWS_DELETE_COMMANDS.has(command)) return command === "rmdir" && process.platform !== "win32" ? "-" : "/";
+	return "none";
+}
+
 /** 该命令族的目标参数里，什么前缀算标志 */
 function isFlagToken(command: string, token: string): boolean {
-	if (POSIX_DELETE_COMMANDS.has(command) || POWERSHELL_DELETE_COMMANDS.has(command)) {
-		return token.startsWith("-") && token.length > 1;
-	}
-	if (WINDOWS_DELETE_COMMANDS.has(command)) {
-		return token.startsWith("/") && token.length > 1;
-	}
+	const style = deleteFlagStyle(command);
+	if (style === "-") return token.startsWith("-") && token.length > 1;
+	if (style === "/") return token.startsWith("/") && token.length > 1;
 	return false;
 }
 

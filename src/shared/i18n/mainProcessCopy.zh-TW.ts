@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: c7e13f73ea9def1fdb7ca1875079fbadf36615bb4fbcf44670415d188db22c3c（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 4e5066a33ca88ae1230750782da73b06551768d7224a6084038448d4a3fd7e1c（来自 src/shared/i18n/mainProcessCopy.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import type { MainProcessTranslationKey } from "./mainProcessCopy";
 
@@ -271,6 +271,7 @@ export const mainProcessZhTW: Record<MainProcessTranslationKey, string> = {
 	"mainTool.status": "狀態：{status}",
 	"mainTool.failed": "失敗",
 	"mainTool.done": "完成",
+	"mainTool.running": "執行中",
 	"mainTool.arguments": "引數：\n{value}",
 	"mainTool.result": "結果：\n{value}",
 	"mainTool.details": "詳情：\n{value}",

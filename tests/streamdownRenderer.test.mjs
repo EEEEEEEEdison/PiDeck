@@ -216,6 +216,12 @@ test("streaming overlong guard: plain-text fallback above STREAM_LIGHT_MAX_CHARS
 	// 三元可能被格式化到同一行：用 \s* 容忍换行。
 	assert.match(stream, /resolvedRehypePlugins = isStreamingNow\s*\?\s*NO_STREAM_REHYPE_PLUGINS/);
 	assert.doesNotMatch(stream, /isStreamingNow\s*\?\s*\[\]/);
+	// 行内公式判别（非公式的 $...$ 降级为原文）必须同时挂在流式与静态两套列表：
+	// 只挂静态会让中文货币文本流式中被 KaTeX 渲染、settle 后变回原文（可见闪变）；
+	// 只挂流式则静态渲染丢失判别（2026-10 issue 357）
+	assert.match(stream, /import \{ remarkInlineMathGuard \} from "\.\.\/\.\.\/utils\/markdownInlineMath"/);
+	assert.match(stream, /NO_STREAM_REMARK_PLUGINS:[\s\S]{0,160}?= \[remarkInlineMathGuard\]/);
+	assert.match(stream, /remarkGfmNoSingleTilde,\s*remarkInlineMathGuard/);
 });
 
 test("settle full render is deferred to idle (no long task during interaction)", () => {

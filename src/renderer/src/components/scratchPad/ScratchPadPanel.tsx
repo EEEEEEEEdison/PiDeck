@@ -4,6 +4,7 @@ import remarkBreaks from "remark-breaks";
 import remarkMath from "remark-math";
 import { Download, Eye, FilePlus, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
 import { remarkGfmNoSingleTilde } from "../../utils/markdownPlugins";
+import { remarkInlineMathGuard } from "../../utils/markdownInlineMath";
 import { MarkdownStream } from "../session/MarkdownStream";
 import { continueListOnNewline, normalizeOrderedLists, prepareTaskListPreview } from "./scratchPadLists";
 import type { Plugin } from "unified";
@@ -241,7 +242,7 @@ export const ScratchPadPanel = memo(function ScratchPadPanel(props: ScratchPadPa
 							key={`scratch-pad-${content}`}
 							text={prepareTaskListPreview(content)}
 							onOpenExternal={() => undefined}
-							remarkPlugins={[remarkGfmNoSingleTilde, remarkMath, remarkBreaks]}
+							remarkPlugins={[remarkGfmNoSingleTilde, remarkInlineMathGuard, remarkMath, remarkBreaks]}
 							rehypePlugins={[rehypeKatex, rehypeHighlightMark]}
 							components={{
 								/* GFM task list：用 AST 节点行号直接定位源码行，避免 render-order 计数器漂移 */

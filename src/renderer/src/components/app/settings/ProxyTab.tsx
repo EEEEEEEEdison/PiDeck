@@ -12,7 +12,7 @@ import { desktopApi } from "../../../desktopApi";
 // 分组折叠复用模型选择器同一套机制：groupModelsByProvider 按提供商分组 +
 // commandPickerExpansion 的「派生默认展开 + 用户覆盖」纯状态机（搜索激活时强制展开）。
 import { groupModelsByProvider } from "../../session/sessionPickerOptions";
-import { hasPiProxyListFilter } from "../../../../../shared/piProxyList";
+import { configuredProviderSummariesFromModelsConfig, hasPiProxyListFilter, splitUnlistedProviders, type ConfiguredProviderSummary } from "../../../../../shared/piProxyList";
 import { INITIAL_PICKER_GROUP_SELECTION, applyPickerGroupAction, resolveGroupExpanded, type PickerGroupSelection } from "../../ui-shadcn/commandPickerExpansion";
 
 /** 代理相关字段：用于判断代理 tab 是否有未保存变更。 */
@@ -41,10 +41,10 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 	// 模型白名单候选：从 models.json 拉全量（与会话模型选择器同一数据源），保留 AvailableModel 结构，
 	// 搜索可同时命中 provider/modelId 与显示名。
 	const [availableModelList, setAvailableModelList] = useState<AvailableModel[] | null>(null);
-	// models.json 里配置的供应商名（独立于模型条目）：供应商只建了名字还没加模型时，
-	// pi --list-models 不会输出它 → 白名单候选里完全看不到，用户以为刷新丢了供应商。
-	// 这里单独读出并展示为「无模型供应商」小节，点击可跳转到 Pi 管理 → 模型 补模型。
-	const [configProviderNames, setConfigProviderNames] = useState<string[]>([]);
+	// models.json 里配置的供应商（名称 + 模型条目数，独立于 pi 的报告）：pi 只列出凭据可解析的
+	// 供应商，因此「配置里有、报告里没有」有两种原因——有模型但凭据解析不到（补 API Key / 登录），
+	// 或只建了供应商名还没加模型（补模型）。分开展示，避免把人指向错误的修复动作（issue #356）。
+	const [configProviders, setConfigProviders] = useState<ConfiguredProviderSummary[]>([]);
 	const [modelSearch, setModelSearch] = useState("");
 	const [proxyListLoading, setProxyListLoading] = useState(false);
 	// 手动刷新：绕过缓存重新 fork pi --list-models（白名单候选加载不出来时重试）。
@@ -57,7 +57,7 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 			const [report, configResult] = await Promise.all([desktopApi.projects.listModelsReport(undefined, force), desktopApi.config.getModels().catch(() => null)]);
 			// 无 provider 的模型无法参与 provider/modelId 匹配（策略层直接跳过），不进名单候选。
 			setAvailableModelList(report.models.filter((m) => m.provider && m.id));
-			setConfigProviderNames(configResult?.parsed ? Object.keys(configResult.parsed.providers ?? {}).sort((a, b) => a.localeCompare(b)) : []);
+			setConfigProviders(configuredProviderSummariesFromModelsConfig(configResult?.parsed));
 		} catch {
 			setAvailableModelList([]);
 		} finally {
@@ -73,7 +73,7 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 				if (cancelled) return;
 				// 无 provider 的模型无法参与 provider/modelId 匹配（策略层直接跳过），不进名单候选。
 				setAvailableModelList(models.filter((m) => m.provider && m.id));
-				setConfigProviderNames(configResult?.parsed ? Object.keys(configResult.parsed.providers ?? {}).sort((a, b) => a.localeCompare(b)) : []);
+				setConfigProviders(configuredProviderSummariesFromModelsConfig(configResult?.parsed));
 			})
 			.catch(() => {
 				if (!cancelled) setAvailableModelList([]);
@@ -128,19 +128,13 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 	}, [initialSelectedModelKeys]);
 	const groupedVisibleModels = useMemo(() => groupModelsByProvider(visibleModels), [visibleModels]);
 	const visibleProviders = useMemo(() => Object.keys(groupedVisibleModels).sort((a, b) => a.localeCompare(b)), [groupedVisibleModels]);
-	// models.json 里配置了名字、但还没有任何模型条目的供应商：pi --list-models 不会
-	// 输出它们，若不单独展示，用户刷新后会误以为“代理配置检测不到新加的供应商”。
-	const emptyProviderNames = useMemo(() => {
-		const withModels = new Set(visibleProviders);
-		const query = modelSearchQuery;
-		return configProviderNames
-			.filter((name) => {
-				if (withModels.has(name)) return false;
-				if (query && !name.toLowerCase().includes(query)) return false;
-				return true;
-			})
-			.sort((a, b) => a.localeCompare(b));
-	}, [configProviderNames, visibleProviders, modelSearchQuery]);
+	// 「models.json 里有、pi 报告里没有」的供应商：pi 只列凭据可解析的供应商，
+	// 若不单独展示并写清原因，用户刷新后会误以为「代理配置检测不到新加的供应商」。
+	// 搜索态下按名称收窄（与下方模型列表同一查询），判据与分组都走 shared 纯函数。
+	const unlistedProviders = useMemo(() => {
+		const scoped = modelSearchQuery ? configProviders.filter((provider) => provider.name.toLowerCase().includes(modelSearchQuery)) : configProviders;
+		return splitUnlistedProviders(scoped, visibleProviders);
+	}, [configProviders, visibleProviders, modelSearchQuery]);
 	const toggleProviderGroup = useCallback(
 		(provider: string) => {
 			setGroupSelection((current) =>
@@ -281,13 +275,30 @@ export const ProxyTab = memo(function ProxyTab(props: ProxyTabProps) {
 									<div className="flex flex-col gap-1 rounded-md border border-amber-500/25 bg-amber-500/5 p-2">{extraModelKeys.map(renderExtraRow)}</div>
 								</div>
 							)}
-							{/* 只加了供应商名、还没加模型的供应商：pi --list-models 不会出现它们，
-                  这里单独列出提醒用户去 Pi 管理 → 模型 补模型（代理策略按 provider/modelId 匹配，没有模型无从配置） */}
-							{emptyProviderNames.length > 0 && !proxyListLoading && (
+							{/* 配置里有、pi 报告里没有的供应商，按原因分两类展示（issue #356）：
+								1) 有模型条目——pi 只列出凭据可解析的供应商，缺 API Key / 未登录时它的模型既不进
+									会话模型选择器、也不进白名单候选，提示补凭据；
+								2) 只建了供应商名——提醒去 Pi 管理 → 模型 补模型（代理策略按 provider/modelId 匹配）。 */}
+							{unlistedProviders.withModels.length > 0 && !proxyListLoading && (
+								<div className="flex flex-col gap-1">
+									<span className="px-0.5 text-micro font-medium text-muted-foreground">{t("settings.piProxyModelsUnlistedProviders")}</span>
+									<div className="flex flex-col gap-1 rounded-md border border-amber-500/25 bg-amber-500/5 p-2">
+										{unlistedProviders.withModels.map((providerName) => (
+											<div key={providerName} className="flex min-w-0 items-baseline gap-2 px-2 py-0.5">
+												<span className="min-w-0 flex-none font-mono text-caption text-foreground" title={providerName}>
+													{providerName}
+												</span>
+												<span className="min-w-0 truncate text-micro text-muted-foreground/80">{t("settings.piProxyModelsUnlistedHint")}</span>
+											</div>
+										))}
+									</div>
+								</div>
+							)}
+							{unlistedProviders.withoutModels.length > 0 && !proxyListLoading && (
 								<div className="flex flex-col gap-1">
 									<span className="px-0.5 text-micro font-medium text-muted-foreground">{t("settings.piProxyModelsNoModelProviders")}</span>
 									<div className="flex flex-col gap-1 rounded-md border border-border/60 bg-muted/20 p-2">
-										{emptyProviderNames.map((providerName) => (
+										{unlistedProviders.withoutModels.map((providerName) => (
 											<div key={providerName} className="flex min-w-0 items-baseline gap-2 px-2 py-0.5">
 												<span className="min-w-0 flex-none font-mono text-caption text-foreground" title={providerName}>
 													{providerName}

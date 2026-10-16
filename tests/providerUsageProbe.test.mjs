@@ -10,11 +10,13 @@ const ensureVersion = (url) => {
 	return `${url.replace(/\/+$/, "")}/v1`;
 };
 
-test("candidateApplies 命中 opencode 网关（zen 与 pi-ai 1.3.0 的 inference 前缀）", () => {
+test("candidateApplies 命中 opencode 网关（zen 与 inference 两种 host 路径）", () => {
 	const cand = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains && c.baseUrlContains.some((n) => n.includes("opencode")));
 	assert.ok(cand, "候选表应包含 opencode 适配器");
 	assert.equal(probe.candidateApplies(cand, "https://opencode.ai/zen/go/v1/", "openai-completions"), true);
-	assert.equal(probe.candidateApplies(cand, "https://opencode.ai/inference/go/v1/", "openai-completions"), true);
+	// pi-ai 1.3.0 起 catalog 把该网关写成 opencode.ai/inference，catalog 兜底的端点必须同样命中。
+	assert.equal(probe.candidateApplies(cand, "https://opencode.ai/inference/go/v1", "openai-completions"), true);
+	assert.equal(probe.candidateApplies(cand, "https://opencode.ai/inference/v1/", "openai-completions"), true);
 	assert.equal(probe.candidateApplies(cand, "https://api.openai.com/v1", "openai-completions"), false);
 });
 
@@ -158,10 +160,13 @@ test("parseUsageResponseBody credits 显式 remainingPath 优先", () => {
 });
 
 test("内置候选包含 DeepSeek balance 与 opencode periods", () => {
-	const opencode = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("opencode.ai/zen"));
+	const opencode = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.some((n) => n.startsWith("opencode.ai/")));
 	const deepseek = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains?.includes("api.deepseek.com"));
 	assert.ok(opencode);
 	assert.ok(deepseek);
+	// 1.3.0 的 host 改名不能把旧路径的匹配挤掉（用户 models.json / DSH 侧仍是 zen）。
+	assert.ok(opencode.baseUrlContains.includes("opencode.ai/zen"));
+	assert.ok(opencode.baseUrlContains.includes("opencode.ai/inference"));
 	assert.equal(deepseek.parse.kind, "balance");
 });
 
