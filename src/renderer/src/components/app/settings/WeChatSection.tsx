@@ -306,7 +306,7 @@ export function WeChatSection() {
 	if (loading) {
 		return (
 			<div className="text-muted-foreground flex items-center gap-2 text-sm">
-				<Loader2 className="h-4 w-4 animate-spin" />
+				<Loader2 className="h-4 w-4 animate-pideck-spin" />
 				{t("config.wechat.loading")}
 			</div>
 		);
