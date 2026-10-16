@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 7f88290748b6f8184250484d3ab2513102d8139073740a04b80dbe8d1e76e1e9（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: aa9148c5c55fac5c539ad9ed02579ed149866d20b7c5d89e0b3b22dd12e250f5（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -3286,6 +3286,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.fetchModels": "獲取模型列表",
 	"config.fetchingModels": "獲取中…",
 	"config.field.apiKey": "API Key",
+	"config.field.apiKeyEmptyHint": "pi 只列出能解析憑據的供應商：留空且未登入時，該供應商的模型不會出現在會話模型選擇器和代理名單裡。",
 	"config.field.apiType": "API 型別",
 	"config.field.baseUrl": "Base URL",
 	"config.field.type": "型別",
@@ -4839,6 +4840,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.piProxyModelsExtras": "已選但不在當前列表（模型可能已被刪除/改名）",
 	"settings.piProxyModelsNoModelProviders": "僅配置了供應商（暫無模型）",
 	"settings.piProxyModelsNoModelHint": "去 Pi 管理 → 模型 新增模型後即可配置代理",
+	"settings.piProxyModelsUnlistedProviders": "已配置但 pi 未列出",
+	"settings.piProxyModelsUnlistedHint": "pi 只列出能解析憑據的供應商：在 Pi 管理 → 模型 裡補 API Key，或先用 /login 登入，再回來重新整理",
 	"settings.enableWebService": "啟用 Web 服務",
 	"settings.environment": "環境",
 	"settings.foundPi": "已找到 {version}",

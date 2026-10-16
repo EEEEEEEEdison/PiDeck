@@ -27,6 +27,11 @@ test("main window records renderer load diagnostics", () => {
 	assert.match(source, /mainWindow\.webContents\.on\(\s*"console-message"/);
 	assert.match(source, /event\.level/);
 	assert.match(source, /Main window renderer console error/);
+	// 渲染层 console 镜像降档（issue 357 类）：error→warn、warning→info，
+	// 不让第三方/框架噪音进 EnvironmentDoctor 的「最近 7 天报错」统计；
+	// 真正的渲染层故障仍由 rendererLog（uncaught error）按 error 上报
+	assert.match(source, /appLogger\.log\(event\.level === "error" \? "warn" : "info"/);
+	assert.doesNotMatch(source, /appLogger\.warn\("app", "Main window renderer console error"/);
 });
 
 test("linux display workaround opens the main window without hidden pre-map", () => {

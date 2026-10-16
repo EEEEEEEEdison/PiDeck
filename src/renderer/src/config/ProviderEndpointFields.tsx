@@ -32,7 +32,13 @@ export function ProviderEndpointFields(props: {
 			)}
 			<div className="config-provider-field items-center">
 				<Label className="pl-0.5 text-left text-xs font-medium text-text-secondary">{t("config.field.apiKey")}</Label>
-				<SecretInput value={props.apiKey} onChange={props.onChangeApiKey} />
+				<div className="flex min-w-0 flex-col gap-1">
+					<SecretInput value={props.apiKey} onChange={props.onChangeApiKey} />
+					{/* 空 Key 是 issue #356 的现场：PiDeck 允许保存不带 Key 的供应商，而 pi 只列出凭据
+					    可解析的供应商，于是「设置页有、会话与代理名单没有」。登录（/login）或环境变量
+					    同样算凭据，所以只陈述条件，不断言「一定列不出」；填了 Key 就不再占地方。 */}
+					{props.backend !== "dsh" && props.apiKey.trim() === "" && <span className="text-micro leading-relaxed text-text-tertiary">{t("config.field.apiKeyEmptyHint")}</span>}
+				</div>
 			</div>
 		</>
 	);

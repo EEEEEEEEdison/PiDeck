@@ -45,6 +45,10 @@ test("pi goal extension auto-continues until complete, blocked, or max rounds", 
 	assert.match(extension, /triggerTurn: true, deliverAs: "followUp"/);
 	assert.match(extension, /phase: "paused"/);
 	assert.match(extension, /\["clear", "reset"\]/);
+	// issue #357-05：删除写而不读的 continuing 变量。它曾被 8 处赋值、
+	// 仅有的读取是 `if (continuing) { continuing = false; }` 自重置（无任何行为）。
+	// 回流即视为重新引入“看似有状态机、实际死代码”。
+	assert.doesNotMatch(extension, /\bcontinuing\b/);
 });
 
 test("goal/plan composer chrome：模式身份只用边框着色 + 单枚 chip（无左侧竖条、无独立退出药丸）", () => {

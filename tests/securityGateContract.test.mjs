@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createRequire } from "node:module";
 import test from "node:test";
+import ts from "typescript";
+import vm from "node:vm";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
+
+const nodeRequire = createRequire(import.meta.url);
 
 /**
  * 安全门集成契约测试：
@@ -125,4 +132,98 @@ test("安全管理 tab 必须 forceMount：切 tab 不能卸载草稿（allow/as
 	assert.match(configModal, /<SecuritySection ref=\{securitySectionRef\} onDirtyChange=\{handleSecurityDirtyChange\}/);
 	// 脏标记必须能被保存流程消费（saveByKey 的 security 分支）
 	assert.match(configModal, /case "security":\s*\n\s*return securitySectionRef\.current\?\.save\(\) \?\? false;/);
+});
+
+/**
+ * 行为回归（issue #357-04）：before_agent_start 的系统提示注入只能「追加」。
+ *
+ * pi 的 extension 契约（docs/extensions.md:104）：返回 systemPrompt / 设 forceSystemPrompt
+ * 的语义是「整体替换本轮系统提示」。旧写法 `(ctx.getSystemPrompt?.() ?? "") + "\n\n" + hint`
+ * 在拿不到基准（ctx 无该方法或返回空）时，会把整条系统提示覆盖成「只剩安全提示」。
+ * 修复后的验收：拿不到非空基准 → 放弃注入（返回 undefined），绝不返回空底替换。
+ */
+function loadSecurityGateHarness(snapshotPath, sessionId) {
+	const source = readFileSync("resources/extensions/pi-deck-security-gate.ts", "utf8");
+	const output = ts.transpileModule(source, {
+		compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
+		fileName: "pi-deck-security-gate.ts",
+	}).outputText;
+	const module2 = { exports: {} };
+	vm.runInNewContext(
+		output,
+		{
+			module: module2,
+			exports: module2.exports,
+			// type-only import 编译后消失：运行时不需要 pi 模块，其余走真实 node 内置模块
+			require: (specifier) => (specifier === "@earendil-works/pi-coding-agent" ? {} : nodeRequire(specifier)),
+			process: { ...process, env: { ...process.env, PIDECK_SECURITY_CONFIG: snapshotPath, PIDECK_SESSION_ID: sessionId } },
+			console,
+			Buffer,
+			setTimeout,
+			clearTimeout,
+		},
+		{ filename: "pi-deck-security-gate.ts" },
+	);
+	const handlers = new Map();
+	module2.exports.default({ on: (event, handler) => handlers.set(event, handler), appendEntry() {} });
+	return handlers.get("before_agent_start");
+}
+
+function writeSnapshotFile(dir, levelDefaults = {}) {
+	const snapshotPath = join(dir, "security-policy.json");
+	writeFileSync(
+		snapshotPath,
+		JSON.stringify({
+			schemaVersion: 1,
+			enabled: true,
+			defaultLevelId: "standard",
+			levels: [
+				{
+					id: "standard",
+					name: "标准",
+					description: "",
+					toolActions: {},
+					denyBashPatterns: ["rm -rf"],
+					pathPolicy: "workspace",
+					customAllowDirs: [],
+					denyDirs: [],
+					protectSensitivePaths: true,
+					defaultAction: "allow",
+					...levelDefaults,
+				},
+			],
+			sessionLevels: {},
+		}),
+	);
+	return snapshotPath;
+}
+
+test("before_agent_start: 有基准时追加安全提示（不丢原文）", () => {
+	const dir = mkdtempSync(join(tmpdir(), "security-gate-prompt-"));
+	try {
+		const handler = loadSecurityGateHarness(writeSnapshotFile(dir), "sess-1");
+		const result = handler({}, { getSystemPrompt: () => "BASE PROMPT" });
+		assert.ok(result && typeof result.systemPrompt === "string");
+		assert.ok(result.systemPrompt.startsWith("BASE PROMPT\n\n"), "必须保留原系统提示");
+		assert.match(result.systemPrompt, /当前会话启用了桌面端安全管理（等级: 标准）/);
+		assert.match(result.systemPrompt, /文件读写仅限工作目录/);
+		assert.match(result.systemPrompt, /rm -rf/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("before_agent_start: 拿不到非空基准时放弃注入（不能用空串覆盖系统提示）", () => {
+	const dir = mkdtempSync(join(tmpdir(), "security-gate-prompt-"));
+	try {
+		const handler = loadSecurityGateHarness(writeSnapshotFile(dir), "sess-1");
+		// ctx 没有 getSystemPrompt（老版本 pi / 替身实现）→ 之前会返回 systemPrompt = "\n\n" + hint
+		assert.equal(handler({}, {}), undefined);
+		// 返回空串同样视为「拿不到基准」（空串会整体替换掉系统提示）
+		assert.equal(handler({}, { getSystemPrompt: () => "" }), undefined);
+		// 有基准的正常路径不受影响（对照，避免上面两条靠「永远 undefined」蒙过）
+		assert.equal(typeof handler({}, { getSystemPrompt: () => "BASE" })?.systemPrompt, "string");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
