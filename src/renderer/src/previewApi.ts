@@ -1512,8 +1512,10 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 		},
 		yaoPrompts: {
-			list: async () => ({ categories: [], prompts: [], repoPath: "" }),
+			list: async () => ({ categories: [], prompts: [], repoPath: "", dbState: "missing" }),
 			detail: async () => ({ title: "", description: "", promptContent: "", fullContent: "" }),
+			onDbStateChange: (_callback) => () => {},
+			retryDb: async () => ({ state: "missing" }),
 			import: async (_slug, _category) => ({
 				name: _slug,
 				path: `C:/Users/preview/.pi/agent/prompts/${_slug}.md`,

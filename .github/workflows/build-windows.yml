@@ -38,6 +38,8 @@ jobs:
         run: npm run build && npx electron-builder --win nsis portable zip --${{ matrix.arch }} --publish never
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
+          XUE_INDEX_OS: win32
+          XUE_INDEX_ARCH: ${{ matrix.arch }}
 
       - name: Upload Windows ${{ matrix.arch }} artifact
         uses: actions/upload-artifact@v4

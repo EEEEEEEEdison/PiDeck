@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: aa9148c5c55fac5c539ad9ed02579ed149866d20b7c5d89e0b3b22dd12e250f5（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 22a08f37df618ef40396b87997d533675c6bfab312b27d382b55b27d748c6491（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -3460,6 +3460,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"editor.htmlPreview": "HTML 預覽",
 	"config.yaoAll": "全部",
 	"config.yaoNoData": "暫無提示詞資料",
+	"config.yaoDbPreparing": "正在獲取提示詞庫…",
+	"config.yaoDbDownloading": "正在下載提示詞庫…（{received}/{total} MB）",
+	"config.yaoDbDownloadingNoTotal": "正在下載提示詞庫…（已接收 {received} MB）",
+	"config.yaoDbFailed": "提示詞庫下載失敗",
+	"config.yaoDbRetry": "重試",
 	"config.yaoNoMatches": "未匹配到提示詞",
 	"config.yaoLoadError": "載入中文提示詞失敗，請稍後重試",
 	"config.yaoPreviewError": "載入提示詞詳情失敗，請稍後重試",

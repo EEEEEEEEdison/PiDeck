@@ -38,6 +38,8 @@ jobs:
         run: npm run build && npx electron-builder --linux AppImage deb tar.gz --${{ matrix.arch }} --publish never
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
+          XUE_INDEX_OS: linux
+          XUE_INDEX_ARCH: ${{ matrix.arch }}
 
       - name: Upload Linux ${{ matrix.arch }} artifact
         uses: actions/upload-artifact@v4

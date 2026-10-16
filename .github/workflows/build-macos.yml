@@ -52,6 +52,8 @@ jobs:
         run: npm run build && npx electron-builder --mac dmg zip --${{ matrix.arch }} --publish never
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
+          XUE_INDEX_OS: darwin
+          XUE_INDEX_ARCH: ${{ matrix.arch }}
 
       # 打包后门禁：bundle 必须有有效签名（无 Apple 证书时靠 build.mac.identity 的显式
       # ad-hoc，原因见 docs/release-process.md「打包验证」与 issue #347）。

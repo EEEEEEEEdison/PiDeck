@@ -393,6 +393,10 @@ export const ipcChannels = {
 	yaoPromptsList: "yao-prompts:list",
 	yaoPromptsDetail: "yao-prompts:detail",
 	yaoPromptsImport: "yao-prompts:import",
+	/** 提示词库 db 就绪状态推送（main→renderer；db 远程拉取进度/完成/失败） */
+	yaoPromptsDbState: "yao-prompts:db-state",
+	/** 用户点击重试：强制重新检查远程 db（绕过 TTL） */
+	yaoPromptsDbRetry: "yao-prompts:db-retry",
 	skillStoreSearch: "skill-store:search",
 	skillStoreImport: "skill-store:import",
 	// SkillHub（api.skillhub.cn）

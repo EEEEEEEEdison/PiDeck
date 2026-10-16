@@ -10,6 +10,7 @@ import type { AppLogger } from "../logging/AppLogger";
 import type { PromptManager } from "../prompts/PromptManager";
 import type { SkillManager } from "../skills/SkillManager";
 import type { XuePromptManager } from "../prompts/XuePromptManager";
+import type { XuePromptDbStore } from "../prompts/XuePromptDbStore";
 import type { ExtensionManager } from "../extensions/ExtensionManager";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 import type { ConfigManager } from "../config/ConfigManager";
@@ -19,6 +20,8 @@ export type StoreIpcDeps = {
 	promptManager: PromptManager;
 	skillManager: SkillManager;
 	xuePromptManager: XuePromptManager;
+	/** 提示词库 db 远程拉取服务（yaoPromptsDbRetry 用；可选保持 IPC 单测轻量）。 */
+	xuePromptDbStore?: () => XuePromptDbStore | null;
 	extensionManager: ExtensionManager;
 	projectResourceManager: ProjectResourceManager;
 	/** Project trust is checked before any store write; optional keeps isolated IPC tests lightweight. */
@@ -28,7 +31,7 @@ export type StoreIpcDeps = {
 	mainCopy: (key: string, params?: Record<string, string | number>) => string;
 };
 
-export function registerStoreIpc({ promptManager, skillManager, xuePromptManager, extensionManager, projectResourceManager, configManager, projectTrustPath, appLogger, mainCopy }: StoreIpcDeps): void {
+export function registerStoreIpc({ promptManager, skillManager, xuePromptManager, xuePromptDbStore, extensionManager, projectResourceManager, configManager, projectTrustPath, appLogger, mainCopy }: StoreIpcDeps): void {
 	const requireText = (value: unknown, label: string, maxLength = 4096): string => {
 		if (typeof value !== "string" || !value.trim() || value.length > maxLength) {
 			throw new Error(`Invalid ${label}.`);
@@ -526,6 +529,14 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 			}
 		},
 	);
+
+	// 提示词库 db 重试：失败后用户点击重试按钮触发，绕过 TTL 强制重查远程。
+	// 返回触发时刻快照（downloading/ready/failed），完成态经 yaoPromptsDbState 事件推送。
+	ipcMain.handle(ipcChannels.yaoPromptsDbRetry, async () => {
+		const dbStore = xuePromptDbStore?.() ?? null;
+		if (!dbStore) throw new Error(mainCopy("store.yaoListFailed"));
+		return dbStore.retry();
+	});
 
 	ipcMain.handle(ipcChannels.yaoPromptsDetail, async (_event, slug: string, category: string) => {
 		try {

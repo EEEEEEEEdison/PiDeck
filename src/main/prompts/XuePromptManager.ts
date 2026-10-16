@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { app } from "electron";
 import initSqlJs from "sql.js";
 import { PromptManager } from "./PromptManager";
+import type { XueIndexService, XueIndexOverlayEntry } from "./XueIndexService";
+import type { XuePromptDbStore } from "./XuePromptDbStore";
 import type { WslEnvironment } from "../wsl/WslPaths";
-import type { YaoPromptCategory, YaoPromptItem, YaoPromptListResult, YaoPromptDetailResult, PiPromptTemplateSummary } from "../../shared/types";
+import type { YaoPromptCategory, YaoPromptItem, YaoPromptListResult, YaoPromptDetailResult, PiPromptTemplateSummary, YaoPromptDbState } from "../../shared/types";
 
 /** 覆盖层模板条目（官方模板热更新 md，正文为明文、无需解压）。 */
 type OverlayPrompt = {
@@ -20,8 +22,12 @@ type OverlayPrompt = {
  * 基于 SQLite 的 XuePrompt 提示词管理器。
  *
  * 数据来源：xueprompt.com，爬取约 4000 条中文提示词，
- * 预先通过 scripts/convert-xueprompts.mjs 转换为 SQLite（含 FTS3 全文搜索）。
- * 数据库文件打包在 resources/xueprompts.db。
+ * 预先通过 scripts/convert-xueprompts.mjs 转换为 SQLite。
+ * 检索通道（按优先级）：
+ *   1. Go sidecar（XueIndexService，常驻进程内存检索，支持中文搜索）——deps 注入时启用；
+ *   2. sql.js WASM（逐次全库加载，语义完全相同，作为 sidecar 缺失/失败时的兜底）。
+ * db 来源（deps.dbStore 注入时）：userData 缓存（远程拉取）> 仓库 resources 副本；
+ * 未注入 deps 时维持旧形态（固定 resources/xueprompts.db），保证单测零改动。
  */
 export class XuePromptManager {
 	private readonly dbPath: string;
@@ -32,12 +38,15 @@ export class XuePromptManager {
 	 * 每次查询现取（覆盖层内容很少、读取开销可忽略），避免缓存失效时序问题。
 	 */
 	private readonly overlayDirProvider: () => string | null;
+	/** 检索通道依赖（装配层注入；缺省走纯 sql.js 旧路径）。 */
+	private readonly deps: { dbStore?: XuePromptDbStore; xueIndex?: XueIndexService };
 
-	constructor(home?: string, overlayDirProvider: () => string | null = () => null) {
+	constructor(home?: string, overlayDirProvider: () => string | null = () => null, deps: { dbStore?: XuePromptDbStore; xueIndex?: XueIndexService } = {}) {
 		const base = app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources");
 		this.dbPath = join(base, "xueprompts.db");
 		this.promptManager = new PromptManager(home);
 		this.overlayDirProvider = overlayDirProvider;
+		this.deps = deps;
 	}
 
 	private sqlPromise: ReturnType<typeof initSqlJs> | null = null;
@@ -152,14 +161,38 @@ export class XuePromptManager {
 	/**
 	 * 延迟初始化 sql.js（WASM 只需加载一次）
 	 */
-	private async getDb(): Promise<import("sql.js").Database> {
+	private async getDb(dbPath: string = this.dbPath): Promise<import("sql.js").Database> {
 		const SQL = await this.initSql();
 
-		if (!existsSync(this.dbPath)) {
-			throw new Error(`XuePrompt 数据库不存在: ${this.dbPath}`);
+		if (!existsSync(dbPath)) {
+			throw new Error(`XuePrompt 数据库不存在: ${dbPath}`);
 		}
-		const buffer = readFileSync(this.dbPath);
+		const buffer = readFileSync(dbPath);
 		return new SQL.Database(buffer);
+	}
+
+	/**
+	 * 解析当前可用 db：注入 dbStore 时走远程缓存链（惰性 ensureReady，含 TTL 节流），
+	 * 返回 null 表示无可用 db（远程拉取中/失败），调用方返回空态结果让渲染层显示进度/重试。
+	 */
+	private async resolveDb(): Promise<{ path: string | null; state: YaoPromptDbState }> {
+		const dbStore = this.deps.dbStore;
+		if (!dbStore) {
+			return { path: this.dbPath, state: "ready" };
+		}
+		const state = await dbStore.ensureReady();
+		if (state.state === "ready") return { path: state.path, state: "ready" };
+		return { path: null, state: state.state };
+	}
+
+	/** 空态结果（db 未就绪）：渲染层按 dbState 显示下载进度/重试。 */
+	private emptyListResult(state: YaoPromptDbState): YaoPromptListResult {
+		return { categories: [], prompts: [], repoPath: "", dbState: state };
+	}
+
+	/** 把覆盖层 Map 转成 sidecar 协议条目（无覆盖层时传空数组，Go 侧走纯 db 路径）。 */
+	private overlayEntriesOf(overlay: Map<string, OverlayPrompt>): XueIndexOverlayEntry[] {
+		return Array.from(overlay, ([slug, op]) => ({ slug, title: op.title, description: op.description, category: op.category, content: op.content }));
 	}
 
 	/**
@@ -170,7 +203,22 @@ export class XuePromptManager {
 	 * prompts 按 category/search 过滤并分页，同时返回 total 总数。
 	 */
 	async list(opts?: { category?: string; search?: string; page?: number; pageSize?: number }): Promise<YaoPromptListResult> {
-		const db = await this.getDb();
+		const { path: dbPath, state } = await this.resolveDb();
+		if (!dbPath) return this.emptyListResult(state);
+
+		// ── 通道 1：Go sidecar（常驻内存检索，支持中文搜索；失败自动降级）──
+		const xueIndex = this.deps.xueIndex;
+		if (xueIndex) {
+			const overlayEntries = this.overlayEntriesOf(this.readOverlayPrompts());
+			const result = await xueIndex.list(dbPath, { category: opts?.category, search: opts?.search, page: opts?.page, pageSize: opts?.pageSize, overlay: overlayEntries });
+			if (result.ok) {
+				return { ...result.value, repoPath: dbPath, dbState: "ready" };
+			}
+			// 降级不报错：sidecar 缺失（贡献者未构建）/超时都静默走 sql.js，商店始终可用
+		}
+
+		// ── 通道 2：sql.js 兑底（语义与 Go 完全一致，见 native/xue-index/store.go 对齐注释）──
+		const db = await this.getDb(dbPath);
 		try {
 			// 始终查询全部分类（数据量小，分类栏需要）
 			const catRows = db.exec("SELECT slug, name, count FROM xueprompt_categories ORDER BY count DESC");
@@ -182,7 +230,7 @@ export class XuePromptManager {
 
 			const overlay = this.readOverlayPrompts();
 			if (overlay.size === 0) {
-				return this.listFromDbOnly(db, categories, opts);
+				return this.listFromDbOnly(db, categories, dbPath, opts);
 			}
 
 			// ── 有官方模板覆盖层：db 全量取回后与 overlay 合并，再统一排序/分页/搜索 ──
@@ -258,14 +306,14 @@ export class XuePromptManager {
 			);
 
 			if (!opts) {
-				return { categories: mergedCategories, prompts: all.map((e) => e.item), repoPath: this.dbPath };
+				return { categories: mergedCategories, prompts: all.map((e) => e.item), repoPath: dbPath, dbState: "ready" };
 			}
 
 			const page = Math.max(1, opts.page ?? 1);
 			const pageSize = Math.max(1, Math.min(100, opts.pageSize ?? 20));
 			const offset = (page - 1) * pageSize;
 			const prompts = all.slice(offset, offset + pageSize).map((e) => e.item);
-			return { categories: mergedCategories, prompts, repoPath: this.dbPath, total: all.length, page, pageSize };
+			return { categories: mergedCategories, prompts, repoPath: dbPath, dbState: "ready", total: all.length, page, pageSize };
 		} finally {
 			db.close();
 		}
@@ -274,12 +322,12 @@ export class XuePromptManager {
 	/**
 	 * 无覆盖层时的原 db 查询路径（保持历史行为与性能，分页走 SQL LIMIT/OFFSET）。
 	 */
-	private async listFromDbOnly(db: import("sql.js").Database, categories: YaoPromptCategory[], opts?: { category?: string; search?: string; page?: number; pageSize?: number }): Promise<YaoPromptListResult> {
+	private async listFromDbOnly(db: import("sql.js").Database, categories: YaoPromptCategory[], dbPath: string, opts?: { category?: string; search?: string; page?: number; pageSize?: number }): Promise<YaoPromptListResult> {
 		if (!opts) {
 			// 向后兼容：全量查询
 			const promptRows = db.exec("SELECT slug, url, title, category, content, description FROM xueprompts ORDER BY category, title");
 			const prompts: YaoPromptItem[] = (promptRows[0]?.values ?? []).map((row: unknown[]) => this.rowToYaoPromptItem(row));
-			return { categories, prompts, repoPath: this.dbPath };
+			return { categories, prompts, repoPath: dbPath, dbState: "ready" };
 		}
 
 		// title 是明文 TEXT，可直接进 SQL；content / description 都是 gzip BLOB，
@@ -310,7 +358,7 @@ export class XuePromptManager {
 			});
 			const offset = (page - 1) * pageSize;
 			const prompts = matched.slice(offset, offset + pageSize).map((row: unknown[]) => this.rowToYaoPromptItem(row));
-			return { categories, prompts, repoPath: this.dbPath, total: matched.length, page, pageSize };
+			return { categories, prompts, repoPath: dbPath, dbState: "ready", total: matched.length, page, pageSize };
 		}
 
 		const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -323,7 +371,7 @@ export class XuePromptManager {
 		const promptRows = db.exec(`SELECT slug, url, title, category, content, description FROM xueprompts ${whereClause} ORDER BY category, title LIMIT ? OFFSET ?`, [...params, pageSize, offset]);
 		const prompts: YaoPromptItem[] = (promptRows[0]?.values ?? []).map((row: unknown[]) => this.rowToYaoPromptItem(row));
 
-		return { categories, prompts, repoPath: this.dbPath, total, page, pageSize };
+		return { categories, prompts, repoPath: dbPath, dbState: "ready", total, page, pageSize };
 	}
 
 	/**
@@ -358,26 +406,42 @@ export class XuePromptManager {
 	 * 获取单条提示词详情（覆盖层模板优先：官方模板热更新后，商店详情立即显示新正文）
 	 */
 	async detail(slug: string, category: string): Promise<YaoPromptDetailResult | null> {
+		const { path: dbPath } = await this.resolveDb();
+		// 详情由列表进入：列表有数据即 db 已就绪；db 不可用（极小概率窗口，如换库重启间隙）直接未命中
+		if (!dbPath) return null;
 		const overlay = this.readOverlayPrompts().get(slug);
 		if (overlay) {
-			const db = await this.getDb();
+			// overlay 命中：正文用覆盖层，标题/描述缺省时回退 db 同名条目（保持商店观感一致）。
+			// 优先 Go 通道取回退字段，不可用再 sql.js，两路字段同构
+			const xueIndex = this.deps.xueIndex;
+			if (xueIndex) {
+				const doc = await xueIndex.get(dbPath, slug);
+				if (doc.ok) {
+					return this.overlayDetailOf(overlay, doc.value ? { title: doc.value.title, url: doc.value.url, description: doc.value.description } : null, slug);
+				}
+			}
+			const db = await this.getDb(dbPath);
 			try {
-				// 标题/描述缺省时回退 db 同名条目，保持商店观感一致
 				const rows = db.exec("SELECT title, description, url FROM xueprompts WHERE slug = ?", [slug]);
 				const dbRow = rows[0]?.values?.[0];
-				const dbTitle = dbRow ? String(dbRow[0] ?? "") : "";
-				const dbDescription = dbRow ? this.blobToString(dbRow[1]) : "";
-				const dbUrl = dbRow ? String(dbRow[2] ?? "") : "";
-				const title = overlay.title ?? dbTitle ?? slug;
-				const description = overlay.description ?? dbDescription ?? "";
-				const fullContent = ["---", `title: ${title}`, `description: ${description}`, `source: xueprompt-overlay`, `url: ${dbUrl}`, "---", "", overlay.content].join("\n");
-				return { title, description, promptContent: overlay.content, fullContent };
+				return this.overlayDetailOf(overlay, dbRow ? { title: String(dbRow[0] ?? ""), description: this.blobToString(dbRow[1]), url: String(dbRow[2] ?? "") } : null, slug);
 			} finally {
 				db.close();
 			}
 		}
 
-		const db = await this.getDb();
+		const xueIndex = this.deps.xueIndex;
+		if (xueIndex) {
+			const doc = await xueIndex.get(dbPath, slug);
+			if (doc.ok) {
+				if (!doc.value) return null;
+				const { title, description, content, url } = doc.value;
+				const fullContent = ["---", `title: ${title}`, `description: ${description}`, `source: xueprompt`, `url: ${url}`, "---", "", content].join("\n");
+				return { title, description, promptContent: content, fullContent };
+			}
+		}
+
+		const db = await this.getDb(dbPath);
 		try {
 			const rows = db.exec("SELECT title, content, description, url FROM xueprompts WHERE slug = ?", [slug]);
 			if (!rows[0]?.values?.length) return null;
@@ -401,6 +465,15 @@ export class XuePromptManager {
 		} finally {
 			db.close();
 		}
+	}
+
+	/** overlay 命中时的详情组装（db 回退字段由调用方提供，Go/sql.js 两通道同构）。 */
+	private overlayDetailOf(overlay: OverlayPrompt, dbDoc: { title: string; description: string; url: string } | null, slug: string): YaoPromptDetailResult {
+		// 回退链：overlay 显式 title > db 同名 title > slug 文件名（原实现 db 无同名时得空串，回 slug 更可读且两通道一致）
+		const title = overlay.title ?? (dbDoc?.title || slug);
+		const description = overlay.description ?? (dbDoc?.description || "");
+		const fullContent = ["---", `title: ${title}`, `description: ${description}`, `source: xueprompt-overlay`, `url: ${dbDoc?.url ?? ""}`, "---", "", overlay.content].join("\n");
+		return { title, description, promptContent: overlay.content, fullContent };
 	}
 
 	/**

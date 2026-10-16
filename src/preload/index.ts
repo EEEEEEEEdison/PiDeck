@@ -39,6 +39,7 @@ import type { NoticeHistoryFileEntry, NoticeHistoryRecordInput } from "../shared
 import type { ReplyActionRule, ReplyActionsSaveResult, ReplyActionsSnapshot } from "../shared/types/replyActions";
 import type {
 	YaoPromptListResult,
+	YaoPromptDbSnapshot,
 	YaoPromptDetailResult,
 	AgentRuntimeState,
 	AppInfo,
@@ -1145,6 +1146,8 @@ const api = {
 		list: (opts?: { category?: string; search?: string; page?: number; pageSize?: number }) => ipcRenderer.invoke(ipcChannels.yaoPromptsList, opts) as Promise<YaoPromptListResult>,
 		detail: (slug: string, category: string) => ipcRenderer.invoke(ipcChannels.yaoPromptsDetail, slug, category) as Promise<YaoPromptDetailResult>,
 		import: (slug: string, category: string, projectId?: string) => ipcRenderer.invoke(ipcChannels.yaoPromptsImport, slug, category, projectId) as Promise<PiPromptTemplateSummary>,
+		onDbStateChange: (callback: (state: YaoPromptDbSnapshot) => void) => subscribe(ipcChannels.yaoPromptsDbState, callback),
+		retryDb: () => ipcRenderer.invoke(ipcChannels.yaoPromptsDbRetry) as Promise<YaoPromptDbSnapshot>,
 	},
 	extensions: {
 		list: (forceRefresh?: boolean) => ipcRenderer.invoke(ipcChannels.extensionsList, forceRefresh) as Promise<PiExtensionListResult>,

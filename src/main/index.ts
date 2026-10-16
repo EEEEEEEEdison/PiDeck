@@ -344,6 +344,8 @@ import { TelemetryService } from "./telemetry/TelemetryService";
 import { collectTelemetrySnapshot } from "./telemetry/telemetrySnapshot";
 import { PromptManager } from "./prompts/PromptManager";
 import { XuePromptManager } from "./prompts/XuePromptManager";
+import { XueIndexService } from "./prompts/XueIndexService";
+import { XuePromptDbStore } from "./prompts/XuePromptDbStore";
 import { SkillManager } from "./skills/SkillManager";
 import { readSkillContent } from "./skills/readSkillContent";
 import { ExtensionManager } from "./extensions/ExtensionManager";
@@ -541,6 +543,10 @@ let extensionManagerNativePackages: unknown[] | null = null;
 let configBackupManager: ConfigBackupManager | undefined;
 let promptManager: PromptManager;
 let xuePromptManager: XuePromptManager;
+/** 提示词库 Go sidecar 客户端（null = 未装配；进程生命周期与 app 一致）。 */
+let xueIndexService: XueIndexService | null = null;
+/** 提示词库 db 远程拉取/缓存服务；null = 未装配。 */
+let xuePromptDbStore: XuePromptDbStore | null = null;
 let skillManager: SkillManager;
 let extensionManager: ExtensionManager;
 /** 后台更新检查服务（启动延迟 + 2h 周期，无配额方案）；null = 未初始化。 */
@@ -4078,11 +4084,47 @@ app
 		});
 		registerContentStoreIpc(promptStoreUpdater, PROMPTS_STORE_CHANNELS);
 		registerContentStoreIpc(skillStoreUpdater, SKILLS_STORE_CHANNELS);
+		// 提示词库双通道装配：db 远程拉取（安装包不内置 db，首次使用从 Release 资产下载缓存）
+		// + Go sidecar 检索（常驻内存，中文搜索可用；缺失/失败自动降级 sql.js，商店始终可用）。
+		xuePromptDbStore = new XuePromptDbStore({
+			userDataDir: app.getPath("userData"),
+			repoResourceDir: () => (app.isPackaged ? null : join(app.getAppPath(), "resources")),
+			log: (domain, message, details) => void appLogger.info(domain, message, details),
+			onStateChange: (state) => {
+				// 推送前判 isDestroyed（窗口销毁后 send 会抛）；下载完成/失败时渲染层据此刷新空态
+				const win = mainWindow;
+				if (win && !win.isDestroyed()) win.webContents.send(ipcChannels.yaoPromptsDbState, state);
+			},
+		});
+		xueIndexService = new XueIndexService({
+			resolveBinaryPath: () => {
+				// 打包后：resourcesPath/xue-index/xue-index(.exe)（extraResources）；
+				// dev：仓库构建产物 resources/xue-index/bin/（scripts/dev.js 自动 fail-open 构建）
+				const dir = app.isPackaged ? join(process.resourcesPath, "xue-index") : join(app.getAppPath(), "resources", "xue-index", "bin");
+				const name = process.platform === "win32" ? "xue-index.exe" : "xue-index";
+				const path = join(dir, name);
+				return existsSync(path) ? path : null;
+			},
+			logger: {
+				debug: (m) => appLogger.debug("xue-index", m),
+				info: (m) => void appLogger.info("xue-index", m),
+				warn: (m) => void appLogger.warn("xue-index", m),
+				error: (m) => void appLogger.error("xue-index", m),
+			},
+		});
 		xuePromptManager = new XuePromptManager(
 			undefined,
 			// 官方模板覆盖层叠加：热更新后商店列表/详情立即显示覆盖层版本
 			() => promptStoreUpdater.resolveEffectiveOverlayDir(),
+			{ dbStore: xuePromptDbStore, xueIndex: xueIndexService },
 		);
+		// 退出清理：结算在途请求并停掉 sidecar，避免退出阶段仍拉起进程
+		quitCleanup.register("xue-index", () => {
+			xueIndexService?.dispose();
+			xueIndexService = null;
+			xuePromptDbStore?.dispose();
+			xuePromptDbStore = null;
+		});
 		skillManager = new SkillManager(undefined, mainCopy);
 		// 内置技能覆盖层叠加：安装内置技能模板时覆盖层优先（修 bug/新增技能免发版）
 		skillManager.configureSkillOverlay(() => skillStoreUpdater.resolveEffectiveOverlayDir());
