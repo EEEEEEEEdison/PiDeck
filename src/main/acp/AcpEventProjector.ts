@@ -21,7 +21,7 @@
 import type { AcpContentBlock, AcpSessionUpdate, AcpStopReason, AcpToolCallUpdate } from "./acpProtocol";
 import { parseUsageUpdate, readAcpCommandsUpdate, readAcpSessionTitle, readAcpPlanEntries, toAcpCommands, type AcpSessionUsage } from "./acpWireTolerance";
 import { fallbackSessionTitle } from "../dsh/dshSessionTitleFold";
-import { defaultToolDetailTranslate, formatToolDetail } from "../../shared/formatToolDetail";
+import { defaultToolDetailTranslate, formatToolDetail, type ToolDetailStatus } from "../../shared/formatToolDetail";
 import type { TodoItem } from "../../shared/types/todo";
 import type { ChatMessage } from "../../shared/types/session";
 import type { PiCommand } from "../../shared/types/app";
@@ -135,7 +135,10 @@ function patchToolCard(existing: ChatMessage | undefined, update: AcpToolCallUpd
 	const isError = meta.status === "error";
 	meta.isError = isError;
 	const result = typeof meta.fullText === "string" && meta.fullText ? meta.fullText : meta.result;
-	meta.detailText = formatToolDetail(title, meta.args, result, isError, defaultToolDetailTranslate);
+	// 状态段取真实运行态：tool_call（pending/in_progress）也会烘焙 detailText，
+	// 只按 isError 二分会把还在跑的工具印成「完成」（与 PI 侧同一修复）。
+	const detailStatus: ToolDetailStatus = meta.status === "error" ? "error" : meta.status === "running" ? "running" : "done";
+	meta.detailText = formatToolDetail(title, meta.args, result, detailStatus, defaultToolDetailTranslate);
 	const base = existing ?? { id: nextMessageId(), agentId, role: "tool" as const, timestamp: Date.now() };
 	return { ...base, ...(contentImages !== undefined ? { images: contentImages.length > 0 ? contentImages : undefined } : {}), text: title, meta };
 }
