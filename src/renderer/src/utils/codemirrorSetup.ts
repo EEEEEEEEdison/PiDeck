@@ -160,10 +160,17 @@ const editorThemeSpec = {
 	".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-accent)" },
 	"&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, ::selection": {
 		backgroundColor: "var(--color-accent-soft)",
+		// 显式前景色：drawSelection 只接管选区背景，::selection 若不指定 color，
+		// GTK/Linux 的 UA 样式会用 highlighttext 把选区文字反白 —— 浅色选区上直接失读；
+		// currentColor 保持 token 自身颜色，不吞语法高亮。
+		color: "currentColor",
 	},
 	".cm-gutters": { backgroundColor: "transparent", color: "var(--color-text-tertiary)", border: "none", borderRight: "1px solid var(--color-border-subtle)", paddingRight: "2px" },
-	".cm-activeLine": { backgroundColor: "var(--color-bg-active)" },
-	".cm-activeLineGutter": { backgroundColor: "var(--color-bg-active)", color: "var(--color-text-primary)" },
+	// 当前行高亮：用主色的低透明度混色，而不是列表态的实色 --color-bg-active ——
+	// 实色铺满整行会把正文压进同色相底色（Windows ClearType 下笔画边缘发虚、字符发糊），
+	// 对齐 VS Code 的轻量行标记语义，明暗主题都随 accent 自然过渡。
+	".cm-activeLine": { backgroundColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)" },
+	".cm-activeLineGutter": { backgroundColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", color: "var(--color-text-primary)" },
 	// 折叠按钮：VS Code 风格 chevron（foldMarkerDOM 内联 SVG），hover 时圆角底色 + 主题色；折叠列宽由 CM6 自动测量
 	".cm-foldGutter .cm-gutterElement": { cursor: "pointer", textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center" },
 	".cm-foldGutter .cm-gutterElement .cm-fold-marker": {

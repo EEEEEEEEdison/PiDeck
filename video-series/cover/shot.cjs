@@ -1,6 +1,8 @@
-// 封面出图：node shot.cjs [--ratio both|16x9|3x4] [--scale 1|2] [--ep "..."] [--title 前半] [--accent 金色部分] [--lead "..."] [--chips "a, b, c"]
-// 原理：走 cover.html 里的 window.__buildPng（DOM → SVG foreignObject → canvas），
+// 封面出图：node shot.cjs [--file cover.html|pi-or-dsh.html] [--ratio both|16x9|3x4] [--scale 1|2]
+//                  [--ep "..."] [--title 前半] [--accent 金色部分] [--lead "..."] [--chips "a, b, c"]
+// 原理：走页面里的 window.__buildPng（DOM → SVG foreignObject → canvas），
 // 所以出图与浏览器里点「导出 PNG」完全同一条路径，不依赖额外渲染器。
+// --ep/--title/--accent/--lead/--chips 只对 cover.html 有意义（pi-or-dsh.html 用面板字段名）。
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
@@ -15,8 +17,13 @@ const flag = (name, def) => {
 	const i = argv.indexOf(`--${name}`);
 	return i >= 0 && argv[i + 1] ? argv[i + 1] : def;
 };
+const file = flag("file", "cover.html");
 const ratioArg = flag("ratio", "both");
 const scale = Number(flag("scale", "2"));
+if (!fs.existsSync(path.join(DIR, file))) {
+	console.error(`✗ --file 指向的封面源不存在：${file}`);
+	process.exit(1);
+}
 const ratios = ratioArg === "both" ? ["16x9", "3x4"] : [ratioArg];
 if (ratios.some((r) => !SIZE[r])) {
 	console.error(`✗ --ratio 只支持 both / 16x9 / 3x4，收到：${ratioArg}`);
@@ -37,7 +44,7 @@ function pngSize(buf) {
 	const page = await browser.newPage({ viewport: { width: 1400, height: 900 }, deviceScaleFactor: 1 });
 	const pageErrors = [];
 	page.on("pageerror", (e) => pageErrors.push(e.message));
-	await page.goto(pathToFileURL(path.join(DIR, "cover.html")).href);
+	await page.goto(pathToFileURL(path.join(DIR, file)).href);
 	await page.waitForTimeout(300);
 
 	const patched = await page.evaluate((over) => {
@@ -60,8 +67,8 @@ function pngSize(buf) {
 		const dataUrl = await page.evaluate((s) => window.__buildPng(s), scale);
 		const buf = Buffer.from(dataUrl.split(",")[1], "base64");
 		const [gotW, gotH] = pngSize(buf);
-		const ep = await page.evaluate(() => state.ep);
-		const out = path.join(DIR, `${ep.replace(/[^\w\u4e00-\u9fa5-]+/g, "")}_封面_${r}_${scale}x.png`);
+		const name = await page.evaluate(() => state.slug || state.ep);
+		const out = path.join(DIR, `${name.replace(/[^\w\u4e00-\u9fa5-]+/g, "")}_封面_${r}_${scale}x.png`);
 		if (gotW !== wantW * scale || gotH !== wantH * scale) {
 			// 先判定再落盘：尺寸不对就不写文件，避免拿错图去发
 			console.error(`✗ ${r} 出图尺寸异常：期望 ${wantW * scale}x${wantH * scale}，实得 ${gotW}x${gotH}`);

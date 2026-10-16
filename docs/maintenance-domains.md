@@ -166,3 +166,15 @@
 - **冷会话恢复提示**：`SessionAcpRestoreStrip`（纯函数 `utils/acpSessionRestore.resolveAcpRestoreHint`，单测 tests/acpSessionRestore.test.mjs）挂在 `SessionStartSurface` widgets 顶层，只有「backend=acp + acpSessionId + 未激活」才显示；绑定工具被删降级为只读引导。composer 占位符对 ACP 会话用 `app.composerAcpPlaceholder`（工具名来源：激活后 runtime.modelName，草稿期 acpToolId 查表）。
 - **图片能力门控**：`agentInfo.capabilities.promptImage` 来自 initialize 的 `promptCapabilities.image`；未声明时 `sendPrompt` 带图直接拒收（`acp.imagesNotSupported`），不然给不支持图的 agent 发 image 块只会换来整回合协议错误（acpCompatibility/acpRuntimeLifecycle 的物化用例显式声明 image=true）。
 - 已知未做（勿宣称完整支持）：冷历史自动恢复（catalog 恢复依赖 AcpMessagePage 游标）、真实 CLI smoke（`scripts/acpLiveSmoke.mjs` 需真实 agent，不进 CI）、工具卡图片渲染、`authenticate` RPC（AUTH_REQUIRED 目前只引导用户去终端登录，未拉起 agent 声明的 `authMethods`）。
+
+## Web 端流式链路（WebChatApp：/api/chat 一次性流 + /api/sessions/:id/stream 保活流）
+
+> 硬边界：Web 只有一条流式协议（AI SDK UIMessageStream，响应头 `x-vercel-ai-ui-message-stream: v1`）。任何后端都必须先翻译成同一形状的 pi 事件再进 `PiEventToUiMessageStream`；禁止在翻译器或前端里按后端分叉。
+
+- **两条连接语义相反**：`/api/chat`（useChat 一次性 fetch）非 keepAlive，finish 帧后必须补 `[DONE]` 并 `response.end()`，否则前端 status 永远停在 streaming；`/api/sessions/:id/stream`（外部流，页面可见且本页未发消息时订阅）keepAlive，finish 后换新适配器继续等下一轮，客户端在下一轮 `start` 帧上重置合并器。收尾统一走 `WebEventStreamRouter.emitFrames`（finish 帧后跟 `SSE_DONE`）。
+- **事件源按后端分别注入**（`bindPiSource` / `bindChannelSource`）：pi 走 `deps.subscribePiEvents`；DSH 等非 pi 后端走 `deps.subscribeAgentChannelEvents`——`src/main/index.ts` 注入时**只订 `dshAgentManager.onOutput`**，不能订 `compositeAgentGateway`（它把 pi 的 `agents:text-stream` 一并转发，会与 pi 源重复推帧）；`agents:state` 载荷是无 agentId 的数组，天然被过滤。缺这一层的表现就是「输出很慢」（只剩 3s 状态轮询 + 5s 防抖磁盘重拉）与「察觉不到结束/停止」（整轮没有 finish 帧）。未注入时静默退化为旧行为（fail-safe）。
+- **DSH 通道 → pi 事件**（`src/main/web/DshChannelToPiEvents.ts`，每条连接一份实例）：`agents:text-stream` / `agents:thinking` 是**累积全量文本**，用游标取增量后当 `text_delta`/`thinking_delta`；工具卡从 `agents:message` 快照补 input/output（首个消息帧是整会话历史，只保留在跑的卡与本轮新卡，否则刷新页面会把满屏旧卡片追加进当前回复）。
+- **回合边界只认 `turnEnded: true`**（由 `DshAgentManager` 在四处发：正常 turn/end、abort、停止后迟到的 turn/end、host 崩溃恢复；desktop 渲染层不读该字段）。`isStreaming=false` **不能**当收口信号——带工具调用的 `assistant/message` 也会把它置 false，而回合还在跑。
+- **停止的重复收口**：abort 先收一次，host 随后补发的 turn/end 会带同一份全文再收一次；翻译器用 `closedRunText` 忽略第二次，避免保活连接上重复上屏一条回复。
+- **状态推送**：通道事件同样触发 `scheduleStatePush()`（400ms 去抖），运行时忙闲翻转即时可达；5s tick 只兜不住事件流里的目录变更。
+- 回归集：`tests/webDshChannelStream.test.mjs`（翻译器 + 路由 + 契约）、`tests/webServiceDshStream.test.mjs`（真实 WebServiceManager + 真实 HTTP：帧序列 / 保活 / 状态推送）、`tests/webEventStream.test.mjs`、`tests/webExternalReplyMerger.test.mjs`。

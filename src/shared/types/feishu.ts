@@ -14,7 +14,8 @@ export type FeishuBotConfig = {
 	requireMention?: boolean;
 	/** 用户自己的 open_id（用于自动拉群时加入 user_id_list）。在飞书中给 Bot 发 /whoami 即可获取 */
 	defaultUserOpenId?: string;
-	/** 新建飞书会话使用的后端（pi/dsh）；缺省 = 跟随会话默认。已有绑定保持自己的 backend。 */
+	/** 新建飞书会话使用的后端（pi/dsh）；缺省 = 跟随会话默认。
+	 *  改这里会让已有绑定在下一条消息时换绑成新后端的新会话（换绑会主动回消息说明），原会话留在侧栏。 */
 	backend?: ImChannelBackend;
 };
 

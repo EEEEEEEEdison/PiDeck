@@ -2272,7 +2272,12 @@ async function createWindow() {
 	});
 	mainWindow.webContents.on("console-message", (event) => {
 		if (!["warning", "error"].includes(event.level)) return;
-		void appLogger.warn("app", "Main window renderer console error", {
+		// 渲染层 console 镜像只作排查线索，不参与健康统计：这里聚集的是第三方/框架的原始输出
+		// （KaTeX strict 警告、React 开发期提示等，实测 40k+ 行/天），按 error/warn 记会让
+		// EnvironmentDoctor 的「最近 7 天报错 / 警告明细」被噪音填满。降一档：error → warn、
+		// warning → info（仍按天写进日志文件，可检索）。真正的渲染层故障由 main.tsx 的
+		// rendererLog 显式上报（uncaught error / unhandled rejection），那条链路仍是 error。
+		void appLogger.log(event.level === "error" ? "warn" : "info", "app", "Main window renderer console error", {
 			level: event.level,
 			message: event.message,
 			line: event.lineNumber,
@@ -4641,6 +4646,15 @@ app
 			subscribePiEvents: (handler) => agentManager.addLocalEventListener((agentId, event) => handler(agentId, event as never)),
 			// agentId → sessionId 路由：pi 事件只有 agentId，SSE 连接按 session 订阅。
 			getSessionIdForAgent: (agentId) => sessionRuntimeCoordinator.getSessionId(agentId),
+			// 非 pi 后端（DSH）的通道事件：正文/思考/工具卡不在 pi 事件流里。只订 DSH 网关，
+			// 不能订 compositeAgentGateway（它把 pi 的 agents:text-stream 一并转发，会与上面
+			// 的 pi 事件源重复推帧）。agents:state 是数组无 agentId，天然被过滤。
+			subscribeAgentChannelEvents: (handler) =>
+				dshAgentManager.onOutput((channel, payload) => {
+					const agentId = payload && typeof payload === "object" && "agentId" in payload ? (payload as { agentId?: unknown }).agentId : undefined;
+					if (typeof agentId !== "string") return;
+					handler(agentId, channel, payload);
+				}),
 			listProjects: () => projectStore.list(),
 			createProject: (path) => projectStore.add(path, undefined, settingsStore.get().wslEnabled ? "wsl" : "windows"),
 			deleteProject: async (projectId) => {

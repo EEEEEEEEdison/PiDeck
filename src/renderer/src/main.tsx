@@ -48,7 +48,12 @@ window.addEventListener("error", (event) => {
 	// 资源加载失败（script/img）也会进 error 事件，但 event.error 通常为空；
 	// 这类错误不适合弹业务 toast，只记日志。
 	const isResourceError = event.target instanceof HTMLElement;
-	writeStartupLog("error", "Renderer uncaught error", {
+	// ResizeObserver loop 警告是 Chromium 的良性通知（同一帧内 RO 回调又触发 resize），
+	// Streamdown 动画 + resizable panels 组合下常见：只记日志、不弹错误 toast。
+	// 日志降到 info：这条会进 EnvironmentDoctor 的「最近 7 天报错」统计，
+	// 用 error 级别会让良性噪音顶掉真正的失败信号。
+	const isBenignResizeObserverLoop = typeof event.message === "string" && event.message.includes("ResizeObserver loop");
+	writeStartupLog(isBenignResizeObserverLoop ? "info" : "error", "Renderer uncaught error", {
 		message: event.message,
 		filename: event.filename,
 		lineno: event.lineno,
@@ -58,9 +63,6 @@ window.addEventListener("error", (event) => {
 	});
 	if (!isResourceError) {
 		const message = formatRuntimeError(event.error ?? event.message);
-		// ResizeObserver loop 警告是 Chromium 的良性通知（同一帧内 RO 回调又触发 resize），
-		// Streamdown 动画 + resizable panels 组合下常见；只记日志，不弹错误 toast 干扰用户。
-		const isBenignResizeObserverLoop = typeof event.message === "string" && event.message.includes("ResizeObserver loop");
 		if (message && !isBenignResizeObserverLoop) {
 			showNotice(`${t("app.runtimeErrorToast")}: ${message}`, 6000, "error");
 		}

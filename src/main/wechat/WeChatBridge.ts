@@ -22,12 +22,12 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import type { AgentRuntimeState, AgentTab, ImChannelBackend, WeChatBridgeStatus, WeChatChatBinding, WeChatModelChainEntry } from "../../shared/types";
+import type { AgentRuntimeState, AgentTab, ImChannelBackend, WeChatBindingModel, WeChatBridgeStatus, WeChatChatBinding, WeChatModelChainEntry } from "../../shared/types";
 import { IlinkClient, IlinkError, type IlinkLogFn } from "./IlinkClient";
 import { ILINK_CHANNEL_VERSION, MESSAGE_TYPE_USER, POLL_RETRY_FAST_MS, POLL_RETRY_SLOW_AFTER, POLL_RETRY_SLOW_MS, extractMessageText, hasUnsupportedItem, type IlinkMessage, type IlinkSession } from "./ilinkProtocol";
 import type { SessionRuntimeBindingGateway } from "../sessions/sessionRuntimeBinding";
 import type { SessionRunOutcome } from "../sessions/sessionRunWaiter";
-import { getAccount, getBinding, getDecryptedBotToken, getCursor, getPublicAccount, getSettings, isAllowedUser, loadBindings, markNeedsRelogin, normalizeModelChain, removeBinding, removeBindingsBySessionId, setCursor, upsertBinding } from "./WeChatConfig";
+import { getAccount, getBinding, getDecryptedBotToken, getCursor, getPublicAccount, getSettings, isAllowedUser, loadBindings, markNeedsRelogin, normalizeModelChain, removeBinding, removeBindingsBySessionId, setCursor, updateSettings, upsertBinding } from "./WeChatConfig";
 import { normalizeWeChatLocale, weChatLanguage, wechatT, type WeChatLocale, type WeChatTranslationKey } from "./WeChatI18n";
 import { pickLatestAssistantText, prepareOutgoingText, splitForWeChat } from "./weChatText";
 
@@ -469,6 +469,38 @@ export class WeChatBridge {
 		await this.applyRunModel(binding.sessionId, first);
 	}
 
+	/**
+	 * 该绑定会话当前实际在用的模型（设置页显示「当前会话模型」用）。
+	 *
+	 * 拿不到运行时（进程没起/状态未就绪）就返回 undefined：界面宁可少显示一行，
+	 * 也不能把上次点过的模型冒充成「现在用的模型」。
+	 */
+	async getBindingModel(binding: WeChatChatBinding): Promise<WeChatBindingModel | undefined> {
+		const state = await this.readRuntimeState(binding.sessionId);
+		if (!state?.provider || !state.modelId) return undefined;
+		return { provider: state.provider, modelId: state.modelId, modelName: state.modelName };
+	}
+
+	/**
+	 * 首次建立绑定时，把会话当前真实模型写进模型链链首。
+	 *
+	 * 为什么写进设置而不是只在界面上显示：链为空时设置页只有一句「使用会话当前模型」，
+	 * 用户看不到模型名，也没法据此调整顺序；写一条进链里，链首即新会话的默认模型，
+	 * 语义不变但看得见。只在链为空时播种：用户之后删掉链项是有意为之，不该被下一条消息写回来。
+	 */
+	private async seedModelChain(sessionId: string): Promise<void> {
+		// 播种只是让设置页看得见的锦上添花：读不到运行时或写设置失败都不能拖垮会话绑定。
+		try {
+			if (normalizeModelChain(getSettings().modelChain).length > 0) return;
+			const state = await this.readRuntimeState(sessionId);
+			if (!state?.provider || !state.modelId) return;
+			updateSettings({ modelChain: [{ provider: state.provider, modelId: state.modelId, modelName: state.modelName }] });
+			this.deps.logger?.("info", `微信已把会话当前模型写入模型链链首：${state.provider}/${state.modelId}`);
+		} catch (error) {
+			this.deps.logger?.("warn", "微信模型链播种失败（不影响本次回复）", error instanceof Error ? error.message : String(error));
+		}
+	}
+
 	/** 读最近一条助手消息并回信。超时补发与正常投递共用这一条路径。 */
 	private async deliverResult(target: { sessionId: string; chatId: string; contextToken: string; runId?: string }, sinceIndex = 0): Promise<void> {
 		// sinceIndex：顺延重试时只认本轮新产生的消息，否则会把上一次失败留下的错误文本当成结果回信。
@@ -588,12 +620,22 @@ export class WeChatBridge {
 	 * 失败就重新激活同一个 sessionId；只有 /new 才真的新建会话。
 	 */
 	private async ensureBinding(chatId: string, options?: { forceNew?: boolean }): Promise<WeChatChatBinding | undefined> {
-		const existing = options?.forceNew ? undefined : getBinding(chatId);
+		const current = getBinding(chatId);
+		const existing = options?.forceNew ? undefined : current;
 		if (existing) {
+			// 设置页换后端等于换引擎：旧绑定的会话文件与模型目录都属于另一个引擎，复用旧 sessionId
+			// 只会让它静默跑在旧引擎上（用户以为切了后端其实没切）。这种情况按换绑处理，开新会话。
+			const settingsBackend = getSettings().backend ?? "pi";
+			if ((existing.backend ?? "pi") !== settingsBackend) {
+				this.deps.logger?.("info", `微信会话后端变更（${existing.backend ?? "pi"} → ${settingsBackend}），换绑新会话`);
+				return this.activateBinding(existing, chatId, { backendChanged: true });
+			}
 			const agentId = await this.authorizeRuntimeAgent(existing);
 			if (agentId) return { ...existing, agentId };
 		}
-		return this.activateBinding(existing, chatId);
+		// firstBinding 只在「这个 chat 从来没绑过」时为真：/new 与换后端都是用户有意的动作，
+		// 不该顺手把用户清空的模型链又写回来（见 seedModelChain）。
+		return this.activateBinding(existing, chatId, { firstBinding: current === undefined });
 	}
 
 	/** 句柄复用必须同时满足「进程还活着」与「网关认可同一个稳定 sessionId」。 */
@@ -617,26 +659,35 @@ export class WeChatBridge {
 		}
 	}
 
-	private async activateBinding(existing: WeChatChatBinding | undefined, chatId: string): Promise<WeChatChatBinding | undefined> {
+	/**
+	 * 新建/恢复会话并写回绑定。
+	 *
+	 * `backendChanged` 表示本次激活是设置页把渠道后端换成了另一个引擎（pi ↔ dsh）：旧绑定的
+	 * sessionId/sessionPath 与模型都作废（跨引擎没有可续的历史，模型目录也不是同一套词汇），
+	 * 必须真的开新会话，否则新后端只是设置里的摆设。
+	 *
+	 * `firstBinding` 表示这个 chat 从来没绑过：此时把会话当前模型播种进模型链（见 seedModelChain）。
+	 */
+	private async activateBinding(existing: WeChatChatBinding | undefined, chatId: string, options?: { backendChanged?: boolean; firstBinding?: boolean }): Promise<WeChatChatBinding | undefined> {
 		const projects = this.deps.getProjects();
 		if (projects.length === 0) {
 			this.sendSafe(chatId, this.currentContextToken(chatId), this.t("project.required"));
 			return undefined;
 		}
 		const preferred = existing?.workspaceId || getSettings().defaultWorkspaceId || "";
-		// 工作区优先序：已有绑定 > 设置里的默认工作区 > 项目列表第一项（约等于最近使用）。
+		// 工作区优先序：已有绑定 > 设置里的默认工作区 > 项目列表第一项（约等于最近使用）。工作区不因换后端而变化。
 		const projectId = projects.some((project) => project.id === preferred) ? preferred : projects[0].id;
-		const title = existing ? "微信对话" : `微信 ${chatId.slice(-4)}`;
-		// 已有绑定沿用它的后端（缺省 pi）；只有新建绑定时看设置。设置只影响新建会话：
-		// 否则用户后来把设置改成 dsh，同一个聊天窗的老会话会被换成另一个引擎（历史与模型目录都对不上）。
-		const backend: ImChannelBackend = existing ? (existing.backend ?? "pi") : (getSettings().backend ?? "pi");
+		// 换后端走全新会话（标题也用新会话形态）；其余情况已有绑定沿用自身后端与模型，设置只影响新建绑定。
+		const reuse = options?.backendChanged ? undefined : existing;
+		const title = reuse ? "微信对话" : `微信 ${chatId.slice(-4)}`;
+		const backend: ImChannelBackend = reuse ? (reuse.backend ?? "pi") : (getSettings().backend ?? "pi");
 
 		try {
 			let session = await this.deps.runtimeBindings.ensureSession({
 				projectId,
 				title,
-				existingSessionId: existing?.sessionId,
-				sessionPath: existing?.sessionPath,
+				existingSessionId: reuse?.sessionId,
+				sessionPath: reuse?.sessionPath,
 				backend,
 				// 微信会话在侧栏带渠道标志，并像桌面会话一样由 pi 侧自动命名
 				// （桥给的「微信 xxxx」只是首条消息前的占位，不再锁死标题所有权）。
@@ -649,7 +700,7 @@ export class WeChatBridge {
 			} catch (error) {
 				// 历史 sessionPath 恢复失败（文件被删/格式变化）时退化为新会话，
 				// 而不是让这个 chat 永久卡在错误上。
-				if (!existing?.sessionPath) throw error;
+				if (!reuse?.sessionPath) throw error;
 				this.deps.logger?.("warn", "微信会话恢复失败，改新建", error instanceof Error ? error.message : String(error));
 				session = await this.deps.runtimeBindings.ensureSession({ projectId, title: `微信 ${chatId.slice(-4)}`, backend, channel: "wechat", autoTitle: true });
 				tab = await this.deps.runtimeBindings.activateRuntime(session.sessionId);
@@ -661,15 +712,23 @@ export class WeChatBridge {
 				sessionId: session.sessionId,
 				sessionPath: tab.sessionPath,
 				workspaceId: projectId,
-				modelId: existing?.modelId,
+				// 跨引擎的模型 id 不是同一套词汇，换绑后不留旧模型的 pin（留了只会连续选模失败）。
+				modelId: reuse?.modelId,
 				createdAt: existing?.createdAt ?? Date.now(),
 				agentId: tab.id,
 			};
 			upsertBinding(binding);
+			// 首次绑定：先把会话真在用的模型写进链首，让设置页一眼看到「现在用的是哪个模型」。
+			// DSH 的模型不是 pi 目录的词汇，链条对它是空计划，不播种。
+			if (options?.firstBinding && backend === "pi") await this.seedModelChain(binding.sessionId);
 			// 链条首项作为这个会话的默认模型；失败不阻断建会话（没有模型也能先回错误提示）。
 			await this.applyChainDefault(binding);
 			this.setStatus({ activeBindings: loadBindings().length });
 			this.notifyBindingsChanged();
+			if (options?.backendChanged) {
+				// 换绑后原会话的上下文不再延续，必须主动说明，否则用户会把「新会话没上下文」当成丢消息。
+				await this.sendSafe(chatId, this.currentContextToken(chatId), this.t("session.backendSwitched", { backend: backend === "dsh" ? "DSH" : "pi", id: session.sessionId.slice(0, 8) }));
+			}
 			return binding;
 		} catch (error) {
 			this.deps.logger?.("error", "微信会话激活失败", error instanceof Error ? error.message : String(error));

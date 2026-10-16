@@ -385,7 +385,7 @@ const SETTINGS_ROW_ANCHORS = [
 		tab: "appearance",
 		slug: "appearance-modules",
 		labelKey: "settings.modules.title",
-		keywords: ["隐藏模块", "功能模块", "隐藏", "显示模块", "hide", "modules", "收起", "dsh", "飞书", "桌宠", "生图", "输入框底栏", "模式选择器", "composer"],
+		keywords: ["隐藏模块", "功能模块", "隐藏", "显示模块", "hide", "modules", "收起", "dsh", "飞书", "桌宠", "生图", "功能提示", "响应提示", "tips"],
 	},
 
 	// ── Git ──────────────────────────────────────────────────────────

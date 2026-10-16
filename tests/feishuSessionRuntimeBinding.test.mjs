@@ -983,15 +983,18 @@ test("新建飞书会话带上 Bot 设置的后端并写进绑定", async () => 
 	assert.equal(bridge.listBindings()[0].backend, "dsh", "后端随会话记录在绑定上");
 });
 
-test("已有绑定用自己的后端：Bot 设置改成 pi 也不影响 dsh 会话", async () => {
+test("已绑定会话的后端就是 Bot 设置：仍按 dsh 语义提交（不重绑）", async () => {
 	const prompts = [];
-	const { bridge } = makeBridge([makeAgent("A")], { sendPrompt: async (input) => prompts.push(input) });
-	bridge.botConfig.backend = "pi";
+	const calls = { ensureSession: [] };
+	const { bridge } = makeBridge([makeAgent("A")], { sendPrompt: async (input) => prompts.push(input) }, calls);
+	bridge.botConfig.backend = "dsh";
 	bridge.connection.client = mockFeishuClient([]);
 	bindChat(bridge, "dsh");
 
 	await bridge.runAgent({ chatId: "chat", senderOpenId: "u", chatType: "p2p", messageId: "m" }, "hello", [], []);
 
+	assert.equal(calls.ensureSession[0]?.existingSessionId, "S1", "后端一致：仍复用同一个会话（不换绑）");
+	assert.equal(calls.ensureSession[0]?.backend, "dsh", "复用路径也要把会话自己的后端交给网关（命中已有会话时网关忽略它）");
 	assert.equal(prompts.length, 1);
 	assert.equal(prompts[0].agentMessage, undefined, "绑定后端是 dsh：DSH 拒收宿主指令，不能带 agentMessage");
 	assert.ok(prompts[0].message.includes("严禁调用 lark-cli"), "通道约束必须并进正文");
@@ -1001,9 +1004,49 @@ test("已有绑定用自己的后端：Bot 设置改成 pi 也不影响 dsh 会�
 	assert.equal(bridge.pendingCardEvents.size, 0, "非 pi 后端不得留事件缓冲注册项");
 });
 
+// 回归（用户报的“切了后端还在旧引擎里跑”）：换 Bot 后端必须换绑新会话，
+// 否则设置形同虚设——消息仍会提交给旧引擎的会话，用户只会看到“失忆”或“没变化”。
+test("切换 Bot 后端：老绑定换绑到新后端的新会话并说明原因", async () => {
+	const prompts = [];
+	const calls = { ensureSession: [] };
+	const listeners = [];
+	const { bridge } = makeBridge([makeAgent("A")], { sendPrompt: async (input) => prompts.push(input) }, calls);
+	bridge.botConfig.backend = "pi";
+	const sent = [];
+	bridge.connection.client = mockFeishuClient(sent);
+	bindChat(bridge, "dsh");
+	// pi 会话的回合收口走本地事件流（与最后一条用例同形）。
+	bridge.agentManager = {
+		addLocalEventListener: (handler) => {
+			listeners.push(handler);
+			return () => undefined;
+		},
+	};
+
+	const run = bridge.runAgent({ chatId: "chat", senderOpenId: "u", chatType: "p2p", messageId: "m" }, "hello", [], []);
+	for (let i = 0; i < 200 && prompts.length === 0; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+
+	assert.equal(calls.ensureSession.length, 1, "换后端要重新过网关建会话");
+	assert.equal(calls.ensureSession[0].backend, "pi", "新会话要用设置里的后端");
+	assert.equal(calls.ensureSession[0].existingSessionId, undefined, "不能续旧引擎的会话（跨引擎没有可续的历史）");
+	assert.equal(calls.ensureSession[0].sessionPath, undefined, "也不能带上旧引擎的会话文件");
+	assert.equal(bridge.listBindings()[0].backend, "pi", "绑定要改记新后端，否则下一条消息又要换一次");
+	assert.ok(
+		sent.some((call) => JSON.stringify(call.data ?? {}).includes("会话后端已切换")),
+		"换绑要主动说明，否则用户会以为会话无故失忆",
+	);
+	assert.equal(prompts.length, 1);
+	assert.ok(prompts[0].agentMessage?.includes("严禁调用 lark-cli"), "换到 pi 之后按 pi 的语义提交（宿主指令可用）");
+
+	for (const listener of listeners) listener("A", { type: "agent_end" });
+	await run;
+});
+
 test("dsh 回合失败时用等待器给出的错误原文回信", async () => {
 	const sent = [];
 	const { bridge } = makeBridge([makeAgent("A")], { sendPrompt: async () => undefined, waitForRunEnd: async () => ({ kind: "ended", failed: true, errorMessage: "供应商 500" }) });
+	// 绑定记着 dsh，Bot 设置也得是 dsh：否则会被认定为「用户刚换了后端」而换绑（那是另一条用例的主题）。
+	bridge.botConfig.backend = "dsh";
 	bridge.connection.client = mockFeishuClient(sent);
 	bindChat(bridge, "dsh");
 

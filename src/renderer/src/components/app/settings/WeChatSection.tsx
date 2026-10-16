@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Switch } from "../../ui-shadcn/switch";
 import { ConfirmDialog } from "../../app/AppParts";
 import { ModelPicker } from "../../session/ComposerComponents";
-import type { AvailableModel, ImChannelBackend, WeChatBridgeStatus, WeChatChatBinding, WeChatIpcResult, WeChatLoginState, WeChatModelChainEntry, WeChatSettings, WeChatSettingsSnapshot } from "../../../../../shared/types";
+import type { AvailableModel, ImChannelBackend, WeChatBindingModel, WeChatBindingView, WeChatBridgeStatus, WeChatIpcResult, WeChatLoginState, WeChatModelChainEntry, WeChatSettings, WeChatSettingsSnapshot } from "../../../../../shared/types";
 import { parseImChannelBackend } from "../../../../../shared/types";
 import { dshUiVisibilityFor } from "../../../../../shared/types/dshRuntime";
 import { dshRuntimeStatusAtom } from "../../../atoms/dsh-atoms";
@@ -41,10 +41,10 @@ type WeChatApiRaw = {
 	cancelLogin?: () => Promise<WeChatIpcResult<{ state: WeChatLoginState }>>;
 	submitVerifyCode?: (code: string) => Promise<WeChatIpcResult<{ state: WeChatLoginState }>>;
 	getLoginState?: () => Promise<WeChatLoginState>;
-	unbindChat?: (chatId: string) => Promise<WeChatIpcResult<{ removed: boolean; bindings: WeChatChatBinding[] }>>;
+	unbindChat?: (chatId: string) => Promise<WeChatIpcResult<{ removed: boolean; bindings: WeChatBindingView[] }>>;
 	onStatus?: (cb: (status: WeChatBridgeStatus) => void) => () => void;
 	onLoginState?: (cb: (state: WeChatLoginState) => void) => () => void;
-	onBindingsChanged?: (cb: (bindings: WeChatChatBinding[]) => void) => () => void;
+	onBindingsChanged?: (cb: (bindings: WeChatBindingView[]) => void) => () => void;
 };
 
 /** 登录阶段 → 文案 key。集中映射避免 JSX 里堆 switch。 */
@@ -83,6 +83,29 @@ function moveChainEntry(chain: WeChatModelChainEntry[], from: number, to: number
 function appendChainEntry(chain: WeChatModelChainEntry[], entry: WeChatModelChainEntry): WeChatModelChainEntry[] {
 	if (chain.some((item) => item.provider === entry.provider && item.modelId === entry.modelId)) return chain;
 	return [...chain, entry];
+}
+
+/**
+ * 链为空时那句提示要写出的「当前会话模型」。
+ *
+ * 只有唯一一条绑定拿得到模型时才给：多条绑定各跑各的会话，各有各的模型，写谁都是误导
+ * （那种情况逐条显示在绑定列表里）。拿不到运行时（进程没起）也返回 undefined，界面宁可少一行。
+ */
+function currentSessionModelLabel(bindings: WeChatBindingView[]): string | undefined {
+	const models = bindings.map((binding) => binding.currentModel).filter((model): model is WeChatBindingModel => Boolean(model));
+	if (models.length !== 1) return undefined;
+	const [model] = models;
+	return `${model.provider}/${model.modelName ?? model.modelId}`;
+}
+
+/**
+ * 绑定行第二行：工作区 + 后端 + 会话当前模型。
+ * 纯数据拼接（工作区 id、品牌名、模型 id 都不翻译），所以不占 i18n key。
+ */
+function describeBinding(binding: WeChatBindingView): string {
+	const parts = [binding.workspaceId, binding.backend === "dsh" ? "DSH" : "pi"];
+	if (binding.currentModel) parts.push(`${binding.currentModel.provider}/${binding.currentModel.modelName ?? binding.currentModel.modelId}`);
+	return parts.join(" · ");
 }
 
 export function WeChatSection() {
@@ -154,6 +177,9 @@ export function WeChatSection() {
 		});
 		const offBindings = api.onBindingsChanged?.((bindings) => {
 			setSnapshot((prev) => (prev ? { ...prev, bindings } : prev));
+			// 首次绑定/换绑时主进程会顺手把会话当前模型播种进模型优先级链，只吃推送里的
+			// bindings 会停在「绑定已建、链还是空的」。重拉快照同时拿到链与 currentModel。
+			void loadSnapshot();
 		});
 		return () => {
 			offStatus?.();
@@ -229,7 +255,7 @@ export function WeChatSection() {
 			if (!api?.unbindChat) return;
 			const result = await runAction(() => api.unbindChat?.(chatId) as Promise<WeChatIpcResult<Record<string, unknown>>>);
 			if (result.ok && "bindings" in result) {
-				const bindings = result.bindings as WeChatChatBinding[];
+				const bindings = result.bindings as WeChatBindingView[];
 				setSnapshot((prev) => (prev ? { ...prev, bindings } : prev));
 			}
 		},
@@ -292,6 +318,8 @@ export function WeChatSection() {
 	const bindings = snapshot?.bindings ?? [];
 	const projects = snapshot?.projects ?? [];
 	const modelChain = settings?.modelChain ?? [];
+	// 链为空时用绑定会话的真实模型补齐「现在用的是哪个模型」这句提示。
+	const currentSessionModel = currentSessionModelLabel(bindings);
 	// 渠道后端：只作用于新会话（老绑定自带后端）；未设置时与历史行为一致——pi。
 	const backend: ImChannelBackend = settings?.backend ?? "pi";
 	const dshAvailable = dshUiVisibilityFor(dshRuntimeState).canCreateDshSession;
@@ -443,7 +471,10 @@ export function WeChatSection() {
 						</Button>
 					</div>
 					{modelChain.length === 0 ? (
-						<span className="text-muted-foreground text-xs">{t("config.wechat.modelChainEmpty")}</span>
+						<>
+							<span className="text-muted-foreground text-xs">{t("config.wechat.modelChainEmpty")}</span>
+							{currentSessionModel ? <span className="text-muted-foreground text-xs">{t("config.wechat.currentSessionModel", { model: currentSessionModel })}</span> : null}
+						</>
 					) : (
 						modelChain.map((entry, index) => (
 							<div key={`${entry.provider}/${entry.modelId}`} className="border-border flex items-center justify-between gap-2 rounded-md border px-3 py-1.5">
@@ -490,17 +521,23 @@ export function WeChatSection() {
 				{bindings.length === 0 ? (
 					<span className="text-muted-foreground text-xs">{t("config.wechat.noBindings")}</span>
 				) : (
-					bindings.map((binding) => (
-						<div key={binding.chatId} className="border-border flex items-center justify-between gap-2 rounded-md border px-3 py-2">
-							<div className="flex flex-col">
-								<span className="text-foreground text-xs">{binding.chatId}</span>
-								<span className="text-muted-foreground text-xs">{binding.workspaceId}</span>
+					bindings.map((binding) => {
+						const description = describeBinding(binding);
+						return (
+							<div key={binding.chatId} className="border-border flex items-center justify-between gap-2 rounded-md border px-3 py-2">
+								<div className="flex min-w-0 flex-col">
+									<span className="text-foreground text-xs">{binding.chatId}</span>
+									{/* 工作区 + 后端 + 当前模型：用户在这里就能确认这个 chat 到底跑在哪个引擎、哪个模型上。 */}
+									<span className="text-muted-foreground truncate text-xs" title={description}>
+										{description}
+									</span>
+								</div>
+								<Button size="sm" variant="ghost" disabled={busy} onClick={() => void handleUnbind(binding.chatId)}>
+									{t("config.wechat.unbind")}
+								</Button>
 							</div>
-							<Button size="sm" variant="ghost" disabled={busy} onClick={() => void handleUnbind(binding.chatId)}>
-								{t("config.wechat.unbind")}
-							</Button>
-						</div>
-					))
+						);
+					})
 				)}
 			</div>
 

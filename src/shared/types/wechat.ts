@@ -42,8 +42,8 @@ export type WeChatSettings = {
 	defaultWorkspaceId?: string;
 	/**
 	 * 微信回复跑在哪个运行时后端（缺省 pi）。
-	 * 只影响**新会话**：已有绑定保持自己创建时的后端，改这里不会迁移旧会话。
-	 * 模型优先级链的条目必须与后端同源（pi 模型 / dsh 模型不能混用）。
+	 * 改这里会让已有绑定在下一条消息时换绑成新后端的新会话（换绑会主动回一条提示），
+	 * 原会话保留在桌面侧栏；模型优先级链的条目必须与后端同源（pi 模型 / dsh 模型不能混用）。
 	 */
 	backend?: ImChannelBackend;
 	/**
@@ -106,8 +106,9 @@ export type WeChatChatBinding = {
 	 */
 	agentId?: string;
 	workspaceId: string;
-	/** 这个绑定创建时用的运行时后端（缺省 pi）。跟着会话走，不跟设置走：
-	 *  设置里改后端只影响新建会话，否则旧会话会被换引擎（历史/模型目录都对不上）。 */
+	/** 这个绑定当前用的运行时后端（缺省 pi）。
+	 *  **跟会话走**：设置里改了后端，绑定会在下一条消息处换绑到新后端的新会话（原会话留在侧栏），
+	 *  而不是让同一个会话中途换引擎（跨引擎没有可续的历史，模型目录也不是同一套词汇）。 */
 	backend?: ImChannelBackend;
 	modelId?: string;
 	/** 微信里 /model 显式选中的 provider。有它才说明 modelId 是一次明确选择，
@@ -116,6 +117,20 @@ export type WeChatChatBinding = {
 	createdAt: number;
 };
 
+/** 绑定会话当前实际在用的模型（只读视图，来自运行时状态，不落盘）。 */
+export type WeChatBindingModel = {
+	provider: string;
+	modelId: string;
+	/** 展示用名称；运行时给不出时省略，界面回退到 modelId。 */
+	modelName?: string;
+};
+
+/**
+ * 给设置页看的绑定视图：落盘结构永远是 WeChatChatBinding，`currentModel` 由主进程按运行时现算。
+ * 只有拿到运行时状态（进程在跑）才有这个字段——界面据此显示「现在用的是哪个模型」。
+ */
+export type WeChatBindingView = WeChatChatBinding & { currentModel?: WeChatBindingModel };
+
 /**
  * 设置页一次拉齐用的快照。微信只可能有一个账号，分多次请求只会让
  * 「开关已变、状态未及」这类不一致更难排查。
@@ -123,7 +138,7 @@ export type WeChatChatBinding = {
 export type WeChatSettingsSnapshot = {
 	settings: WeChatSettings;
 	status: WeChatBridgeStatus;
-	bindings: WeChatChatBinding[];
+	bindings: WeChatBindingView[];
 	/** 可绑定的工作区；与飞书取自同一份项目列表。 */
 	projects: Array<{ id: string; name: string }>;
 };

@@ -23,7 +23,7 @@
 | `pipeline/render_episode.py` | 整集渲染：旁白脚本 + 批量合成 |
 | `pipeline/concat_series.py` | 多集成片拼接合集 |
 | `EP0X-narration.md`（可选） | 纯旁白长文稿，便于改词 |
-| `cover/cover.html` + `shot.cjs` + `check.cjs` | **视频封面源**：改文字/比例 → 导出 16:9（1920×1080）/ 3:4（1080×1440）封面 |
+| `cover/*.html` + `shot.cjs` + `check*.cjs` | **视频封面源**：`cover.html`（EP 系列）/ `pi-or-dsh.html`（介绍片「Pi Or Dsh？我全都要」），改文字/比例 → 导出 16:9（1920×1080）/ 3:4（1080×1440）封面 |
 | `poster/` | 与正片无关、作者自用：充值价目海报生成器（`price.mjs` 改价 → 出图） |
 
 ### 不要提交（生成物）

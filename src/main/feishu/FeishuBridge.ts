@@ -236,10 +236,13 @@ export class FeishuBridge {
 		}
 	}
 
-	private async ensureRuntimeBinding(binding: FeishuChatBinding): Promise<string | undefined> {
-		const activeAgentId = await this.authorizeRuntimeAgent(binding);
-		if (activeAgentId) return activeAgentId;
-		const resumed = await this.resumeOrCreateAgent(binding);
+	private async ensureRuntimeBinding(binding: FeishuChatBinding, options?: { forceNew?: boolean }): Promise<string | undefined> {
+		// 换后端时必须跳过句柄复用：旧句柄跑的还是旧引擎，复用它等于没换。
+		if (!options?.forceNew) {
+			const activeAgentId = await this.authorizeRuntimeAgent(binding);
+			if (activeAgentId) return activeAgentId;
+		}
+		const resumed = await this.resumeOrCreateAgent(binding, options);
 		return resumed?.agentId;
 	}
 
@@ -739,7 +742,19 @@ export class FeishuBridge {
 
 		// stable sessionId identifies the catalog record; all process operations use agentId.
 		if (binding) {
-			const runtimeAgentId = await this.ensureRuntimeBinding(binding);
+			// 设置里换了 Bot 后端 = 换引擎：旧绑定记的会话文件与模型目录都属于旧引擎，继续复用
+			// 只会让它静默跑在旧引擎上（用户以为切了后端其实没切）。这里改记新后端并强制开新会话，
+			// 由 resumeOrCreateAgent 回一条换绑说明。
+			// 旧绑定的 backend 缺省按 pi 算（功能上线前的绑定都是 pi），不能用 bindingBackend——
+			// 它会回落到当前 Bot 设置，把「老绑定 + 新设置」误判成一致，就永远不会换绑。
+			const settingsBackend = this.botBackend();
+			const currentBackend = binding.backend ?? "pi";
+			const switched = currentBackend !== settingsBackend;
+			if (switched) {
+				log(`[飞书 Bridge] 会话后端变更（${currentBackend} → ${settingsBackend}），换绑新会话`);
+				binding.backend = settingsBackend;
+			}
+			const runtimeAgentId = await this.ensureRuntimeBinding(binding, { forceNew: switched });
 			if (!runtimeAgentId) {
 				await this.sendSmartMessage(chatId, feishuT(this.locale, "session.restoreFailed"));
 				return;
@@ -1204,23 +1219,30 @@ export class FeishuBridge {
 	 * 再由 coordinator 激活 runtime。Bridge 不直接创建或停止 Agent。
 	 * 用 chatId 作为稳定 key（参考上游 ConversationManager 思路），
 	 * 会话文件持久化，重启后优先恢复而不是重建。
+	 *
+	 * `forceNew` 表示本次是设置页把 Bot 后端换成了另一个引擎（pi ↔ dsh）：旧 sessionId/sessionPath
+	 * 属于旧引擎（跨引擎没有可续的历史，模型目录也不是同一套词汇），必须真的开新会话。
 	 */
-	private async resumeOrCreateAgent(binding: FeishuChatBinding): Promise<FeishuChatBinding | undefined> {
+	private async resumeOrCreateAgent(binding: FeishuChatBinding, options?: { forceNew?: boolean }): Promise<FeishuChatBinding | undefined> {
 		const projects = this.getProjects();
 		if (projects.length === 0) {
 			log("[飞书 Bridge] 恢复会话失败：无可用项目");
 			return undefined;
 		}
 		const projectId = projects[0].id;
+		const forceNew = options?.forceNew === true;
 
 		try {
 			const title = binding.groupName || feishuT(this.locale, "group.defaultSession");
 			let session = await this.runtimeBindings.ensureSession({
 				projectId,
 				title,
-				existingSessionId: binding.sessionId,
-				sessionPath: binding.sessionPath,
+				existingSessionId: forceNew ? undefined : binding.sessionId,
+				sessionPath: forceNew ? undefined : binding.sessionPath,
 				channel: "feishu",
+				// 新建会话（首次恢复失败 / 换后端）一律带上会话自己的后端：不带就默默建成 pi，
+				// 让 dsh 绑定挂到 pi 会话上。已有会话命中时这个字段被忽略。
+				backend: this.bindingBackend(binding),
 			});
 			let tab: AgentTab;
 			try {
@@ -1241,7 +1263,7 @@ export class FeishuBridge {
 			this.chatBindings.set(binding.chatId, binding);
 			this.persistBindings();
 			this.pushBindings();
-			await this.sendSmartMessage(binding.chatId, feishuT(this.locale, "session.recovered", { id: binding.sessionId.slice(0, 8) }));
+			await this.sendSmartMessage(binding.chatId, feishuT(this.locale, forceNew ? "session.backendSwitched" : "session.recovered", { id: binding.sessionId.slice(0, 8), backend: this.bindingBackend(binding) === "dsh" ? "DSH" : "pi" }));
 			// 恢复的会话同样带 PIDECK_FEISHU_LINKED，ask 已禁用，同步提示用户。
 			await this.sendSmartMessage(binding.chatId, feishuT(this.locale, "session.askDisabled"));
 			return binding;
