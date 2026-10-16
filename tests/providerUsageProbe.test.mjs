@@ -10,10 +10,11 @@ const ensureVersion = (url) => {
 	return `${url.replace(/\/+$/, "")}/v1`;
 };
 
-test("candidateApplies 命中 opencode zen 网关", () => {
+test("candidateApplies 命中 opencode 网关（zen 与 pi-ai 1.3.0 的 inference 前缀）", () => {
 	const cand = probe.USAGE_PROBE_CANDIDATES.find((c) => c.baseUrlContains && c.baseUrlContains.some((n) => n.includes("opencode")));
 	assert.ok(cand, "候选表应包含 opencode 适配器");
 	assert.equal(probe.candidateApplies(cand, "https://opencode.ai/zen/go/v1/", "openai-completions"), true);
+	assert.equal(probe.candidateApplies(cand, "https://opencode.ai/inference/go/v1/", "openai-completions"), true);
 	assert.equal(probe.candidateApplies(cand, "https://api.openai.com/v1", "openai-completions"), false);
 });
 

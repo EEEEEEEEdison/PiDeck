@@ -72,7 +72,7 @@ function cleanup(dir) {
 test("catalog:update 成功：写入覆盖层并生效，状态可见", async () => {
 	const dir = tempDir();
 	try {
-		const artifact = makeArtifact("1.2.3-remote");
+		const artifact = makeArtifact("9.1.0-remote");
 		const updater = new PiAiCatalogUpdater({
 			userDataDir: dir,
 			fetchImpl: makeFetch(artifact),
@@ -85,7 +85,7 @@ test("catalog:update 成功：写入覆盖层并生效，状态可见", async ()
 		// 首次更新无备份
 		assert.equal(existsSync(join(dir, "pi-ai-catalog.json.bak")), false);
 		const status = updater.getStatus();
-		assert.equal(status.overlay?.packageVersion, "1.2.3-remote");
+		assert.equal(status.overlay?.packageVersion, "9.1.0-remote");
 		assert.equal(status.overlay?.entryCount, artifact.entryCount);
 		// builtin 来自真实 resources（开发态 cwd 项目根可解析到），只要求非空结构
 		assert.notEqual(status.builtin, null);
@@ -99,14 +99,14 @@ test("catalog:update 成功：写入覆盖层并生效，状态可见", async ()
 test("catalog:update 覆盖已有覆盖层：旧文件备份为 .bak", async () => {
 	const dir = tempDir();
 	try {
-		const artifact = makeArtifact("1.2.3-remote");
+		const artifact = makeArtifact("9.1.0-remote");
 		const updater = new PiAiCatalogUpdater({ userDataDir: dir, fetchImpl: makeFetch(artifact), timeoutMs: 200 });
 		await updater.update("main");
-		const next = makeArtifact("1.2.4-remote");
+		const next = makeArtifact("9.1.1-remote");
 		await new PiAiCatalogUpdater({ userDataDir: dir, fetchImpl: makeFetch(next), timeoutMs: 200 }).update("main");
 		assert.equal(existsSync(join(dir, "pi-ai-catalog.json.bak")), true);
 		assert.equal(readFileSync(join(dir, "pi-ai-catalog.json.bak"), "utf8"), artifact.catalogRaw);
-		assert.equal(updater.getStatus().overlay?.packageVersion, "1.2.4-remote");
+		assert.equal(updater.getStatus().overlay?.packageVersion, "9.1.1-remote");
 	} finally {
 		cleanup(dir);
 	}
@@ -173,7 +173,7 @@ test("catalog:update manifest 与内容不匹配：返回 validation 且不写�
 test("catalog:restoreBuiltin 有覆盖时：覆盖文件转 .bak 回到内置", async () => {
 	const dir = tempDir();
 	try {
-		const artifact = makeArtifact("1.2.3-remote");
+		const artifact = makeArtifact("9.1.0-remote");
 		const updater = new PiAiCatalogUpdater({ userDataDir: dir, fetchImpl: makeFetch(artifact), timeoutMs: 200 });
 		await updater.update("main");
 		const result = updater.restoreBuiltin();
@@ -203,16 +203,16 @@ test("catalog:restoreBuiltin 无覆盖时：视为成功（幂等）", async () 
 test("catalog:restorePrevious 从 .bak 恢复；无备份返回 no-backup", async () => {
 	const dir = tempDir();
 	try {
-		const artifact = makeArtifact("1.2.3-remote");
+		const artifact = makeArtifact("9.1.0-remote");
 		const updater = new PiAiCatalogUpdater({ userDataDir: dir, fetchImpl: makeFetch(artifact), timeoutMs: 200 });
 		await updater.update("main");
-		const newer = makeArtifact("1.3.0-remote");
+		const newer = makeArtifact("9.2.0-remote");
 		await new PiAiCatalogUpdater({ userDataDir: dir, fetchImpl: makeFetch(newer), timeoutMs: 200 }).update("main");
-		// 回滚到 1.2.3
+		// 回滚到 9.1.0
 		const result = updater.restorePrevious();
 		assert.equal(result.ok, true);
-		assert.equal(updater.getStatus().overlay?.packageVersion, "1.2.3-remote");
-		// 再恢复一次：.bak 已是 1.2.3，与当前一致仍视为成功（幂等可失败语义：有备份即恢复）
+		assert.equal(updater.getStatus().overlay?.packageVersion, "9.1.0-remote");
+		// 再恢复一次：.bak 已是 9.1.0，与当前一致仍视为成功（幂等可失败语义：有备份即恢复）
 		const second = updater.restorePrevious();
 		assert.equal(second.ok, true);
 		// 换一个无备份目录：no-backup
