@@ -64,9 +64,6 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
 /** pi 支持的传输协议枚举（transport 设置项，websocket-cached 为新协议，auto 为默认自动选择）。 */
 const TRANSPORT_OPTIONS = ["sse", "websocket", "websocket-cached", "auto"].map((v) => ({ value: v, label: v }));
 
-/** /share 上传目标（pi 1.3.0 新增 sessionShareDestination）：auto = 已登录 Radius 用 Radius，否则建 GitHub gist。 */
-const SHARE_DESTINATION_OPTIONS = ["auto", "gist", "radius"].map((v) => ({ value: v, label: v }));
-
 /** steering / follow-up 消息发送模式（pi 文档："all" 一次全部发送，"one-at-a-time" 逐条，默认 one-at-a-time）。 */
 const SEND_MODE_OPTIONS = ["all", "one-at-a-time"].map((v) => ({ value: v, label: v }));
 
@@ -134,7 +131,6 @@ export function SettingsTab(props: {
 			key !== "followUpMode" &&
 			key !== "defaultProjectTrust" &&
 			key !== "transport" &&
-			key !== "sessionShareDestination" &&
 			// 「工具与 Codemode」区块占用：不走「其他设置项」的 JSON 兜底
 			key !== "defaultTools" &&
 			key !== "codemode" &&
@@ -317,8 +313,6 @@ export function SettingsTab(props: {
 				return t("config.label.followUpMode");
 			case "transport":
 				return t("config.label.transport");
-			case "sessionShareDestination":
-				return t("config.label.sessionShareDestination");
 			case "httpProxy":
 				return t("config.label.httpProxy");
 			case "shellPath":
@@ -434,19 +428,6 @@ export function SettingsTab(props: {
 				<SettingRow title={<span>{configLabel("transport")}</span>} description={t("config.general.transportHint")} alignEnd={false}>
 					<ClearableSettingsInput empty={typeof data.transport !== "string" || !data.transport} onClear={() => props.onChange({ ...data, transport: "" })}>
 						<ConfigSelect value={typeof data.transport === "string" ? data.transport : ""} options={TRANSPORT_OPTIONS} onChange={(v) => props.onChange({ ...data, transport: v })} placeholder={t("config.general.transportPlaceholder")} />
-					</ClearableSettingsInput>
-				</SettingRow>
-
-				{/* sessionShareDestination（pi 1.3.0）：/share 上传目标；留空 = 删除键，回到 pi 默认 auto */}
-				<SettingRow title={<span>{configLabel("sessionShareDestination")}</span>} description={t("config.general.shareDestinationHint")} alignEnd={false}>
-					<ClearableSettingsInput
-						empty={typeof data.sessionShareDestination !== "string" || !data.sessionShareDestination}
-						onClear={() => {
-							const { sessionShareDestination: _removed, ...rest } = data;
-							props.onChange(rest);
-						}}
-					>
-						<ConfigSelect value={typeof data.sessionShareDestination === "string" ? data.sessionShareDestination : ""} options={SHARE_DESTINATION_OPTIONS} onChange={(v) => props.onChange({ ...data, sessionShareDestination: v })} placeholder={t("config.general.shareDestinationPlaceholder")} />
 					</ClearableSettingsInput>
 				</SettingRow>
 			</SettingsSection>

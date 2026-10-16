@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: c00f642c04126cf608ca2680f2e6c8058e9ec70ac07aba875262564bf0f6a7ef（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: aa9148c5c55fac5c539ad9ed02579ed149866d20b7c5d89e0b3b22dd12e250f5（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -3033,8 +3033,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.general.projectTrustHint": "RPC 模式不彈信任詢問，決定是否載入專案 .pi/settings.json 等資源：ask 忽略（預設）/ always 信任 / never 永不",
 	"config.general.transportPlaceholder": "auto（自動選擇）",
 	"config.general.transportHint": "多協議供應商的傳輸方式：sse / websocket / websocket-cached / auto",
-	"config.general.shareDestinationHint": "會話 /share 上傳目標：auto 已登入 Radius 時用 Radius，否則建立 GitHub gist；gist / radius 強制指定",
-	"config.general.shareDestinationPlaceholder": "auto（預設）",
 	"config.label.lastChangelogVersion": "上次更新日誌版本",
 	"config.label.customPrompt": "自定義提示詞",
 	"config.label.promptGuidelines": "提示詞指南",
@@ -3472,7 +3470,6 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.label.steeringMode": "引導訊息模式",
 	"config.label.followUpMode": "追問訊息模式",
 	"config.label.transport": "傳輸方式",
-	"config.label.sessionShareDestination": "分享目標",
 	"config.label.httpProxy": "HTTP 代理",
 	"config.label.shellPath": "Shell 路徑",
 	"config.label.shellCommandPrefix": "Shell 命令字首",
