@@ -29,12 +29,23 @@
 - md 格式：front matter 必填 `id` / `title` / `level`(info|warn|critical) / `publishedAt` / `effectiveUntil`（ISO 8601），可选 `minVersion`（仅向更低版本客户端展示）；`id` 必须稳定唯一（渲染层已读去重 key）且不含空白；下线公告 = 删除对应 md 文件重新生成，或等 `effectiveUntil` 自然过期。
 - 渲染安全边界：公告是外部数据。**列表卡片只展示 `announcementExcerpt()` 清洗后的短摘要（不渲染 md）**；「查看详情」弹窗复用 `MarkdownStream`（light 模式）渲染完整正文——与会话消息同一套 streamdown sanitize 管线。禁止在列表卡片直接渲染 md 或引入第二条公告渲染链。
 
-## 商店提示词库维护（resources/xueprompts.db）
+## 商店提示词库维护（resources/xueprompts.db 远程拉取 + xue-index Go sidecar）
 
-- 数据文件 `resources/xueprompts.db` 通过 `extraResources` 直接打进安装包（dev 读 `app.getAppPath()/resources`，打包版读 `process.resourcesPath`）。**改了 db 必须重新打包**，否则用户升级后仍看到旧数据。
-- 内置模板写入入口是 `scripts/add-builtin-prompts.mjs`（源文件 `docs/pi-prompt-templates/*.md`，跳过 README），归入分类 `编程提示词`，可重复执行（`INSERT OR REPLACE` + 分类 count 全量重算）。
-- `npm run check:xueprompts`（`scripts/check-xueprompts.mjs`）断言分类 count 与实际分组一致、内置模板全部落库且正文可解压，已挂进 `npm run build`，用于挡住「产物带旧库」这类问题。
-- **查询边界**：`content` / `description` 都是 gzip BLOB，**SQL 的 `LIKE` 对 BLOB 只做字节比较，中文关键词恒不命中**。所有涉及这两个字段的文本搜索必须在应用层 `gunzipSync` 解压后匹配（见 `XuePromptManager.list` 的 search 分支）；`title` 是明文 TEXT，可以走 SQL。
+- **db 不再打进安装包**（#2 远程化）：客户端首次使用时从 Release 资产拉取双源（AtomGit 主 + GitHub raw 兑底，`XuePromptDbStore`），sha256 版本文件与 db 必须同源成套（跨源指纹不匹配整体作废），缓存落 `<userData>/xue/xueprompts-<sha16>.db`，1h TTL 后台重查。db 有更新：跑 `node scripts/publish-xueprompts.mjs` → 两文件成套上传 Release 资产（`gh release upload <tag> resources/xueprompts.db resources/xueprompts.db.sha256`；AtomGit 侧由 sync-atomgit workflow 同步）。
+- dev 模式优先读仓库副本 `resources/xueprompts.db`（`repoResourceDir()`），打包后无副本强制远程。
+- **检索走 Go sidecar**（`native/xue-index`，modernc.org/sqlite 纯 Go）：常驻进程预解压建索引，中文搜索可用；宿主客户端 `XueIndexService`，协议 NDJSON stdio（`SESSIONS/XUE_INDEX_PROTOCOL_VERSION` 不匹配即弃用）。二进制缺失/失败自动降级 sql.js 路径（应用层逐行 gunzip，慢但可用），商店永不因 sidecar 缺席而坏。
+- 构建链：`npm run build:xue-index`（fail-open，无 Go 只告警）；`scripts/dev.js` 自动构建；三平台 workflow 经 `XUE_INDEX_OS/ARCH` env + setup-go 1.26 交叉编译（modernc.org/sqlite 要求 go 1.26，漏钉版本会静默跳过=包里没 sidecar）。
+- **查询边界（降级路径仍适用）**：`content` / `description` 都是 gzip BLOB，SQL `LIKE` 对 BLOB 只做字节比较，中文关键词恒不命中；降级路径的文本匹配必须在应用层 `gunzipSync` 后做（`XuePromptManager.list` search 分支），`title` 是明文 TEXT 可走 SQL。
+- 内置模板写入入口 `scripts/add-builtin-prompts.mjs`（源 `docs/pi-prompt-templates/*.md`），`npm run check:xueprompts` 挡「产物带旧库」，均在 build 链。
+
+## 跨会话正文搜索（session-index Go sidecar）
+
+- **能力**：侧栏搜索词（≥2 字符，debounce 300ms）除标题过滤外，在全部历史会话**正文**里搜词，跨项目命中展示在 `SessionContentSearchResults`（DshSearchResults 同模式），点击打开会话并经 `pendingMessageJumpAtom` 定位到首个命中消息（`ChatSessionPane` 聚焦后消费；消息未就绪时保留 pending，加载完成重试）。
+- **架构**：Go sidecar（`native/session-index`，纯标准库零依赖）预提取 user/assistant text 正文到语料文件（`<userData>/session-index/corpus.bin`，29MB 级 vs 源 1.67GB）+ 定长二进制快照 `state.json`（mtime/size 增量：全量首建 ≈12s，快照启动 37ms）。搜索=多核分片 ReadAt 扫描（纯 CJK 快路径 + ASCII 大小写折叠）。
+- **降级链（fail-open）**：无 sidecar/binary 缺失/boot 中/超时/roots 为空（WSL 不支持）→ IPC 一律返回 null → 渲染层只剩既有标题过滤，搜索入口永不报错。宿主客户端 `src/main/sessions/SessionIndexService.ts`（roots 签名变化重启、迟到响应丢弃、进程身份核对，与 XueIndexService 同哲学）。
+- **roots 口径**：`SessionScanner.resolveGlobalSearchRoots()` = 默认 `~/.pi/agent/sessions` + 全局 settings 的 sessionDir（项目级不进）；每次搜索前先 `refresh(roots)` 增量重扫（stat 毫秒级）保证新会话可搜；启动 5s 后台预热首建。
+- **构建链**：`npm run build:session-index`（fail-open）；`scripts/dev.js` 自动构建；三平台 workflow `SESSION_INDEX_OS/ARCH` env；纯标准库无 go.sum（setup-go 缓存清单只列 xue-index）。
+- 测试：`tests/sessionIndexService.test.mjs`（宿主协议生命周期 9 项）+ `tests/sessionContentSearchChain.test.mjs`（IPC 三处同步/降级 stub/挂载点源码契约 7 项）+ Go 侧 `native/session-index/*_test.go`。
 
 ## 内置扩展热更新（resources/extensions + userData 覆盖层）
 

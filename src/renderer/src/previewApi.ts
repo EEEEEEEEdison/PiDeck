@@ -618,6 +618,8 @@ export function createPreviewApi(): PiDesktopApi {
 		},
 		sessions: {
 			list: async () => getSessions(),
+			// 预览模式无 sidecar：null 让调用方回退标题过滤
+			searchContent: async () => null,
 			// 预览模式无 DSH host：空预设目录满足接口契约
 			listDshAgentPresets: async () => [],
 			getDshDefaultModel: async () => undefined,

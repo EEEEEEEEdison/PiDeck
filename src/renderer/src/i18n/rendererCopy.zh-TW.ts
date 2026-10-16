@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 8c806fcc69816d567e26ad801cf026b51b8d0651fbe67e15da14a542813000cd（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: b44343e7635bfc2c347c7c3fb2fb0a0abc143f94e173adc8d7336e12047437f6（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -1511,6 +1511,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"sessionChannel.feishu": "飛書",
 	"session.acpToolHint": "選擇 Agent CLI 工具（僅草稿期可改）",
 	"sidebar.dshSearchResults": "DSH 會話搜尋結果",
+	"sidebar.sessionContentResults": "正文命中 {count} 個會話",
+	"sidebar.sessionContentMatchCount": "{count} 處匹配",
+	"sidebar.sessionContentTruncated": "（僅顯示前 20 個）",
 	"session.backendPickerHint": "選擇後端（Pi / DSH / 生圖 / 生影片 / Agent CLI）",
 	"session.backendLockedHint": "後端已鎖定（已傳送訊息後不可切換）",
 	"session.backendLockedNotice": "會話已開始，後端已鎖定，無法再切換。如需更換後端，請新建一個會話。",

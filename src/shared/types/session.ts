@@ -540,3 +540,28 @@ export type SessionBranchTree = {
 	/** 当前叶子（活跃分支末端）；空会话为 null。 */
 	leafId: string | null;
 };
+
+// ── 跨会话全文搜索（Go session-index sidecar）────────────────────────────
+
+/** 单条正文命中：messageId 供渲染层调 jumpToMessage 定位到具体消息。 */
+export type SessionSearchMatch = {
+	messageId: string;
+	role: "user" | "assistant";
+	timestampMs: number;
+	/** 命中处前后文摘要（控制字符已折叠，单行展示）。 */
+	snippet: string;
+};
+
+/** 单个会话的命中集合。filePath 即 SessionRecord.id（跨重启稳定身份）。 */
+export type SessionSearchSessionHit = {
+	filePath: string;
+	updatedAtMs: number;
+	matches: SessionSearchMatch[];
+};
+
+export type SessionSearchResult = {
+	sessions: SessionSearchSessionHit[];
+	/** 命中会话总数（可能大于 sessions.length，后者按 limit 截断）。 */
+	totalHitSessions: number;
+	truncated: boolean;
+};

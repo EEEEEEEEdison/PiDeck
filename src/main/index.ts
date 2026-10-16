@@ -345,6 +345,7 @@ import { collectTelemetrySnapshot } from "./telemetry/telemetrySnapshot";
 import { PromptManager } from "./prompts/PromptManager";
 import { XuePromptManager } from "./prompts/XuePromptManager";
 import { XueIndexService } from "./prompts/XueIndexService";
+import { SessionIndexService } from "./sessions/SessionIndexService";
 import { XuePromptDbStore } from "./prompts/XuePromptDbStore";
 import { SkillManager } from "./skills/SkillManager";
 import { readSkillContent } from "./skills/readSkillContent";
@@ -545,6 +546,7 @@ let promptManager: PromptManager;
 let xuePromptManager: XuePromptManager;
 /** 提示词库 Go sidecar 客户端（null = 未装配；进程生命周期与 app 一致）。 */
 let xueIndexService: XueIndexService | null = null;
+let sessionIndexService: SessionIndexService | null = null;
 /** 提示词库 db 远程拉取/缓存服务；null = 未装配。 */
 let xuePromptDbStore: XuePromptDbStore | null = null;
 let skillManager: SkillManager;
@@ -3231,6 +3233,18 @@ function registerIpc() {
 		validationCatalogModels,
 		// fork/clone 统一命令层：重发/编辑 fork 化（mutationFork/branchMode）与 Web HTTP 同源
 		sessionForkCommands,
+		// 跨会话正文搜索适配闭包：roots 解析（全局根+全局 settings sessionDir）+ sidecar
+		// 调用；搜索前先增量 refresh（stat 全目录毫秒级）保证新会话可搜；任何失败返回
+		// null，渲染层回退标题过滤，搜索入口永不报错
+		sessionContentSearch: async (query) => {
+			if (!sessionIndexService) return null;
+			const roots = await sessionScanner.resolveGlobalSearchRoots();
+			if (roots.length === 0) return null;
+			const refreshed = await sessionIndexService.refresh(roots);
+			if (!refreshed.ok) return null;
+			const result = await sessionIndexService.search(roots, query);
+			return result.ok ? result.value : null;
+		},
 		// C1：DSH 后端专用 IPC 依赖按后端分组（注册表化铺路；未来新增后端各自提供一份）
 		dshBackend: {
 			listDshModels: () => dshHost.listModels(),
@@ -4139,6 +4153,38 @@ app
 			xuePromptDbStore?.dispose();
 			xuePromptDbStore = null;
 		});
+		// 跨会话正文搜索 sidecar（Go session-index）：预提取正文语料+分片扫描，
+		// 补齐「全部历史会话正文搜词」能力；缺失/失败自动降级侧栏标题过滤。
+		// 语料落 <userData>/session-index/（与设置/缓存同生命周期，卸载重装可重建）。
+		sessionIndexService = new SessionIndexService({
+			corpusDir: join(app.getPath("userData"), "session-index"),
+			resolveBinaryPath: () => {
+				// 打包后：resourcesPath/session-index/session-index(.exe)（extraResources）；
+				// dev：仓库构建产物 resources/session-index/bin/（build 链自动 fail-open 构建）
+				const dir = app.isPackaged ? join(process.resourcesPath, "session-index") : join(app.getAppPath(), "resources", "session-index", "bin");
+				const name = process.platform === "win32" ? "session-index.exe" : "session-index";
+				const path = join(dir, name);
+				return existsSync(path) ? path : null;
+			},
+			logger: {
+				debug: (m) => appLogger.debug("session-index", m),
+				info: (m) => void appLogger.info("session-index", m),
+				warn: (m) => void appLogger.warn("session-index", m),
+				error: (m) => void appLogger.error("session-index", m),
+			},
+		});
+		quitCleanup.register("session-index", () => {
+			sessionIndexService?.dispose();
+			sessionIndexService = null;
+		});
+		// 后台预热：首次全量建索引可达十余秒，启动后稍等即预热，避免用户首搜撞上
+		// 冷启动（预热失败静默——运行时搜索会再试）
+		setTimeout(() => {
+			void sessionScanner
+				.resolveGlobalSearchRoots()
+				.then((roots) => (roots.length > 0 && sessionIndexService ? sessionIndexService.refresh(roots) : null))
+				.catch(() => {});
+		}, 5_000);
 		skillManager = new SkillManager(undefined, mainCopy);
 		// 内置技能覆盖层叠加：安装内置技能模板时覆盖层优先（修 bug/新增技能免发版）
 		skillManager.configureSkillOverlay(() => skillStoreUpdater.resolveEffectiveOverlayDir());

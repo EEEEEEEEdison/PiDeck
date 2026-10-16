@@ -59,7 +59,7 @@
   "main": "out/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.js",
-    "build": "npm run sync:dsh-version && npm run build:packages && npm run generate:pi-ai-catalog && npm run generate:extensions-manifest && npm run generate:prompts-manifest && npm run generate:skills-manifest && npm run runtime:pack && npm run runtime:check && npm run check:xueprompts && npm run build:xue-index && tsc --noEmit --skipLibCheck --incremental && electron-vite build",
+    "build": "npm run sync:dsh-version && npm run build:packages && npm run generate:pi-ai-catalog && npm run generate:extensions-manifest && npm run generate:prompts-manifest && npm run generate:skills-manifest && npm run runtime:pack && npm run runtime:check && npm run check:xueprompts && npm run build:xue-index && npm run build:session-index && tsc --noEmit --skipLibCheck --incremental && electron-vite build",
     "build:packages": "node scripts/build-local-packages.js",
     "build:fast": "npm run generate:pi-ai-catalog && npm run generate:extensions-manifest && npm run generate:prompts-manifest && npm run generate:skills-manifest && electron-vite build",
     "build:main": "electron-vite build --config electron.vite.main.mjs",
@@ -78,6 +78,7 @@
     "generate:skills-manifest": "node scripts/generate-content-manifests.mjs --domain skills",
     "check:skills-manifest": "node scripts/generate-content-manifests.mjs --domain skills --check",
     "build:xue-index": "node scripts/build-xue-index.mjs",
+    "build:session-index": "node scripts/build-session-index.mjs",
     "build:announcements": "node scripts/build-announcements.js",
     "check:announcements": "node scripts/build-announcements.js --check",
     "check:xueprompts": "node scripts/check-xueprompts.mjs",
@@ -223,6 +224,14 @@
         "filter": [
           "xue-index",
           "xue-index.exe"
+        ]
+      },
+      {
+        "from": "resources/session-index/bin",
+        "to": "session-index",
+        "filter": [
+          "session-index",
+          "session-index.exe"
         ]
       },
       {

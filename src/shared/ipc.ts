@@ -183,6 +183,7 @@ export const ipcChannels = {
 	sessionsSetFocusedSession: "sessions:set-focused-session",
 	/** DSH 会话文件路径推导（渲染层右键「复制会话文件路径」；按 dshSessionId + cwd 计算 host 持久化路径）。 */
 	sessionsGetDshSessionPath: "sessions:get-dsh-session-path",
+	sessionsSearchContent: "sessions:search-content",
 	/** DSH 会话内容搜索（session.search；结果最多 20 会话，返回 sessionId + snippet）。 */
 	sessionsSearchDsh: "sessions:search-dsh",
 	/** DSH 创建目标（goal.create；objective 必填，maxGoalRounds 可选）。 */

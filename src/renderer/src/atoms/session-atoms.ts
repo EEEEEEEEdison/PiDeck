@@ -1730,3 +1730,10 @@ export const removeSessionStateAtom = atom(null, (get, set, sessionId: string) =
 	set(sessionMessageLoadStateAtom, loadState);
 	if (get(currentSessionIdAtom) === sessionId) set(currentSessionIdAtom, undefined);
 });
+
+/**
+ * 待消费的消息跳转（跨会话正文搜索点击后）：侧栏搜索结果点击时写入
+ * {sessionId, messageId}，目标会话 pane 聚焦挂载 jumpToMessageRef 后消费并清空。
+ * 生命周期短暂（点击→pane 挂载），切走即由消费方/写入方覆盖。
+ */
+export const pendingMessageJumpAtom = atom<{ sessionId: string; messageId: string } | null>(null);

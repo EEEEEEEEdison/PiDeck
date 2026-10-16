@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef } from "react";
-import { useAtomValue } from "jotai";
-import { sessionRecordByIdAtomFamily } from "../../atoms";
+import { useAtomValue, useSetAtom } from "jotai";
+import { pendingMessageJumpAtom, sessionRecordByIdAtomFamily } from "../../atoms";
 import { useSessionTimelineController } from "../../hooks/useSessionTimelineController";
 import { SessionRuntimeInjector } from "./SessionRuntimeInjector";
 import { useSessionPaneServices } from "./SessionPaneServices";
@@ -21,6 +21,8 @@ export type ChatSessionPaneProps = {
 export function ChatSessionPane(props: ChatSessionPaneProps) {
 	const { sessionId, focused, onFocusPane, splitPane = false } = props;
 	const services = useSessionPaneServices();
+	const setPendingMessageJump = useSetAtom(pendingMessageJumpAtom);
+	const pendingJump = useAtomValue(pendingMessageJumpAtom);
 
 	const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
 	const sessionTitle = record?.title?.trim() || t("app.chatProject");
@@ -46,6 +48,17 @@ export function ChatSessionPane(props: ChatSessionPaneProps) {
 			}
 		};
 	}, [focused, services.jumpToMessageRef, sessionTimeline.jumpToMessage]);
+
+	// 跨会话正文搜索的落地跳转：目标 pane 聚焦且 jump 挂好后消费一次。
+	// 消息尚未加载（messages 空且未确认空会话）时先不消费：加载完成后
+	// jumpToMessage 引用随 combinedMessages 更新，本 effect 重触发重试；
+	// jumpToMessage 内部另有补页/扩窗挂起策略处理「目标在未加载历史页」的情况。
+	useEffect(() => {
+		if (!focused || !pendingJump || pendingJump.sessionId !== sessionId) return;
+		if (sessionTimeline.messages.length === 0 && !sessionTimeline.knownEmpty) return;
+		sessionTimeline.jumpToMessage(pendingJump.messageId);
+		setPendingMessageJump(null);
+	}, [focused, pendingJump, sessionId, sessionTimeline.jumpToMessage, sessionTimeline.messages, sessionTimeline.knownEmpty, setPendingMessageJump]);
 
 	const layout = useMemo(
 		() => ({

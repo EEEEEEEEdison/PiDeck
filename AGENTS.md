@@ -192,7 +192,8 @@ src/
 |------|--------|------|
 | README/官网共用图片 | 唯一数据源 `docs/images/`，不复制到 docs-site | README 与官网共用图片 |
 | 公告 | 只编辑 `announcements-md/*.md`，json 由脚本生成，禁止手写 | 公告维护与发布 |
-| 提示词库 xueprompts.db | `content`/`description` 是 gzip BLOB，SQL LIKE 中文恒不命中，必须应用层 gunzip 后匹配 | 商店提示词库维护 |
+| 提示词库 xueprompts.db | db 远程拉取双源成套（sha256+db 同源）；检索走 xue-index Go sidecar，缺失降级 sql.js（应用层 gunzip，SQL LIKE 中文恒不命中）；改 db 走 publish 脚本+Release 资产 | 商店提示词库维护 |
+| 跨会话正文搜索 | session-index Go sidecar（纯标准库）；语料+快照落 `<userData>/session-index/`；roots 只取全局（WSL 不支持）；任何失败 IPC 返回 null 降级标题过滤；`SESSION_INDEX_OS/ARCH` 必须进三平台 workflow | 跨会话正文搜索 |
 | 内置扩展热更新 | 判据是逐文件 sha256 不是版本号；覆盖层必须完整快照 + vendored 依赖；磁盘根统一走 `resolveBuiltInExtensionRoots()` | 内置扩展热更新 |
 | 生图存储 | **base64 不进 JSONL**（只存 ref）；读取永远有字节上界；`<img src>` 只走 `imageContentSrc()` | 生图会话存储 |
 | 会话消息编辑/删除/重发 | 编辑/删除写 pi 原生 `context_edit`（原文不改写、费用不回退；被移出的条目界面直接不显示，原始文件仍保留）；重发仍用 `deleted` 墓碑截断分支；追加条目的 parentId 必须取当前 leaf，pi 活着禁改会话文件，三道闸不许放宽 | 会话消息编辑/删除/重发 |

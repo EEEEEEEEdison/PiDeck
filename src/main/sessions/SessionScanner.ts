@@ -320,6 +320,30 @@ export class SessionScanner {
 		return this.wslConfig ? this.wslSessionsDir : this.root;
 	}
 
+	/**
+	 * 跨会话全文搜索（session-index sidecar）的扫描根：全局默认根 + 全局
+	 * settings 的 sessionDir（若存在）。不含项目级 .pi/settings.json 的
+	 * sessionDir——全局搜索无法枚举所有项目，项目级目录由激活时的常规扫描
+	 * 覆盖；这与 SessionIndexService 的降级语义一致（搜不到≠错误）。
+	 * WSL 模式下返回 Linux 侧根（宿主 Go 进程直接读 UNC 不可靠，跨 WSL 的
+	 * 全文搜索暂不支持，返回空数组由调用方降级）。
+	 */
+	async resolveGlobalSearchRoots(): Promise<string[]> {
+		if (this.wslConfig) return [];
+		const roots = [this.defaultSessionsRoot];
+		// 全局 settings：~/.pi/agent/settings.json（与 resolveConfiguredSessionDir 的全局分支同源）
+		const globalSettingsPath = join(dirname(this.root), "settings.json");
+		const globalRaw = await this.readSessionDirSettingLocal(globalSettingsPath);
+		if (!globalRaw) return roots;
+		const resolved = this.resolveSessionDirPath(globalRaw, this.root);
+		if (!resolved) return roots;
+		const normalized = this.normalize(resolved);
+		if (roots.some((root) => this.normalize(root) === normalized)) return roots;
+		if (!existsSync(resolved)) return roots;
+		roots.push(resolved);
+		return roots;
+	}
+
 	/** 判断文件路径是否为 WSL Linux 路径（以 / 开头且属于当前 WSL 配置） */
 	private isWslPath(filePath: string): boolean {
 		if (!this.wslConfig) return false;

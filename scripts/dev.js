@@ -102,6 +102,16 @@ function runDev() {
 	} catch (error) {
 		console.warn("[dev] build:xue-index 跳过:", error instanceof Error ? error.message : error);
 	}
+	// Go session-index sidecar（跨会话全文搜索）：同 fail-open，产物缺失时回退标题过滤
+	try {
+		require("node:child_process").execSync("npm run build:session-index", {
+			cwd: path.join(__dirname, ".."),
+			stdio: "inherit",
+			shell: true,
+		});
+	} catch (error) {
+		console.warn("[dev] build:session-index 跳过:", error instanceof Error ? error.message : error);
+	}
 	checkElectronBinaryBeforeDev();
 	const invocation = getElectronViteInvocation();
 	// Windows 下切换到 UTF-8 代码页，使终端能正确显示中文输出
