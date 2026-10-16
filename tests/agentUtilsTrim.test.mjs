@@ -180,7 +180,9 @@ test("only PiDeck automatic titles can write runtime names back to the catalog",
 	assert.doesNotMatch(agentManager, /forceCatalogSync/);
 	assert.match(agentManager, /return this\.applyRuntimeTitle\(agentId, nextTitle, true, "fallback"\)/);
 	assert.match(agentManager, /applyRuntimeTitle\(agentId, name, true, "auto"\)/);
-	assert.match(index, /agentManager\.setAutomaticTitleChangedHandler\(\(agentId, title, source\)/);
+	// 处理器拿到的是未清洗的 rawTitle（外部通道指令随首条消息写进会话文件），index.ts 再 sanitizeAutomaticTitle 一次；
+	// 参数名是刻意区分「原文 / 落库标题」，不是笔误。
+	assert.match(index, /agentManager\.setAutomaticTitleChangedHandler\(\(agentId,\s*rawTitle,\s*source\)/);
 	assert.match(index, /applyAutomaticTitle\(sessionId, title, source\)/);
 	assert.match(index, /sessionsCatalogRefreshed/);
 	assert.match(index, /Pi automatic title sync to catalog failed/);
