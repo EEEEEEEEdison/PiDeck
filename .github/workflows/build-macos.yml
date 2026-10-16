@@ -42,6 +42,15 @@ jobs:
           node-version: 24.13.0
           cache: npm
 
+      # Go 工具链钉版本：runner 预装 Go 版本浮动，低于 go.mod 要求（1.26，modernc.org/sqlite v1.60.1 也要求 1.26）时
+      # build:xue-index 会 fail-open 静默跳过（包里没 sidecar，运行时降级 sql.js）——
+      # 不红灯但功能缺失，所以必须显式安装而不是赌镜像预装版本
+      - name: Setup Go (xue-index sidecar)
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: native/xue-index/go.sum
+
       - name: Install dependencies
         run: npm ci
 
