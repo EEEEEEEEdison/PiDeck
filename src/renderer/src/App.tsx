@@ -25,8 +25,8 @@ import {
 	Fingerprint,
 	// 抽屉 RPC 日志 Tab 图标
 	ScrollText,
-	// 抽屉侧边任务 Tab 图标
-	PanelRight,
+	// 抽屉侧边任务 Tab 图标：不用 PanelRight——那是会话头部抽屉开关的图形，并排会认错
+	Rocket,
 } from "lucide-react";
 import { configureNoticeDefaults, showNotice, type NoticeKind } from "./utils/notice";
 import { copyTextWithCopiedNotice } from "./utils/clipboardNotice";
@@ -3098,7 +3098,7 @@ export function App() {
 											{
 												id: "sideTask",
 												label: t("sideTask.title"),
-												icon: <PanelRight size={16} />,
+												icon: <Rocket size={16} />,
 												active: drawer === "sideTask",
 												onClick: () => handleToolDrawerAction("sideTask"),
 											},
