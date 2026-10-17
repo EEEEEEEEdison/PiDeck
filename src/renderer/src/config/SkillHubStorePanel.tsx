@@ -6,7 +6,7 @@ import { t } from "../i18n";
 import { StoreSearchBar } from "./StoreSearchBar";
 import { showNotice } from "../utils/notice";
 import { desktopApi } from "../desktopApi";
-import type { SkillHubItem, SkillHubDetail, SkillHubSearchResult, SkillHubInstallResult, PiSkillListResult } from "../../../shared/types";
+import type { SkillHubItem, SkillHubDetail, SkillHubSearchResult, SkillHubInstallResult, SkillHubInstallProgress, PiSkillListResult } from "../../../shared/types";
 
 const STORAGE_KEY = "skillhub-installed-v2";
 
@@ -90,6 +90,7 @@ const api = (
 				search: (q: string, limit?: number) => Promise<SkillHubSearchResult>;
 				detail: (slug: string) => Promise<SkillHubDetail | null>;
 				install: (slug: string, projectId?: string) => Promise<SkillHubInstallResult>;
+				onInstallProgress: (callback: (progress: SkillHubInstallProgress) => void) => () => void;
 			};
 		};
 	}
@@ -103,6 +104,25 @@ function fmtNum(n: number): string {
 	return String(n);
 }
 
+/**
+ * 安装进度文案：阶段中文案 + 可能存在的真实百分比。
+ * 百分比来自 git/npm 的进度行（Receiving objects 等），不是估算值；没有百分比时只说阶段，
+ * 不编造进度条（用户反馈的「没有下载进度」正是这两者都没有）。
+ */
+function installProgressText(progress: SkillHubInstallProgress | undefined): string {
+	if (!progress) return t("config.skillHubPhaseRunning");
+	switch (progress.phase) {
+		case "preparing":
+			return t("config.skillHubPhasePreparing");
+		case "downloading":
+			return progress.percent === undefined ? t("config.skillHubPhaseDownloading") : t("config.skillHubPhaseDownloadingPercent", { percent: progress.percent });
+		case "installing":
+			return t("config.skillHubPhaseInstalling");
+		default:
+			return t("config.skillHubPhaseRunning");
+	}
+}
+
 export function SkillHubStorePanel(props: { projectId?: string }) {
 	const [query, setQuery] = useState("");
 	const [searching, setSearching] = useState(false);
@@ -110,6 +130,8 @@ export function SkillHubStorePanel(props: { projectId?: string }) {
 	/** 持久化安装记录（跨组件卸载/重启），用于同名歧义时强制标记已安装 */
 	const persistedRef = useRef<PersistedInstall[]>(loadPersisted);
 	const [installingSlugs, setInstallingSlugs] = useState<Set<string>>(new Set());
+	/** 安装进度（按 slug 记录，主进程推送）：按钮旁显示「下载中 45%」这类真实进度 */
+	const [installProgress, setInstallProgress] = useState<Record<string, SkillHubInstallProgress>>({});
 	const [result, setResult] = useState<SkillHubSearchResult | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [previewSlug, setPreviewSlug] = useState<string | null>(null);
@@ -121,6 +143,14 @@ export function SkillHubStorePanel(props: { projectId?: string }) {
 
 	useEffect(() => {
 		searchInputRef.current?.focus();
+	}, []);
+
+	// 安装进度订阅：spawn 流式输出在主进程翻译成阶段后推送，卸载/切换面板由退订函数收尾。
+	useEffect(() => {
+		const unsubscribe = api.skillHub.onInstallProgress((progress) => {
+			setInstallProgress((prev) => ({ ...prev, [progress.slug]: progress }));
+		});
+		return unsubscribe;
 	}, []);
 
 	const handleSearch = useCallback(
@@ -199,6 +229,13 @@ export function SkillHubStorePanel(props: { projectId?: string }) {
 			setInstallingSlugs((prev) => {
 				const next = new Set(prev);
 				next.delete(slug);
+				return next;
+			});
+			// 安装结束（成功或失败）都要清掉进度：否则失败后按钮旁会残留上一次的「下载中」
+			setInstallProgress((prev) => {
+				if (!(slug in prev)) return prev;
+				const next = { ...prev };
+				delete next[slug];
 				return next;
 			});
 		}
@@ -298,6 +335,11 @@ export function SkillHubStorePanel(props: { projectId?: string }) {
 										</span>
 									)}
 								</strong>
+								{installingSlugs.has(item.slug) && (
+									<span className="mt-0.5 block text-caption leading-snug text-text-tertiary" title={installProgress[item.slug]?.detail || undefined}>
+										{installProgressText(installProgress[item.slug])}
+									</span>
+								)}
 								<div className="skillhub-card-meta">
 									<span className="skillhub-card-stats">
 										<Download size={12} /> {t("config.skillHubInstallCount", { count: fmtNum(item.downloads) })}

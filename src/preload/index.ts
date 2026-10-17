@@ -1144,6 +1144,8 @@ const api = {
 		search: (query: string, page?: number, pageSize?: number, sortBy?: string, order?: string) => ipcRenderer.invoke(ipcChannels.skillHubSearch, { query, page, pageSize, sortBy, order }) as Promise<import("../shared/types").SkillHubSearchResult>,
 		detail: (slug: string) => ipcRenderer.invoke(ipcChannels.skillHubDetail, slug) as Promise<import("../shared/types").SkillHubDetail | null>,
 		install: (slug: string, projectId?: string) => ipcRenderer.invoke(ipcChannels.skillHubInstall, slug, projectId) as Promise<import("../shared/types").SkillHubInstallResult>,
+		// 安装进度：主进程节流推送，返回退订函数（渲染层卸载必须退订）
+		onInstallProgress: (callback: (progress: import("../shared/types").SkillHubInstallProgress) => void) => subscribe(ipcChannels.skillHubInstallProgress, callback),
 	},
 	yaoPrompts: {
 		list: (opts?: { category?: string; search?: string; page?: number; pageSize?: number }) => ipcRenderer.invoke(ipcChannels.yaoPromptsList, opts) as Promise<YaoPromptListResult>,

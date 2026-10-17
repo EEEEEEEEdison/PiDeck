@@ -1546,6 +1546,8 @@ export function createPreviewApi(): PiDesktopApi {
 			search: async () => ({ query: "", total: 0, items: [] }),
 			detail: async () => null,
 			install: async (slug) => ({ success: true, slug, installDir: "", message: "Preview install" }),
+			// 预览模式无安装进程，但事件订阅形状必须完整（返回退订函数）
+			onInstallProgress: () => () => {},
 		},
 		acp: {
 			// 预览模式：无 ACP 工具数据，返回空表/恒过校验保持 PiDesktopApi 形状完整；

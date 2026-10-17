@@ -404,6 +404,8 @@ export const ipcChannels = {
 	skillHubSearch: "skill-hub:search",
 	skillHubDetail: "skill-hub:detail",
 	skillHubInstall: "skill-hub:install",
+	/** 安装进度（主进程 → 渲染层推送；状态丝流程用，不用轮询） */
+	skillHubInstallProgress: "skill-hub:install-progress",
 	extensionsList: "extensions:list",
 	extensionsUninstall: "extensions:uninstall",
 	extensionsInstall: "extensions:install",

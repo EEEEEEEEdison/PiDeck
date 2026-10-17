@@ -34,7 +34,7 @@ const importerCatalogMod = loadTsCommonJs("src/shared/api/importerCatalog.ts");
 const DOMAIN_CATALOG = domainCatalogMod.DOMAIN_CATALOG;
 const IMPORTER_CATALOG = importerCatalogMod.IMPORTER_CATALOG;
 
-// 仓库真实通道面：673 通道 → 84 前缀；preload 真实命名空间面：70 键。
+// 仓库真实通道面：677 通道 → 84 前缀；preload 真实命名空间面：70 键。
 const allChannelValues = Object.values(ipcChannels);
 const actualPrefixes = new Set(allChannelValues.map((value) => value.split(":")[0]));
 const actualNamespaces = new Set(exposedNamespaces);

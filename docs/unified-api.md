@@ -1,13 +1,13 @@
 # PiDeck 统一接口（unified API）
 
-PiDeck 桌面能力面统一门面 `piDeckApi` 的契约文档。三层结构：`src/shared/api/`（纯契约目录与组合函数）、`src/main/api/`（主进程域注册表装配）、`src/renderer/src/unifiedApi.ts`（渲染层门面入口）。叠加不替换：606→673 条既有 IPC 通道与 preload 暴露面一行不改，`piDeckApi` 是消费侧统一视图。
+PiDeck 桌面能力面统一门面 `piDeckApi` 的契约文档。三层结构：`src/shared/api/`（纯契约目录与组合函数）、`src/main/api/`（主进程域注册表装配）、`src/renderer/src/unifiedApi.ts`（渲染层门面入口）。叠加不替换：606→677 条既有 IPC 通道与 preload 暴露面一行不改，`piDeckApi` 是消费侧统一视图。
 
 ## API 总览
 
 - 组合入口：`piDeckApi = composeUnifiedApi(desktopApi)`；**piDeckApi 以 preload 齐备为消费前提**（desktopApi 由 preload 经 contextBridge 注入，测试/SSR 等无 preload 环境下门面不可用）。
 - 聚合三式：`aggregate`（引用透传恒等，`piDeckApi.git === desktopApi.git`）、`consolidate`（按组 Pick 视图收口，如 sessions 四子域 / config 十子库）、`redline`（四例外通道只透传，禁止扩成通用桥）。
 - 主进程注册表装配：`registerAllDomains()` 在 `registerIpc()` 之后旁路调用，经 `registerDomain` / `registerImporter` 登记元数据后 `freeze()` 冻结；重复登记抛 `PIDECK_API_DUPLICATE_DOMAIN`，冻结后写路径抛 `PIDECK_API_REGISTRY_FROZEN`，非法条目抛 `PIDECK_API_INVALID_DOMAIN_ENTRY`。懒实例化，不改启动时序。
-- 快照守卫：tests/unifiedApi*.test.mjs 把 673 通道 / 84 前缀 / 70 命名空间 / sessions 110 / config 48 锚定为 sha256 快照，暴露面任何漂移显式红。
+- 快照守卫：tests/unifiedApi*.test.mjs 把 677 通道 / 84 前缀 / 70 命名空间 / sessions 111 / config 48 锚定为 sha256 快照，暴露面任何漂移显式红。
 - 2026-10-16 合并刷新：随 dev 演进（ACP 全渠道、微信渠道、宿主插件、pideck-mcp、生视频、公告历史等）补 6 域行，目录现为 61 域 + 11 导入器。
 
 ## 按域调用面

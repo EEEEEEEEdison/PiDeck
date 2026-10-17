@@ -349,6 +349,7 @@ import { SessionIndexService } from "./sessions/SessionIndexService";
 import { XuePromptDbStore } from "./prompts/XuePromptDbStore";
 import { SkillManager } from "./skills/SkillManager";
 import { readSkillContent } from "./skills/readSkillContent";
+import { buildSkillInstallProxyEnv } from "./skills/skillHubInstallProxy";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { BuiltInExtensionsUpdater } from "./extensions/builtInExtensionsUpdater";
 import { readEffectiveBuiltInExtensionsVersion, resolveBuiltInExtensionsDir, resolveBuiltInExtensionsOverlayDir, resolveVendorNodeModulesDir, type BuiltInExtensionPathRoots } from "./extensions/builtInExtensions";
@@ -3763,6 +3764,28 @@ function registerIpc() {
 				}
 			}
 			return projectRoot;
+		},
+		// 商店搜索必须走 Electron net（跟随桌面代理/系统代理）；裸 fetch 在需要代理的网络上会挂到超时。
+		netFetch: (url, init) => net.fetch(url, init),
+		resolveInstallProxyEnv: async () => {
+			const settings = settingsStore.get();
+			const desktop = { enabled: settings.desktopProxyEnabled, url: settings.desktopProxyUrl, bypass: settings.desktopProxyBypass };
+			// 与 DesktopProxy 同一套语义：开关关闭/地址非法 = 交还系统，因此这里解析系统代理补上。
+			// 解决 git clone（安装链路的关键步骤）不认 Chromium 代理的问题。
+			let systemRules: string | null = null;
+			if (!desktop.enabled || !desktop.url.trim()) {
+				try {
+					systemRules = await session.defaultSession.resolveProxy("https://github.com");
+				} catch (error) {
+					// 解析失败不阻断安装：无 PAC/直连环境本就没有代理可注入，返回 undefined 即可
+					void appLogger.warn("skill-hub", "Resolve system proxy failed", { error: error instanceof Error ? error.message : String(error) });
+				}
+			}
+			return buildSkillInstallProxyEnv(desktop, systemRules);
+		},
+		sendSkillHubInstallProgress: (progress) => {
+			if (!mainWindow || mainWindow.isDestroyed()) return;
+			mainWindow.webContents.send(ipcChannels.skillHubInstallProgress, progress);
 		},
 		appLogger,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,

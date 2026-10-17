@@ -47,6 +47,14 @@
 - **构建链**：`npm run build:session-index`（fail-open）；`scripts/dev.js` 自动构建；三平台 workflow `SESSION_INDEX_OS/ARCH` env；纯标准库无 go.sum（setup-go 缓存清单只列 xue-index）。
 - 测试：`tests/sessionIndexService.test.mjs`（宿主协议生命周期 9 项）+ `tests/sessionContentSearchChain.test.mjs`（IPC 三处同步/降级 stub/挂载点源码契约 7 项）+ Go 侧 `native/session-index/*_test.go`。
 
+## 技能商店安装链路（net.fetch 搜索 + spawn 进度 + 代理 env 注入）
+
+- **主进程联网一律走注入的 `fetchImpl`（= Electron `net.fetch`）**：裸全局 `fetch` 是 undici，既不读系统代理也不读 Electron 桌面 session 代理，代理环境下境外 API 挂到超时且只抛含糊 `AbortError`。`storeIpc.ts` 四个商店 handler（`skillHubSearch` / `skillStoreSearch` / `promptStoreSearch` / `promptStoreGet`）全部经 `deps.fetchImpl`；测试用 `createStoreIpc({ fetchImpl })` 注桩，未注入时才回退全局 fetch（测试沙箱无 fetch，故必须惰性取值）。
+- **安装用 `spawn` + 流式解析，不用 `execFile`**：`execFile` 要等进程结束才有输出、且旧实现丢掉了 stdout——`npx skills add` 冷启动实测 30.25s 期间 UI 零反馈，失败时用户只看到 npm warn（CLI 的真报错在 stdout，带 ANSI 的 spinner 也在 stdout）。现在 `runSkillHubInstall` 逐块喂 `createInstallProgressParser`，阶段 `preparing → downloading → installing`、百分比同阶段单调不倒退，节流 `INSTALL_PROGRESS_MIN_INTERVAL_MS=200` 经 `skillHub:install-progress` 推送；preload `skillHub.onInstallProgress` 返回退订函数，`previewApi` 走 no-op 订阅。
+- **渲染层**：`SkillHubStorePanel` 用进度帧替换纯 spinner（阶段文案 + 百分比条）；错误文案取 `cleanInstallOutput` 清洗后的 stdout 尾部（`isNetworkFailure` 命中时给网络提示），i18n 键 `config.skillHub*`（renderer 三词典）与 `mainProcessCopy*` 同步。
+- **代理 env（`skillHubInstallProxy.ts`）**：桌面代理设置优先（fixed_servers 规则 → `HTTP(S)_PROXY`），未启用时回退 `session.defaultSession.resolveProxy`（系统代理），`NO_PROXY` 取桌面 bypass 列表，附 `NODE_USE_ENV_PROXY=1`；`parseElectronProxyRules` 只接受 `PROXY host:port` / `DIRECT`。理由：CLI 内部 `git clone github.com` 不读 npm 的 proxy 配置，不注入 env 时代理环境下必失败（实测 `fatal: unable to access 'https://github.com/...': Recv failure: Connection was reset`）。
+- **模块划分**：`skillHubInstallCommand.ts`（命令行构造，win32 走 `cmd.exe /d /s /c`）、`skillHubInstallProgress.ts`（ANSI/CR 归一 + 阶段/百分比解析 + 输出裁剪）、`skillHubInstallProxy.ts`、`skillHubInstallRunner.ts`（spawn 生命周期 + 超时杀进程树 + close 前 flush 残余行）；测试 `tests/skillHubInstallFlow.test.mjs`。
+
 ## 内置扩展热更新（resources/extensions + userData 覆盖层）
 
 - 内置扩展（`resources/extensions/*.ts`）随包分发，RPC 启动时经 `-e <绝对路径>` 注入 pi。打包态 `resources` 只读，扩展出 bug 原本只能等下次发版；**热更新**把这条例外路径补上：拉远端清单 → 写 `<userData>/builtin-extensions/` 覆盖层 → 路径解析覆盖层优先 → 重启会话即生效。

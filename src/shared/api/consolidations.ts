@@ -6,12 +6,12 @@
  * （FIND-2 方案 a）：门面按组做 Pick 视图，缺失方法静默缺席（S3：不 throw）。
  *
  * 方法名全集与 src/preload/index.ts 的 sessions/config 命名空间逐一核对
- * （sessions 110、config 48，探针快照 tests/unifiedApiChannelSnapshot.test.mjs 锚定通道数）。
+ * （sessions 111、config 48，探针快照 tests/unifiedApiChannelSnapshot.test.mjs 锚定通道数）。
  */
 import type { ConfigSubstoreId, SessionSubdomainId } from "./domainTypes";
 
 /**
- * sessions 命名空间 110 方法 → 四子域。
+ * sessions 命名空间 111 方法 → 四子域。
  *
  * 裁决（S5，沉默清单，PLAN.md:202）：DSH 方法按语义分组——运行时查询面
  * （listDshModels / discoverDshModels / listDshProviders / listDshAgentPresets / getDshDefaultModel /
@@ -37,6 +37,7 @@ export const SESSIONS_SUBDOMAINS = {
 		"readRecordMessagePage",
 		"readRecordMessages",
 		"removeCatalogMessageImage",
+		"searchContent",
 		"setFocusedSession",
 		"unarchiveRecord",
 		"updateRecord",

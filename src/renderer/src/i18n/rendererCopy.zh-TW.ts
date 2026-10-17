@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: b44343e7635bfc2c347c7c3fb2fb0a0abc143f94e173adc8d7336e12047437f6（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 2330818d3d759d0888203efacee9ecf3d4c784ddb09cf18a5752930748ef4b49（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -1461,6 +1461,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.skillHubSearchError": "搜尋 SkillHub 失敗，請稍後重試",
 	"config.skillHubInstallError": "安裝 Skill 失敗：{error}",
 	"config.skillHubDetailNotAvailable": "詳情暫不可用，請在 skills.sh 中檢視",
+	"config.skillHubPhasePreparing": "正在準備安裝環境…",
+	"config.skillHubPhaseDownloading": "正在下載技能倉庫…",
+	"config.skillHubPhaseDownloadingPercent": "正在下載技能倉庫… {percent}%",
+	"config.skillHubPhaseInstalling": "正在寫入技能檔案…",
+	"config.skillHubPhaseRunning": "正在安裝…",
 	"config.skillHubInstallCount": "{count} 安裝",
 	"config.skillHubCopyInstallCommand": "複製安裝命令",
 	"config.noSearchResults": "沒有找到結果",
