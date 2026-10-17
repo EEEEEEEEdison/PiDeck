@@ -150,7 +150,21 @@ test("composer area mounts the stats strip under the input card", () => {
 test("stats copy exists in both locales", () => {
 	const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
 	const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
-	for (const key of ["composerStats.counts", "composerStats.llm", "composerStats.toolCall", "composerStats.ttftAverage", "composerStats.streamingTps", "composerStats.endToEndTps", "composerStats.sessionStreamingTps", "composerStats.sessionEndToEndTps", "composerStats.cacheHit", "composerStats.tokens", "composerStats.ttft", "composerStats.reply", "composerStats.turnsHint"]) {
+	for (const key of [
+		"composerStats.counts",
+		"composerStats.llm",
+		"composerStats.toolCall",
+		"composerStats.ttftAverage",
+		"composerStats.streamingTps",
+		"composerStats.endToEndTps",
+		"composerStats.sessionStreamingTps",
+		"composerStats.sessionEndToEndTps",
+		"composerStats.cacheHit",
+		"composerStats.tokens",
+		"composerStats.ttft",
+		"composerStats.reply",
+		"composerStats.turnsHint",
+	]) {
 		assert.match(zh, new RegExp(`"${key.replace(".", "\\.")}"`));
 		assert.match(en, new RegExp(`"${key.replace(".", "\\.")}"`));
 	}

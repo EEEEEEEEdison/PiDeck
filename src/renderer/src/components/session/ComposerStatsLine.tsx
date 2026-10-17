@@ -17,7 +17,11 @@ import { formatTokens } from "./SessionContextMeter";
 /** 单个可悬停指标：text 为展示文本，hint 为悬停说明（计算口径），缺省不渲染 title。 */
 export type ComposerStatPart = { text: string; hint?: string };
 
-export function buildComposerStatsSegments(state: Pick<AgentRuntimeState, "dshSessionStats" | "inputTokens" | "outputTokens" | "cacheHitPercent" | "ttftMs" | "totalMs" | "tps" | "endToEndTps" | "sessionTps" | "sessionEndToEndTps"> | undefined, turnCount = 0, tpsMode: TpsDisplayMode = "streaming"): ComposerStatPart[][] {
+export function buildComposerStatsSegments(
+	state: Pick<AgentRuntimeState, "dshSessionStats" | "inputTokens" | "outputTokens" | "cacheHitPercent" | "ttftMs" | "totalMs" | "tps" | "endToEndTps" | "sessionTps" | "sessionEndToEndTps"> | undefined,
+	turnCount = 0,
+	tpsMode: TpsDisplayMode = "streaming",
+): ComposerStatPart[][] {
 	if (!state) return [];
 	const groups: ComposerStatPart[][] = [];
 	const sessionStats = state.dshSessionStats;

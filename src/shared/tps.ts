@@ -137,4 +137,3 @@ export function calculateSessionTokensPerSecond(spans: ReadonlyArray<TaskPerfSpa
 		activeStreamingDurationMs,
 	};
 }
-

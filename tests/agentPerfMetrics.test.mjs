@@ -73,8 +73,8 @@ test("message_end/done/error settles perf and pushes a runtime-state patch", () 
 	assert.match(settle, /calculateTokensPerSecond\(outputTokens, streamingMs\)/);
 	assert.match(settle, /calculateTokensPerSecond\(outputTokens, totalMs\)/);
 	// 结算结果本地缓存 + 边沿推送（不触发 get_state/get_session_stats RPC）
-	assert.match(settle, /lastPerfByAgent\.set\(agentId,\s*\{[^}]*ttftMs[^}]*totalMs[^}]*endToEndTps[^}]*tps/);
-	assert.match(settle, /state:\s*\{[^}]*ttftMs[^}]*totalMs[^}]*endToEndTps[^}]*tps/);
+	assert.match(settle, /lastPerfByAgent\.set\(agentId,\s*\{[^}]*ttftMs[^}]*totalMs[^}]*endToEndTps[^}]*tps[^}]*sessionTps[^}]*sessionEndToEndTps[^}]*at:\s*now\s*\}\)/);
+	assert.match(settle, /state:\s*\{[^}]*ttftMs[^}]*totalMs[^}]*endToEndTps[^}]*tps[^}]*sessionTps[^}]*sessionEndToEndTps[^}]*perfAt:\s*now\s*\}/);
 });
 
 test("perf timer starts from the sendPrompt request time, consumed once", () => {

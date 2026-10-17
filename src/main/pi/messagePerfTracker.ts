@@ -142,11 +142,7 @@ export class MessagePerfTracker {
 	/**
 	 * 记录派生任务（如 subagent 派生执行）的用量与耗时区间，消除重叠并纳入会话级平均 TPS 计算。
 	 */
-	recordSubagentTask(
-		agentId: string,
-		task: { id?: string; startedAt: number; completedAt: number; tokens: number; firstDeltaAt?: number },
-		emit?: (channel: string, payload: unknown) => void,
-	): void {
+	recordSubagentTask(agentId: string, task: { id?: string; startedAt: number; completedAt: number; tokens: number; firstDeltaAt?: number }, emit?: (channel: string, payload: unknown) => void): void {
 		if (!task || task.tokens < 0 || task.completedAt <= task.startedAt) return;
 		let spans = this.spansByAgent.get(agentId);
 		if (!spans) {
@@ -209,11 +205,7 @@ export class MessagePerfTracker {
 	/**
 	 * 批量同步子代理记录（例如从会话持久化条目或列表恢复）。
 	 */
-	syncSubagentTasks(
-		agentId: string,
-		tasks: ReadonlyArray<{ id?: string; startedAt: number; completedAt?: number; tokens?: number }>,
-		emit?: (channel: string, payload: unknown) => void,
-	): void {
+	syncSubagentTasks(agentId: string, tasks: ReadonlyArray<{ id?: string; startedAt: number; completedAt?: number; tokens?: number }>, emit?: (channel: string, payload: unknown) => void): void {
 		let modified = false;
 		for (const t of tasks) {
 			if (typeof t.startedAt === "number" && typeof t.completedAt === "number" && t.completedAt > t.startedAt && typeof t.tokens === "number" && t.tokens >= 0) {

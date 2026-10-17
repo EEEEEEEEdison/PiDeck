@@ -1,10 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-	calculateTokensPerSecond,
-	calculateIntervalUnionDurationMs,
-	calculateSessionTokensPerSecond,
-} from "../src/shared/tps.ts";
+import { calculateTokensPerSecond, calculateIntervalUnionDurationMs, calculateSessionTokensPerSecond } from "../src/shared/tps.ts";
 
 test("calculateIntervalUnionDurationMs handles empty or invalid intervals", () => {
 	assert.equal(calculateIntervalUnionDurationMs([]), 0);
