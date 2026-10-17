@@ -10,15 +10,17 @@ import type { ProviderUsageCredits } from "../../shared/types/providerUsage";
 import type { UsageProbeResponse } from "./providerUsageProbe";
 import { getByPath, toNumber } from "./providerUsagePath";
 import { parseBooster } from "./providerUsageBooster";
+import { parseMinimaxPlan } from "./providerUsageMinimax";
 
 /** 专用解析器表：kind:"custom" 的 resolver 名称 → 解析函数。 */
-const CUSTOM_RESOLVERS: Record<"xai-billing" | "codex-usage" | "commandcode-credits" | "kimi-credits" | "volcengine-plan" | "sub2api-usage", (body: unknown, raw: string) => UsageProbeResponse> = {
+const CUSTOM_RESOLVERS: Record<"xai-billing" | "codex-usage" | "commandcode-credits" | "kimi-credits" | "volcengine-plan" | "sub2api-usage" | "minimax-plan", (body: unknown, raw: string) => UsageProbeResponse> = {
 	"xai-billing": parseXaiBilling,
 	"codex-usage": parseCodexUsage,
 	"commandcode-credits": parseCommandcodeCredits,
 	"kimi-credits": parseKimiCredits,
 	"volcengine-plan": parseVolcenginePlan,
 	"sub2api-usage": parseSub2ApiUsage,
+	"minimax-plan": parseMinimaxPlan,
 };
 
 /** 按 resolver 名解析（未注册的 resolver 返回 undefined，由调用方回退 raw）。 */

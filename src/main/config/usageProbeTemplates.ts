@@ -46,6 +46,7 @@ export const USAGE_PROBE_CATEGORY_BY_TEMPLATE_ID: Record<string, UsageProbeTempl
 	"xai-billing": "subscription",
 	"commandcode-credits": "plan",
 	"tokendance-balance": "balance",
+	"minimax-plan": "plan",
 };
 
 /** 声明式模板 id 是否合法（general / newapi / cookie / volcengine / sub2api）。 */
