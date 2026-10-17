@@ -25,10 +25,7 @@ export const CANONICAL_THINKING_LEVEL_ORDER = ["off", "minimal", "low", "medium"
  * 3. 向上无可退时向下就近查找；
  * 4. 均不匹配时回退到可用列表第一项（或 "off"）。
  */
-export function clampThinkingLevelToAllowed(
-	level: string | undefined,
-	allowedLevels?: readonly string[] | readonly { value: string }[],
-): string | undefined {
+export function clampThinkingLevelToAllowed(level: string | undefined, allowedLevels?: readonly string[] | readonly { value: string }[]): string | undefined {
 	if (!level) return undefined;
 	if (!allowedLevels) return level;
 	if (allowedLevels.length === 0) return undefined;
@@ -62,15 +59,10 @@ export function clampThinkingLevelToAllowed(
  * runtime 回传值描述执行状态，不能改写 PiDeck 的当前选择。
  * 当传入当前模型的 allowedLevels 时，自动 clamp 到该模型合法的档位。
  */
-export function resolveComposerThinkingLevel(input: {
-	record?: string;
-	fallback?: string;
-	allowedLevels?: readonly string[] | readonly { value: string }[];
-}): string | undefined {
+export function resolveComposerThinkingLevel(input: { record?: string; fallback?: string; allowedLevels?: readonly string[] | readonly { value: string }[] }): string | undefined {
 	const raw = input.record ?? input.fallback;
 	if (!input.allowedLevels) {
 		return raw;
 	}
 	return clampThinkingLevelToAllowed(raw, input.allowedLevels);
 }
-
