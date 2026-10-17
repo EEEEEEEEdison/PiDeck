@@ -25,9 +25,7 @@ export function ModelThinkingChip(props: { modelLabel: string; modelPendingTo?: 
 export function ThinkingLevelDropdown(props: { current?: string; levels?: ThinkingPickerLevel[]; open: boolean; onOpenChange: (open: boolean) => void; disabled?: boolean; onPick: (level: string) => void }) {
 	// undefined 表示能力尚未知，沿用旧版全量回退；[] 则是后端明确表示不支持。
 	const levels = props.levels ?? THINKING_LEVELS;
-	const effectiveLevel = levels.some((level) => level.value === props.current)
-		? props.current
-		: clampThinkingLevelToAllowed(props.current, levels);
+	const effectiveLevel = levels.some((level) => level.value === props.current) ? props.current : clampThinkingLevelToAllowed(props.current, levels);
 	const currentLevel = levels.find((level) => level.value === (effectiveLevel ?? props.current));
 	const thinkingText = currentLevel?.labelKey ? t(currentLevel.labelKey) : (currentLevel?.label ?? effectiveLevel ?? props.current ?? t("app.think"));
 	return (
