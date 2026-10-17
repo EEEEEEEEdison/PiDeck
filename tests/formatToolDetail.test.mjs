@@ -9,6 +9,7 @@ function enTranslate(key, params = {}) {
 	if (key === "mainTool.status") return `Status: ${params.status}`;
 	if (key === "mainTool.failed") return "Failed";
 	if (key === "mainTool.done") return "Completed";
+	if (key === "mainTool.running") return "Running";
 	if (key === "mainTool.arguments") return `Arguments:\n${params.value}`;
 	if (key === "mainTool.command") return `Command: ${params.command}`;
 	if (key === "mainTool.result") return `Result:\n${params.value}`;
@@ -18,7 +19,7 @@ function enTranslate(key, params = {}) {
 }
 
 test("formatToolDetail 拼出工具/状态/参数/结果（中文兜底文案）", () => {
-	const text = formatToolDetail("read", { path: "F:/PiDeck/src/a.ts", offset: 1, limit: 50 }, { content: [{ type: "text", text: 'import fs from "node:fs";' }] }, false, defaultToolDetailTranslate);
+	const text = formatToolDetail("read", { path: "F:/PiDeck/src/a.ts", offset: 1, limit: 50 }, { content: [{ type: "text", text: 'import fs from "node:fs";' }] }, "done", defaultToolDetailTranslate);
 	assert.match(text, /^工具：read/);
 	assert.match(text, /状态：完成/);
 	assert.match(text, /参数：/);
@@ -29,26 +30,35 @@ test("formatToolDetail 拼出工具/状态/参数/结果（中文兜底文案）
 });
 
 test("formatToolDetail 接受 DSH 纯字符串结果，不二次 JSON 编码", () => {
-	const text = formatToolDetail("read", { file_path: "a.ts" }, "hello world", false, enTranslate);
+	const text = formatToolDetail("read", { file_path: "a.ts" }, "hello world", "done", enTranslate);
 	assert.match(text, /Result:\nhello world/);
 	assert.doesNotMatch(text, /"hello world"/);
 });
 
 test("formatToolDetail args 已是 JSON 字符串时不二次编码", () => {
-	const text = formatToolDetail("read", '{"path":"a.ts"}', { content: [{ type: "text", text: "ok" }] }, false, enTranslate);
+	const text = formatToolDetail("read", '{"path":"a.ts"}', { content: [{ type: "text", text: "ok" }] }, "done", enTranslate);
 	assert.match(text, /"path": "a.ts"/);
 	assert.doesNotMatch(text, /\\\\"path\\\\"/);
 });
 
 test("formatToolDetail 无结果时省略结果段，失败态用 Failed", () => {
-	const text = formatToolDetail("bash", { command: "false" }, undefined, true, enTranslate);
+	const text = formatToolDetail("bash", { command: "false" }, undefined, "error", enTranslate);
 	assert.match(text, /Status: Failed/);
 	assert.doesNotMatch(text, /Result:/);
 });
 
+test("formatToolDetail 运行中的工具印「运行中」而不是「完成」", () => {
+	// 回归：start→end 之间若没有 update（子进程输出全被重定向到日志文件），
+	// detailText 会一直停在启动时那一版；此时状态段只按 isError 二分会印「完成」，
+	// 用户会把还在跑的长任务读成已结束。
+	const text = formatToolDetail("bash", { command: "node long.js > /tmp/x.log" }, undefined, "running", defaultToolDetailTranslate);
+	assert.match(text, /状态：运行中/);
+	assert.doesNotMatch(text, /状态：完成/);
+});
+
 test("formatToolDetail bash uses the raw multiline command instead of JSON escaping", () => {
 	const command = "python3 -c 'import json,sys\nprint(json.load(sys.stdin)[\"a\"])' </dev/null";
-	const text = formatToolDetail("bash", { command }, undefined, true, enTranslate);
+	const text = formatToolDetail("bash", { command }, undefined, "error", enTranslate);
 	assert.match(text, /Command: python3 -c 'import json,sys\nprint\(json\.load\(sys\.stdin\)\[\"a\"\]\)' <\/dev\/null/);
 	assert.doesNotMatch(text, /Arguments:/);
 	assert.doesNotMatch(text, /\\n/);

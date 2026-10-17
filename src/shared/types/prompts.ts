@@ -93,6 +93,16 @@ export type YaoPromptItem = {
 	path: string;
 };
 
+/**
+ * 提示词库 db 的就绪状态（安装包不再内置 db，首次使用需远程拉取）。
+ * ready=本地有库（缓存或仓库副本）；其余仅出现在 list 结果里，prompts 为空，
+ * 渲染层据此显示下载进度/重试引导。
+ */
+export type YaoPromptDbState = "ready" | "missing" | "downloading" | "failed";
+
+/** db 就绪状态推送负载（main→renderer 事件与重试返回值共用；见 XuePromptDbStore）。 */
+export type YaoPromptDbSnapshot = { state: "ready"; path: string; sha256: string | null; source: "cache" | "repo" } | { state: "downloading"; receivedBytes: number; totalBytes: number | null } | { state: "failed"; message: string } | { state: "missing" };
+
 export type YaoPromptListResult = {
 	categories: YaoPromptCategory[];
 	prompts: YaoPromptItem[];
@@ -100,6 +110,8 @@ export type YaoPromptListResult = {
 	total?: number;
 	page?: number;
 	pageSize?: number;
+	/** db 就绪状态；缺省视为 ready（旧客户端兼容：不认识该字段时行为不变） */
+	dbState?: YaoPromptDbState;
 };
 
 export type YaoPromptDetailResult = {

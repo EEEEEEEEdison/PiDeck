@@ -618,6 +618,8 @@ export function createPreviewApi(): PiDesktopApi {
 		},
 		sessions: {
 			list: async () => getSessions(),
+			// 预览模式无 sidecar：null 让调用方回退标题过滤
+			searchContent: async () => null,
 			// 预览模式无 DSH host：空预设目录满足接口契约
 			listDshAgentPresets: async () => [],
 			getDshDefaultModel: async () => undefined,
@@ -1512,8 +1514,10 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 		},
 		yaoPrompts: {
-			list: async () => ({ categories: [], prompts: [], repoPath: "" }),
+			list: async () => ({ categories: [], prompts: [], repoPath: "", dbState: "missing" }),
 			detail: async () => ({ title: "", description: "", promptContent: "", fullContent: "" }),
+			onDbStateChange: (_callback) => () => {},
+			retryDb: async () => ({ state: "missing" }),
 			import: async (_slug, _category) => ({
 				name: _slug,
 				path: `C:/Users/preview/.pi/agent/prompts/${_slug}.md`,
@@ -1542,6 +1546,8 @@ export function createPreviewApi(): PiDesktopApi {
 			search: async () => ({ query: "", total: 0, items: [] }),
 			detail: async () => null,
 			install: async (slug) => ({ success: true, slug, installDir: "", message: "Preview install" }),
+			// 预览模式无安装进程，但事件订阅形状必须完整（返回退订函数）
+			onInstallProgress: () => () => {},
 		},
 		acp: {
 			// 预览模式：无 ACP 工具数据，返回空表/恒过校验保持 PiDesktopApi 形状完整；

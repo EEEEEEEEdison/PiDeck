@@ -39,6 +39,7 @@ import type { NoticeHistoryFileEntry, NoticeHistoryRecordInput } from "../shared
 import type { ReplyActionRule, ReplyActionsSaveResult, ReplyActionsSnapshot } from "../shared/types/replyActions";
 import type {
 	YaoPromptListResult,
+	YaoPromptDbSnapshot,
 	YaoPromptDetailResult,
 	AgentRuntimeState,
 	AppInfo,
@@ -191,6 +192,7 @@ import type {
 	SessionRuntimeModelSelection,
 	SessionRuntimeReplacement,
 	SessionRuntimeTarget,
+	SessionSearchResult,
 	SessionTargetedValue,
 	SessionUiResponseInput,
 	SessionSummary,
@@ -494,6 +496,8 @@ const api = {
 	},
 	sessions: {
 		list: (projectId?: string) => ipcRenderer.invoke(ipcChannels.sessionsList, projectId) as Promise<SessionSummary[]>,
+		/** 跨会话正文搜索（Go sidecar）；null = 不可用（未构建/boot 中/失败），调用方回退标题过滤。 */
+		searchContent: (query: string) => ipcRenderer.invoke(ipcChannels.sessionsSearchContent, query) as Promise<SessionSearchResult | null>,
 		listCatalog: (projectId: string, options?: { scan?: boolean }) => ipcRenderer.invoke(ipcChannels.sessionsCatalogList, projectId, options) as Promise<SessionRecord[]>,
 		/** 后台扫描完成推送：目录缓存已合并，监听方应以 scan:false 重新拉取。返回退订函数。 */
 		onCatalogRefreshed: (listener: (input: { projectId: string }) => void) => {
@@ -1140,11 +1144,15 @@ const api = {
 		search: (query: string, page?: number, pageSize?: number, sortBy?: string, order?: string) => ipcRenderer.invoke(ipcChannels.skillHubSearch, { query, page, pageSize, sortBy, order }) as Promise<import("../shared/types").SkillHubSearchResult>,
 		detail: (slug: string) => ipcRenderer.invoke(ipcChannels.skillHubDetail, slug) as Promise<import("../shared/types").SkillHubDetail | null>,
 		install: (slug: string, projectId?: string) => ipcRenderer.invoke(ipcChannels.skillHubInstall, slug, projectId) as Promise<import("../shared/types").SkillHubInstallResult>,
+		// 安装进度：主进程节流推送，返回退订函数（渲染层卸载必须退订）
+		onInstallProgress: (callback: (progress: import("../shared/types").SkillHubInstallProgress) => void) => subscribe(ipcChannels.skillHubInstallProgress, callback),
 	},
 	yaoPrompts: {
 		list: (opts?: { category?: string; search?: string; page?: number; pageSize?: number }) => ipcRenderer.invoke(ipcChannels.yaoPromptsList, opts) as Promise<YaoPromptListResult>,
 		detail: (slug: string, category: string) => ipcRenderer.invoke(ipcChannels.yaoPromptsDetail, slug, category) as Promise<YaoPromptDetailResult>,
 		import: (slug: string, category: string, projectId?: string) => ipcRenderer.invoke(ipcChannels.yaoPromptsImport, slug, category, projectId) as Promise<PiPromptTemplateSummary>,
+		onDbStateChange: (callback: (state: YaoPromptDbSnapshot) => void) => subscribe(ipcChannels.yaoPromptsDbState, callback),
+		retryDb: () => ipcRenderer.invoke(ipcChannels.yaoPromptsDbRetry) as Promise<YaoPromptDbSnapshot>,
 	},
 	extensions: {
 		list: (forceRefresh?: boolean) => ipcRenderer.invoke(ipcChannels.extensionsList, forceRefresh) as Promise<PiExtensionListResult>,

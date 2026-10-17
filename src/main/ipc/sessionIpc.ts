@@ -40,6 +40,7 @@ import type {
 	ResolveLaunchDefaultsInput,
 	ResolvedLaunchDefaults,
 	ArchivedDshSession,
+	SessionSearchResult,
 } from "../../shared/types";
 import type { BridgeEventInput, BridgeResyncInput } from "../../shared/types/bridge";
 import { parseSessionProcessEventsFromFile } from "../sessions/sessionProcessEventsFile";
@@ -366,6 +367,12 @@ export type SessionIpcDeps = {
 	 * 未装配（单测/无 pi 运行时的宿主）时退回仅 CLI 缓存（models.json）的旧行为。
 	 */
 	validationCatalogModels?: () => AvailableModel[] | null | undefined;
+	/**
+	 * 跨会话正文搜索（Go session-index sidecar 的适配闭包；装配层封装 roots
+	 * 解析与降级）。未装配（单测）或返回 null（sidecar 缺失/boot 中/失败）时
+	 * 渲染层回退现有标题过滤，搜索入口永远不报错。
+	 */
+	sessionContentSearch?: (query: string) => Promise<SessionSearchResult | null>;
 	/** DSH 后端专用 IPC 依赖（C1 分组；未装配 = 无 DSH 后端）。 */
 	dshBackend?: DshBackendIpcDeps;
 };
@@ -558,6 +565,21 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		}
 		return sessionScanner.list(projectPath);
 	});
+	// 跨会话正文搜索：sidecar 不可用/boot 中/失败一律返回 null，渲染层回退标题过滤
+	ipcMain.handle(ipcChannels.sessionsSearchContent, async (_event, query: unknown) => {
+		const searcher = deps.sessionContentSearch;
+		if (!searcher) return null;
+		if (typeof query !== "string") return null;
+		const trimmed = query.trim();
+		if (!trimmed || trimmed.length > 256) return null;
+		try {
+			return await searcher(trimmed);
+		} catch (error) {
+			void appLogger.warn("session", "Content search failed", { error: error instanceof Error ? error.message : String(error) });
+			return null;
+		}
+	});
+
 	ipcMain.handle(ipcChannels.sessionsCatalogList, async (_event, projectId: string, options?: { scan?: boolean }) => {
 		const project = projectStore.get(projectId);
 		if (!project) throw new Error(mainCopy("project.notFound"));

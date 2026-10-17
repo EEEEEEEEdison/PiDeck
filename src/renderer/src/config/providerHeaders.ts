@@ -170,8 +170,8 @@ export const KNOWN_PROVIDER_ENDPOINTS: Record<string, { baseUrl: string; apiType
 	together: { baseUrl: "https://api.together.xyz/v1", apiType: "openai-completions" },
 	fireworks: { baseUrl: "https://api.fireworks.ai/inference/v1", apiType: "openai-completions" },
 	huggingface: { baseUrl: "https://api-inference.huggingface.co/v1", apiType: "openai-completions" },
-	opencode: { baseUrl: "https://opencode.ai/zen/v1", apiType: "openai-completions" },
-	"opencode-go": { baseUrl: "https://opencode.ai/zen/go/v1", apiType: "openai-completions" },
+	opencode: { baseUrl: "https://opencode.ai/inference/v1", apiType: "openai-completions" },
+	"opencode-go": { baseUrl: "https://opencode.ai/inference/go/v1", apiType: "openai-completions" },
 	minimax: { baseUrl: "https://api.minimax.io/v1", apiType: "openai-completions" },
 	"minimax-cn": { baseUrl: "https://api.minimaxi.com/v1", apiType: "openai-completions" },
 	// TokenDance（词元跳动）：多模型/多供应商网关，OpenAI 兼容 base URL；模型拉取

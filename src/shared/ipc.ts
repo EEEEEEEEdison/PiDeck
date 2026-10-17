@@ -183,6 +183,7 @@ export const ipcChannels = {
 	sessionsSetFocusedSession: "sessions:set-focused-session",
 	/** DSH 会话文件路径推导（渲染层右键「复制会话文件路径」；按 dshSessionId + cwd 计算 host 持久化路径）。 */
 	sessionsGetDshSessionPath: "sessions:get-dsh-session-path",
+	sessionsSearchContent: "sessions:search-content",
 	/** DSH 会话内容搜索（session.search；结果最多 20 会话，返回 sessionId + snippet）。 */
 	sessionsSearchDsh: "sessions:search-dsh",
 	/** DSH 创建目标（goal.create；objective 必填，maxGoalRounds 可选）。 */
@@ -393,12 +394,18 @@ export const ipcChannels = {
 	yaoPromptsList: "yao-prompts:list",
 	yaoPromptsDetail: "yao-prompts:detail",
 	yaoPromptsImport: "yao-prompts:import",
+	/** 提示词库 db 就绪状态推送（main→renderer；db 远程拉取进度/完成/失败） */
+	yaoPromptsDbState: "yao-prompts:db-state",
+	/** 用户点击重试：强制重新检查远程 db（绕过 TTL） */
+	yaoPromptsDbRetry: "yao-prompts:db-retry",
 	skillStoreSearch: "skill-store:search",
 	skillStoreImport: "skill-store:import",
 	// SkillHub（api.skillhub.cn）
 	skillHubSearch: "skill-hub:search",
 	skillHubDetail: "skill-hub:detail",
 	skillHubInstall: "skill-hub:install",
+	/** 安装进度（主进程 → 渲染层推送；状态丝流程用，不用轮询） */
+	skillHubInstallProgress: "skill-hub:install-progress",
 	extensionsList: "extensions:list",
 	extensionsUninstall: "extensions:uninstall",
 	extensionsInstall: "extensions:install",

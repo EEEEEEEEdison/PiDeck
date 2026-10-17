@@ -15,6 +15,7 @@ import type { RpcLogEntry } from "../../../../shared/types/rpcLog";
 import type { SidebarRunControl } from "./SidebarComponents";
 import { sessionDisplayName } from "../../utils/sessionDisplayName";
 import { DshSearchResults } from "./DshSearchResults";
+import { SessionContentSearchResults } from "./SessionContentSearchResults";
 import { ProjectTree } from "./ProjectTree";
 import { Button } from "../ui-shadcn/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
@@ -366,6 +367,16 @@ export function SidebarContent(props: SidebarContentProps) {
 				{/* G9：DSH 全文搜索结果（搜索词非空时展示；结果按 dshSessionId 映射回 catalog） */}
 				{controller.search.trim() && (
 					<DshSearchResults
+						query={controller.search}
+						onOpen={(projectId, sessionId) => {
+							void actions.sessions.open(projectId, sessionId);
+						}}
+					/>
+				)}
+				{/* 跨会话正文搜索（Go session-index sidecar）：命中会话跨项目展示，
+				    点击打开并定位到首个命中消息（pendingMessageJump 链路）；无 sidecar 时隐藏 */}
+				{controller.search.trim() && (
+					<SessionContentSearchResults
 						query={controller.search}
 						onOpen={(projectId, sessionId) => {
 							void actions.sessions.open(projectId, sessionId);

@@ -1,8 +1,8 @@
 import { Button } from "../components/ui-shadcn/button";
 import { showNotice } from "../utils/notice";
-import { useEffect, useState } from "react";
-import { Loader2, ArrowLeft, Check, ChevronLeft, ChevronRight, Download } from "lucide-react";
-import type { YaoPromptListResult, YaoPromptItem, YaoPromptDetailResult, PiPromptTemplateSummary, PiPromptTemplateListResult } from "../../../shared/types";
+import { useEffect, useRef, useState } from "react";
+import { Loader2, ArrowLeft, Check, ChevronLeft, ChevronRight, Download, RotateCcw } from "lucide-react";
+import type { YaoPromptListResult, YaoPromptItem, YaoPromptDetailResult, PiPromptTemplateSummary, PiPromptTemplateListResult, YaoPromptDbSnapshot } from "../../../shared/types";
 import { t } from "../i18n";
 import { desktopApi } from "../desktopApi";
 import { StoreSearchBar } from "./StoreSearchBar";
@@ -35,7 +35,25 @@ export function YaoPromptTab(props: { onImported?: () => void; projectId?: strin
 	const [previewDetail, setPreviewDetail] = useState<YaoPromptDetailResult | null>(null);
 	const [previewLoading, setPreviewLoading] = useState(false);
 	const [importingSlug, setImportingSlug] = useState<string | null>(null);
+	/** db 远程拉取状态（安装包不内置 db；list 返回 + 主进程推送双源驱动）。 */
+	const [dbSnapshot, setDbSnapshot] = useState<YaoPromptDbSnapshot | null>(null);
 	const PAGE_SIZE = 20;
+
+	// 稳定引用：订阅 effect 一次性挂载，回调经 ref 调最新实现，避免闭包过期
+	const reloadRef = useRef<() => void>(() => {});
+	const dataRef = useRef<YaoPromptListResult | null>(null);
+	dataRef.current = data;
+
+	// db 状态推送：下载完成（ready）时若当前无数据自动重拉（首次使用/离线重试成功场景）
+	useEffect(() => {
+		const unsubscribe = desktopApi.yaoPrompts.onDbStateChange((snapshot) => {
+			setDbSnapshot(snapshot);
+			if (snapshot.state === "ready" && (dataRef.current == null || dataRef.current.categories.length === 0)) {
+				reloadRef.current();
+			}
+		});
+		return unsubscribe;
+	}, []);
 
 	// 首次加载分类（全量，数据量小）
 	useEffect(() => {
@@ -53,6 +71,7 @@ export function YaoPromptTab(props: { onImported?: () => void; projectId?: strin
 		try {
 			const [result, installed] = await Promise.all([desktopApi.yaoPrompts.list(), getInstalledPromptNames(props.projectId)]);
 			setData(result);
+			if (result.dbState) setDbSnapshot((previous) => (previous?.state === "ready" ? previous : ({ state: result.dbState } as YaoPromptDbSnapshot)));
 			setInstalledNames(installed);
 			// 默认停留「全部」而不是 categories[0]：分类按 count DESC 排序，
 			// categories[0] 恒为「绘画提示词」（1000+ 条），用户一进中文精选就被锁在
@@ -141,6 +160,25 @@ export function YaoPromptTab(props: { onImported?: () => void; projectId?: strin
 		void loadCategories();
 		void loadPrompts();
 	};
+	reloadRef.current = () => void loadCategories();
+
+	/** db 下载失败后的重试：绕过 TTL 强制重查远程，进度经状态推送继续驱动 */
+	const handleDbRetry = async () => {
+		setDbSnapshot({ state: "missing" });
+		try {
+			const snapshot = await desktopApi.yaoPrompts.retryDb();
+			setDbSnapshot(snapshot);
+		} catch (err) {
+			console.error("[YaoPrompts] Db retry failed", err);
+			setDbSnapshot({ state: "failed", message: String(err) });
+		}
+	};
+
+	/** db 拉取中的进度文案：只有 totalBytes 时显示分数，否则只显示已接收 */
+	const dbProgressText = (snapshot: Extract<YaoPromptDbSnapshot, { state: "downloading" }>): string => {
+		const received = (snapshot.receivedBytes / 1024 / 1024).toFixed(1);
+		return snapshot.totalBytes ? t("config.yaoDbDownloading", { received, total: (snapshot.totalBytes / 1024 / 1024).toFixed(1) }) : t("config.yaoDbDownloadingNoTotal", { received });
+	};
 
 	// 预览详情视图
 	if (previewItem) {
@@ -227,6 +265,24 @@ export function YaoPromptTab(props: { onImported?: () => void; projectId?: strin
 				<div className="flex items-center justify-center gap-2 py-12 text-control text-text-tertiary">
 					<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
 					{t("common.loading")}
+				</div>
+			) : dbSnapshot && dbSnapshot.state !== "ready" && (data == null || data.categories.length === 0) ? (
+				/* db 未就绪空态：下载进度 / 获取中 / 失败重试（安装包不内置 db，首次使用需远程拉取） */
+				<div className="flex flex-col items-center justify-center gap-3 py-12 text-control text-text-tertiary">
+					{dbSnapshot.state === "failed" ? (
+						<>
+							<span>{t("config.yaoDbFailed")}</span>
+							<Button size="sm" variant="outline" onClick={() => void handleDbRetry()}>
+								<RotateCcw size={14} strokeWidth={1.8} aria-hidden="true" />
+								{t("config.yaoDbRetry")}
+							</Button>
+						</>
+					) : (
+						<>
+							<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />
+							<span>{dbSnapshot.state === "downloading" ? dbProgressText(dbSnapshot) : t("config.yaoDbPreparing")}</span>
+						</>
+					)}
 				</div>
 			) : !data || data.categories.length === 0 ? (
 				<div className="py-12 text-center text-control text-text-tertiary">{t("config.yaoNoData")}</div>

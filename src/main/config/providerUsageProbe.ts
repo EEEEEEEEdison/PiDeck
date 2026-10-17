@@ -3,7 +3,7 @@
  *
  * 设计目标：可扩展——新增 provider 只在此处增补「候选端点 + 响应解析」，不发散到 UI/IPC。
  * 内置策略：
- *   - opencode-go（baseUrl 含 opencode.ai/zen）：GET /usage →
+ *   - opencode-go（baseUrl 含 opencode.ai/zen 或 opencode.ai/inference）：GET /usage →
  *     { usage: { rolling|weekly|monthly: { status, percent, resetsAt } } }
  *   - DeepSeek（baseUrl 含 api.deepseek.com）：GET /user/balance →
  *     { balance_infos: [{ currency, total_balance }] }（total_balance 可能是数字或字符串）
@@ -88,9 +88,9 @@ export type UsageProbeParse =
 	/**
 	 * 专用解析器：响应结构特殊（cent 包装、percent/count 混合、多端点链），
 	 * 声明式路径表达不了，注册专用函数解析。目前支持 xai-billing / codex-usage /
-	 * commandcode-credits / kimi-credits / sub2api-usage。
+	 * commandcode-credits / kimi-credits / volcengine-plan / sub2api-usage / minimax-plan。
 	 */
-	| { kind: "custom"; resolver: "xai-billing" | "codex-usage" | "commandcode-credits" | "kimi-credits" | "volcengine-plan" | "sub2api-usage" };
+	| { kind: "custom"; resolver: "xai-billing" | "codex-usage" | "commandcode-credits" | "kimi-credits" | "volcengine-plan" | "sub2api-usage" | "minimax-plan" };
 
 /** 链式预检（如 xAI 需先查 identity 拿 userId 再查 billing）：
  *  先请求预检端点，把响应里 capture.path 的值注入主请求的 capture.header。 */
@@ -180,10 +180,12 @@ export type UsageProbeResponse = {
 
 /** 候选端点表：新增 provider 适配器时在此注册（用户探针会追加在之后）。 */
 export const USAGE_PROBE_CANDIDATES: UsageProbeCandidate[] = [
-	// opencode-go Zen：/v1/usage 直接给出三档占用百分比 + 重置时间。
+	// opencode / opencode-go 网关：/v1/usage 直接给出三档占用百分比 + 重置时间。
+	// host 路径随上游注册表改名：pi-ai 1.2.0 写 `opencode.ai/zen`，1.3.0 改成 `opencode.ai/inference`
+	// （旧路径仍在服务，DSH 自带依赖与用户 models.json 里普遍还是它），两种都要匹配。
 	{
 		path: "/usage",
-		baseUrlContains: ["opencode.ai/zen"],
+		baseUrlContains: ["opencode.ai/zen", "opencode.ai/inference"],
 		templateId: "opencode-usage",
 	},
 	// DeepSeek：/user/balance 给出余额信息（total_balance 在部分部署里是字符串，解析器已兼容）。
@@ -354,6 +356,25 @@ export const USAGE_PROBE_CANDIDATES: UsageProbeCandidate[] = [
 			remainingPath: "balance.balance",
 			scale: 1_000_000,
 		},
+	},
+	// MiniMax Coding Plan（Token Plan / M Plan）：官方 /v1/token_plan/remains 返回 general 桶的
+	// 5 小时滚动窗 + 周窗（*_remaining_percent）。路径在 host 根，而 provider 的 baseUrl 普遍带
+	// /anthropic 或 /v1，故走 rootPath 只取 origin。国内域 api.minimaxi.com、海外域 api.minimax.io
+	// 共用同一路径；旧版端点 /v1/api/openplatform/coding_plan/remains 排在其后兜底（仍有一批
+	// 账号/文档只认旧路径）。响应解析见 providerUsageMinimax.parseMinimaxPlan（剩余百分比反转为已用）。
+	{
+		path: "/v1/token_plan/remains",
+		rootPath: true,
+		baseUrlContains: ["minimaxi.com", "minimax.io"],
+		templateId: "minimax-plan",
+		parse: { kind: "custom", resolver: "minimax-plan" },
+	},
+	{
+		path: "/v1/api/openplatform/coding_plan/remains",
+		rootPath: true,
+		baseUrlContains: ["minimaxi.com", "minimax.io"],
+		templateId: "minimax-plan",
+		parse: { kind: "custom", resolver: "minimax-plan" },
 	},
 	// 通用 OpenAI 兼容网关：多数 OpenAI 兼容中转站实现官方 /v1/usage 端点
 	// （{ balance, unit } 结构）。不限定 baseUrl，仅靠 apiTypes 收窄到 OpenAI 协议，

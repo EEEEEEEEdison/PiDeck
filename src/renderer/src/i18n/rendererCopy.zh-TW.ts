@@ -2,7 +2,7 @@
  * 本文件由 `node scripts/genZhTwCopy.mjs` 生成，请勿手改。
  * 文案改动请修改对应的 zh-CN 源文件后重新生成；转换规则见该脚本的 OVERRIDES。
  * 注释刻意保留简体：属于开发者视角文本，不面向用户。
- * source-sha256: 3370a392480a89a021e0836cf72f8a47bf7b2c162c151d191d57c34d96186c97（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
+ * source-sha256: 1bc7fec23f840264329dbbc9bd3ff7830184288e5c9461a3bbecb4cb5ffd9341（来自 src/renderer/src/i18n/rendererCopy.zh-CN.ts 的词典区块指纹，由 tests/zhTwCopy.test.mjs 校验新鲜度）
  */
 import { mainProcessZhTW } from "../../../shared/i18n/mainProcessCopy.zh-TW";
 import type { TranslationKey } from "./rendererCopy.zh-CN";
@@ -325,6 +325,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"tabs.close": "關閉標籤頁",
 	"tabs.closeOthers": "關閉其他標籤頁",
 	"tabs.closeAll": "關閉全部標籤頁",
+	"tabs.closeRunningTitle": "關閉正在回答的會話？",
+	"tabs.closeRunningBody": "該會話正在生成回答，關閉標籤頁會停止當前回答。會話記錄與歷史訊息會保留，可隨時重新開啟。",
+	"tabs.closeRunningConfirm": "停止並關閉",
 	"tabs.pin": "固定標籤頁",
 	"tabs.unpin": "取消固定",
 	"tabs.moreActions": "更多操作",
@@ -1464,6 +1467,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.skillHubSearchError": "搜尋 SkillHub 失敗，請稍後重試",
 	"config.skillHubInstallError": "安裝 Skill 失敗：{error}",
 	"config.skillHubDetailNotAvailable": "詳情暫不可用，請在 skills.sh 中檢視",
+	"config.skillHubPhasePreparing": "正在準備安裝環境…",
+	"config.skillHubPhaseDownloading": "正在下載技能倉庫…",
+	"config.skillHubPhaseDownloadingPercent": "正在下載技能倉庫… {percent}%",
+	"config.skillHubPhaseInstalling": "正在寫入技能檔案…",
+	"config.skillHubPhaseRunning": "正在安裝…",
 	"config.skillHubInstallCount": "{count} 安裝",
 	"config.skillHubCopyInstallCommand": "複製安裝命令",
 	"config.noSearchResults": "沒有找到結果",
@@ -1514,6 +1522,9 @@ export const zhTW: Record<TranslationKey, string> = {
 	"sessionChannel.feishu": "飛書",
 	"session.acpToolHint": "選擇 Agent CLI 工具（僅草稿期可改）",
 	"sidebar.dshSearchResults": "DSH 會話搜尋結果",
+	"sidebar.sessionContentResults": "正文命中 {count} 個會話",
+	"sidebar.sessionContentMatchCount": "{count} 處匹配",
+	"sidebar.sessionContentTruncated": "（僅顯示前 20 個）",
 	"session.backendPickerHint": "選擇後端（Pi / DSH / 生圖 / 生影片 / Agent CLI）",
 	"session.backendLockedHint": "後端已鎖定（已傳送訊息後不可切換）",
 	"session.backendLockedNotice": "會話已開始，後端已鎖定，無法再切換。如需更換後端，請新建一個會話。",
@@ -3292,6 +3303,7 @@ export const zhTW: Record<TranslationKey, string> = {
 	"config.fetchModels": "獲取模型列表",
 	"config.fetchingModels": "獲取中…",
 	"config.field.apiKey": "API Key",
+	"config.field.apiKeyEmptyHint": "pi 只列出能解析憑據的供應商：留空且未登入時，該供應商的模型不會出現在會話模型選擇器和代理名單裡。",
 	"config.field.apiType": "API 型別",
 	"config.field.baseUrl": "Base URL",
 	"config.field.type": "型別",
@@ -3465,6 +3477,11 @@ export const zhTW: Record<TranslationKey, string> = {
 	"editor.htmlPreview": "HTML 預覽",
 	"config.yaoAll": "全部",
 	"config.yaoNoData": "暫無提示詞資料",
+	"config.yaoDbPreparing": "正在獲取提示詞庫…",
+	"config.yaoDbDownloading": "正在下載提示詞庫…（{received}/{total} MB）",
+	"config.yaoDbDownloadingNoTotal": "正在下載提示詞庫…（已接收 {received} MB）",
+	"config.yaoDbFailed": "提示詞庫下載失敗",
+	"config.yaoDbRetry": "重試",
 	"config.yaoNoMatches": "未匹配到提示詞",
 	"config.yaoLoadError": "載入中文提示詞失敗，請稍後重試",
 	"config.yaoPreviewError": "載入提示詞詳情失敗，請稍後重試",
@@ -4139,6 +4156,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.shortcuts.cycleSessionTabsDesc": "按標籤欄順序迴圈切換會話（到末尾回到開頭）；輸入框聚焦時同樣生效。預設 Ctrl+Tab（macOS 為 ⌃Tab）。",
 	"settings.shortcuts.cycleSessionTabsReverseLabel": "切換到上一個會話標籤頁",
 	"settings.shortcuts.cycleSessionTabsReverseDesc": "反向迴圈切換會話標籤頁。預設 Ctrl+Shift+Tab（macOS 為 ⌃⇧Tab）。",
+	"settings.shortcuts.closeSessionTabLabel": "關閉當前會話標籤頁",
+	"settings.shortcuts.closeSessionTabDesc": "關閉當前聚焦的會話標籤頁（Chrome 關標籤頁慣例）。預設 Ctrl+W（macOS ⌘W）；AI 回答進行中會先彈確認框，確認後停止回答並關閉。",
 	"settings.shortcuts.zoomInLabel": "放大視窗",
 	"settings.shortcuts.zoomInDesc": "放大整個視窗介面（含圖示與間距）。預設 Ctrl+=（macOS ⌘=）。",
 	"settings.shortcuts.zoomOutLabel": "縮小視窗",
@@ -4845,6 +4864,8 @@ export const zhTW: Record<TranslationKey, string> = {
 	"settings.piProxyModelsExtras": "已選但不在當前列表（模型可能已被刪除/改名）",
 	"settings.piProxyModelsNoModelProviders": "僅配置了供應商（暫無模型）",
 	"settings.piProxyModelsNoModelHint": "去 Pi 管理 → 模型 新增模型後即可配置代理",
+	"settings.piProxyModelsUnlistedProviders": "已配置但 pi 未列出",
+	"settings.piProxyModelsUnlistedHint": "pi 只列出能解析憑據的供應商：在 Pi 管理 → 模型 裡補 API Key，或先用 /login 登入，再回來重新整理",
 	"settings.enableWebService": "啟用 Web 服務",
 	"settings.environment": "環境",
 	"settings.foundPi": "已找到 {version}",

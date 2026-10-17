@@ -45,6 +45,14 @@ GitHub 的 choice 只能写死静态列表，无法动态读 tag，所以每发�
 - 列表首项是哨兵值 `auto`（语义：跟随 GitHub latest / 按 package.json 正式发版），不要手动移动或删除；带 `auto` 的 workflow 都必须有 `tag_custom` 兜底输入，且 `tag_custom` 非空时优先级高于下拉；
 - 回归测试：`node --test tests/syncWorkflowChoices.test.mjs`（含 v 前缀、新→旧排序、哨兵值、input 顺序）。
 
+## 提示词库 db 资产发布（xueprompts.db，远程拉取通道）
+
+安装包不内置 `resources/xueprompts.db`（省 ~4.3MB，且库可独立于发版更新）：打包后的应用首次打开提示词商店时从 Release 资产下载缓存到 userData，版本判定用同目录的 `.sha256` 文件。
+
+- db 内容有更新时：跑 `node scripts/publish-xueprompts.mjs`（先做 sql.js 健康检查再生成 `resources/xueprompts.db.sha256`，两个文件一起提交），再把这两个文件上传到对应平台的 Release 资产（GitHub `gh release upload <tag> resources/xueprompts.db resources/xueprompts.db.sha256`，AtomGit 侧由 sync-atomgit 同步）；上传到既有 tag 后客户端在 1h 检查 TTL 后自然更新。
+- 两份资产必须同源成套上传（客户端按源配对拉取 sha+db 并校验，跨源指纹不匹配会整体作废）。
+- 平时发版无需重新上传：客户端按 sha 判断未变更则免下载。仓库内的 `resources/xueprompts.db` 仅作为源码运行（dev）副本与发布脚本的健康检查输入。
+
 ## 打包验证
 
 `npm run pack`（--dir 快速验证）→ `dist:win/mac/linux`；发版前至少跑过一次目标平台完整安装包的人工 smoke，不依赖 CI 构建成功即发布。

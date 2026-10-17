@@ -59,7 +59,7 @@
   "main": "out/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.js",
-    "build": "npm run sync:dsh-version && npm run build:packages && npm run generate:pi-ai-catalog && npm run generate:extensions-manifest && npm run generate:prompts-manifest && npm run generate:skills-manifest && npm run runtime:pack && npm run runtime:check && npm run check:xueprompts && tsc --noEmit --skipLibCheck --incremental && electron-vite build",
+    "build": "npm run sync:dsh-version && npm run build:packages && npm run generate:pi-ai-catalog && npm run generate:extensions-manifest && npm run generate:prompts-manifest && npm run generate:skills-manifest && npm run runtime:pack && npm run runtime:check && npm run check:xueprompts && npm run build:xue-index && npm run build:session-index && tsc --noEmit --skipLibCheck --incremental && electron-vite build",
     "build:packages": "node scripts/build-local-packages.js",
     "build:fast": "npm run generate:pi-ai-catalog && npm run generate:extensions-manifest && npm run generate:prompts-manifest && npm run generate:skills-manifest && electron-vite build",
     "build:main": "electron-vite build --config electron.vite.main.mjs",
@@ -77,6 +77,8 @@
     "check:prompts-manifest": "node scripts/generate-content-manifests.mjs --domain prompts --check",
     "generate:skills-manifest": "node scripts/generate-content-manifests.mjs --domain skills",
     "check:skills-manifest": "node scripts/generate-content-manifests.mjs --domain skills --check",
+    "build:xue-index": "node scripts/build-xue-index.mjs",
+    "build:session-index": "node scripts/build-session-index.mjs",
     "build:announcements": "node scripts/build-announcements.js",
     "check:announcements": "node scripts/build-announcements.js --check",
     "check:xueprompts": "node scripts/check-xueprompts.mjs",
@@ -217,8 +219,20 @@
         "to": "extensions/node_modules/undici"
       },
       {
-        "from": "resources/xueprompts.db",
-        "to": "xueprompts.db"
+        "from": "resources/xue-index/bin",
+        "to": "xue-index",
+        "filter": [
+          "xue-index",
+          "xue-index.exe"
+        ]
+      },
+      {
+        "from": "resources/session-index/bin",
+        "to": "session-index",
+        "filter": [
+          "session-index",
+          "session-index.exe"
+        ]
       },
       {
         "from": "resources/quick-messages.default.json",
@@ -378,7 +392,7 @@
     "@deepseek-ai/dsh-subprocess": "0.2.0-rc.2",
     "@deepseek-ai/dsh-timeout": "0.2.0-rc.2",
     "@deepseek-ai/dsh-workflow": "0.2.0-rc.2",
-    "@earendil-works/pi-ai": "1.2.0",
+    "@earendil-works/pi-ai": "1.3.0",
     "@fiahfy/icns": "^0.0.7",
     "@lezer/highlight": "^1.2.3",
     "@pierre/diffs": "^1.3.5",

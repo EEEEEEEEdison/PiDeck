@@ -6,7 +6,9 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 const timeline = readFileSync("src/renderer/src/components/session/SessionMessageTimeline.tsx", "utf8");
 
 test("history load failure displays the actual error without requiring a tooltip", () => {
-	const errorState = timeline.match(/\{messageLoadState\?\.status\s*===\s*"error"\s*&&\s*activeMessages\.length\s*===\s*0\s*&&\s*!dshHostStopped\s*&&\s*\([\s\S]*?\n[\t ]*\)\}/)?.[0];
+	// 终态守卫会继续细分（sessionFileMissing 即后续新增）：只锚定「error + 非 DSH」头部，
+	// 其余守卫不枚举，避免每加一个终态分支就重红。
+	const errorState = timeline.match(/\{messageLoadState\?\.status\s*===\s*"error"[\s\S]{0,200}?!dshHostStopped[\s\S]*?\n[\t ]*\)\}/)?.[0];
 	assert.ok(errorState, "the non-DSH history error state must remain available");
 	assert.match(errorState, /\{messageLoadState\.error\s*&&\s*<p\b[^>]*>\s*\{messageLoadState\.error\}\s*<\/p>\}/);
 	assert.doesNotMatch(errorState, /title=\{messageLoadState\.error/);

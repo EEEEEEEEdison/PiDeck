@@ -5387,7 +5387,7 @@ export class AgentManager {
 		// pi 侧截断（bash/powershell >1 MiB）：存在时才写 meta.resultTruncation，
 		// 普通结果的 details 无 truncation 字段 → 不下发多余 meta。
 		const piTruncation = extractPiToolTruncation(result);
-		const detailText = this.messageProjector.formatToolDetail(toolName, args, result, isError);
+		const detailText = this.messageProjector.formatToolDetail(toolName, args, result, status);
 		// detailText 整体截断（拼接后可能超单段上限）并标记 truncated/fullLength；
 		// 完整结果文本缓存在 toolFullTextByMessageId（LRU），供「查看完整输出」按需读取。
 		const detailDelivery = this.messageProjector.truncateDetailWithMeta(detailText);

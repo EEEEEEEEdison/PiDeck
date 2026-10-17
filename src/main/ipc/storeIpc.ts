@@ -5,11 +5,13 @@
 
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import type { CreatePiPromptTemplateInput, PiPromptTemplateSummary, PromptStoreItem, PromptStoreRawItem, PromptStoreSearchResponse, PromptStoreSearchResult } from "../../shared/types";
+import type { CreatePiPromptTemplateInput, PiPromptTemplateSummary, PromptStoreItem, PromptStoreRawItem, PromptStoreSearchResponse, PromptStoreSearchResult, SkillHubInstallProgress } from "../../shared/types";
 import type { AppLogger } from "../logging/AppLogger";
 import type { PromptManager } from "../prompts/PromptManager";
 import type { SkillManager } from "../skills/SkillManager";
+import { isNetworkFailure } from "../skills/skillHubInstallProgress";
 import type { XuePromptManager } from "../prompts/XuePromptManager";
+import type { XuePromptDbStore } from "../prompts/XuePromptDbStore";
 import type { ExtensionManager } from "../extensions/ExtensionManager";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 import type { ConfigManager } from "../config/ConfigManager";
@@ -19,16 +21,31 @@ export type StoreIpcDeps = {
 	promptManager: PromptManager;
 	skillManager: SkillManager;
 	xuePromptManager: XuePromptManager;
+	/** 提示词库 db 远程拉取服务（yaoPromptsDbRetry 用；可选保持 IPC 单测轻量）。 */
+	xuePromptDbStore?: () => XuePromptDbStore | null;
 	extensionManager: ExtensionManager;
 	projectResourceManager: ProjectResourceManager;
 	/** Project trust is checked before any store write; optional keeps isolated IPC tests lightweight. */
 	configManager?: ConfigManager;
 	projectTrustPath?: (projectRoot: string, projectId: string) => string;
+	/**
+	 * 主进程网络请求实现（注入 Electron net.fetch）。
+	 * 商店搜索不能用裸全局 fetch：undici 既不读系统代理也不读 Electron session 代理，
+	 * 需要代理才能出去的网络上会直接挂到超时，表现为「商店加载不动」。
+	 */
+	netFetch?: (url: string, init?: RequestInit) => Promise<Response>;
+	/** 安装子进程的代理 env（git clone 不读 Chromium 代理，只能靠环境变量传递） */
+	resolveInstallProxyEnv?: () => Promise<Record<string, string> | undefined>;
+	/** 安装进度推送（主进程 → 渲染层，通道 skill-hub:install-progress） */
+	sendSkillHubInstallProgress?: (progress: SkillHubInstallProgress) => void;
 	appLogger: AppLogger;
 	mainCopy: (key: string, params?: Record<string, string | number>) => string;
 };
 
-export function registerStoreIpc({ promptManager, skillManager, xuePromptManager, extensionManager, projectResourceManager, configManager, projectTrustPath, appLogger, mainCopy }: StoreIpcDeps): void {
+export function registerStoreIpc({ promptManager, skillManager, xuePromptManager, xuePromptDbStore, extensionManager, projectResourceManager, configManager, projectTrustPath, netFetch, resolveInstallProxyEnv, sendSkillHubInstallProgress, appLogger, mainCopy }: StoreIpcDeps): void {
+	// 商店网络请求统一走注入实现（Electron net.fetch，遵循桌面/系统代理规则）。
+	// 惰性取全局 fetch：测试沙箱没有 fetch 全局，注册阶段直接引用会 ReferenceError。
+	const fetchImpl = netFetch ?? ((url: string, init?: RequestInit) => globalThis.fetch(url, init));
 	const requireText = (value: unknown, label: string, maxLength = 4096): string => {
 		if (typeof value !== "string" || !value.trim() || value.length > maxLength) {
 			throw new Error(`Invalid ${label}.`);
@@ -246,7 +263,7 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 				if (options?.tag) params.set("tag", options.tag);
 
 				const url = `${PROMPT_STORE_BASE}/prompts?${params.toString()}`;
-				const response = await fetch(url, {
+				const response = await fetchImpl(url, {
 					signal: AbortSignal.timeout(10_000),
 				});
 				if (!response.ok) {
@@ -270,7 +287,7 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 	ipcMain.handle(ipcChannels.promptStoreGet, async (_event, id: string) => {
 		try {
 			const url = `${PROMPT_STORE_BASE}/prompts/${encodeURIComponent(id)}`;
-			const response = await fetch(url, {
+			const response = await fetchImpl(url, {
 				signal: AbortSignal.timeout(10_000),
 			});
 			if (!response.ok) {
@@ -350,7 +367,7 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		try {
 			const params = new URLSearchParams({ q: query, perPage: "20" });
 			const url = `https://prompts.chat/api/prompts?${params.toString()}`;
-			const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+			const response = await fetchImpl(url, { signal: AbortSignal.timeout(10_000) });
 			if (!response.ok) throw new Error(`prompts.chat API 返回 ${response.status}`);
 			const raw = (await response.json()) as PromptStoreSearchResponse;
 			const result = {
@@ -414,7 +431,7 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 	ipcMain.handle(ipcChannels.skillHubSearch, async (_event, opts: { query: string; limit?: number }) => {
 		const { query, limit = 50 } = opts;
 		try {
-			const response = await fetch(`https://www.skills.sh/api/search?q=${encodeURIComponent(query)}&limit=${limit}`, { signal: AbortSignal.timeout(15_000) });
+			const response = await fetchImpl(`https://www.skills.sh/api/search?q=${encodeURIComponent(query)}&limit=${limit}`, { signal: AbortSignal.timeout(15_000) });
 			if (!response.ok) throw new Error(`API returned ${response.status}`);
 			const json = (await response.json()) as {
 				skills?: Array<{ id: string; skillId: string; name: string; installs: number; source: string }>;
@@ -450,14 +467,14 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		const lastSlash = validSlug.lastIndexOf("/");
 		const pkg = lastSlash > 0 ? validSlug.slice(0, lastSlash) : validSlug;
 		const skillName = lastSlash > 0 ? validSlug.slice(lastSlash + 1) : "";
-		// P0 security: validate each argument before passing it to execFile (shell is disabled).
+		// P0 security: validate each argument before passing it to the install command (shell is disabled).
 		const SAFE_SLUG_RE = /^[a-zA-Z0-9@/\-_.]+$/;
 		if (!validSlug || !SAFE_SLUG_RE.test(pkg) || (skillName && !SAFE_SLUG_RE.test(skillName))) {
 			return { success: false, slug: validSlug, installDir: "", error: mainCopy("store.skillsShInvalidSlug") };
 		}
 		const target = await projectInstallTarget(projectId);
 		try {
-			const { execFile } = await import("node:child_process");
+			const { runSkillHubInstall } = await import("../skills/skillHubInstallRunner");
 			const { buildSkillHubInstallCommand } = await import("../skills/skillHubInstallCommand");
 			// win32 经 cmd.exe /d /s /c 包装（Node 24 Windows 直 spawn .cmd 报 EINVAL），
 			// 非 win 平台数组直调；命令构造见 skillHubInstallCommand.ts 头注释。
@@ -466,27 +483,25 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 				skillName,
 				global: !target,
 			});
-			await new Promise<void>((resolve, reject) => {
-				execFile(
-					command,
-					args,
-					{
-						cwd: target?.root,
-						encoding: "utf8",
-						timeout: 120_000,
-						maxBuffer: 10 * 1024 * 1024,
-						shell: false,
-						windowsHide: true,
-					},
-					(error, _stdout, stderr) => {
-						if (error) {
-							const detail = typeof stderr === "string" && stderr.trim() ? `${error.message}: ${stderr.trim()}` : error.message;
-							reject(new Error(detail));
-							return;
-						}
-						resolve();
-					},
-				);
+			// 安装链路（npx → git clone）不吃 Electron 的 session 代理，代理只能靠 env 传进去，
+			// 否则「能搜到、一点安装就失败」——网络受限环境下的实际故障形态。
+			const proxyEnv = await resolveInstallProxyEnv?.();
+			await runSkillHubInstall({
+				command,
+				args,
+				cwd: target?.root,
+				env: proxyEnv,
+				// 进度推送：解析器已按 200ms 节流，阶段切换/百分比推进立即上报。
+				onProgress: sendSkillHubInstallProgress
+					? (update) =>
+							sendSkillHubInstallProgress({
+								slug: validSlug,
+								phase: update.phase,
+								detail: update.detail,
+								...(update.percent === undefined ? {} : { percent: update.percent }),
+								at: Date.now(),
+							})
+					: undefined,
 			});
 			const installDir = target ? await projectResourceManager.ensureResourceDirectory(target.id, "project-pi") : "";
 			void appLogger.info("skill-hub", "Installed skill", {
@@ -500,7 +515,9 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 			const message = err instanceof Error ? err.message : String(err);
 			void appLogger.warn("skill-hub", "Install failed", { slug: validSlug, error: message });
 			const brief = message.length > 300 ? `${message.slice(0, 300)}…` : message;
-			return { success: false, slug: validSlug, installDir: "", error: brief };
+			// 命中网络特征时补一句可执行提示（GitHub 不可达 → 引导用户配代理），避免只丢一句 git 报错
+			const hint = isNetworkFailure(message) ? ` ${mainCopy("store.skillsShInstallNetworkHint")}` : "";
+			return { success: false, slug: validSlug, installDir: "", error: `${brief}${hint}` };
 		}
 	});
 
@@ -526,6 +543,14 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 			}
 		},
 	);
+
+	// 提示词库 db 重试：失败后用户点击重试按钮触发，绕过 TTL 强制重查远程。
+	// 返回触发时刻快照（downloading/ready/failed），完成态经 yaoPromptsDbState 事件推送。
+	ipcMain.handle(ipcChannels.yaoPromptsDbRetry, async () => {
+		const dbStore = xuePromptDbStore?.() ?? null;
+		if (!dbStore) throw new Error(mainCopy("store.yaoListFailed"));
+		return dbStore.retry();
+	});
 
 	ipcMain.handle(ipcChannels.yaoPromptsDetail, async (_event, slug: string, category: string) => {
 		try {

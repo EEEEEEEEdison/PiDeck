@@ -149,3 +149,22 @@ export interface SkillHubInstallResult {
 	message?: string;
 	error?: string;
 }
+
+/**
+ * SkillHub 安装阶段（`skill-hub:install-progress` 事件载荷字段）。
+ * 由安装 CLI 的输出特征判定：preparing=首次拉取 npx cli，downloading=clone 技能仓库，
+ * installing=写入技能目录，running=无阶段特征的普通输出兜底。
+ */
+export type SkillHubInstallPhase = "preparing" | "downloading" | "installing" | "running";
+
+/** SkillHub 安装过程进度（主进程节流后推送；渲染层据此显示下载进度） */
+export interface SkillHubInstallProgress {
+	slug: string;
+	phase: SkillHubInstallPhase;
+	/** 最近一条原始输出（已去 ANSI），作副标题/悬浮提示用 */
+	detail: string;
+	/** git/npm 进度行解析出的百分比；解析不到时缺省 */
+	percent?: number;
+	/** 上报时间（毫秒时间戳） */
+	at: number;
+}
