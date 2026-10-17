@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { computeThinkingDisplay, resolveComposerThinkingLevel } = loadTsCommonJs("src/renderer/src/utils/thinkingDisplay.ts");
+const { computeThinkingDisplay, resolveComposerThinkingLevel, clampThinkingLevelToAllowed } = loadTsCommonJs("src/renderer/src/utils/thinkingDisplay.ts");
 
 // vm realm 对象原型与测试 realm 不同，deepStrictEqual 会误判，改用 JSON 比较
 function assertDisplay(actual, expected) {
@@ -48,6 +48,28 @@ test("resolveComposerThinkingLevel: 无会话记录时只使用引导页 fallbac
 			isLive: true,
 		}),
 		"off",
+	);
+});
+
+test("clampThinkingLevelToAllowed: 档位超限时对齐 pi-ai 优先向上就近 clamp，向上无可退则向下", () => {
+	const allowed = ["low", "medium", "high"];
+	assert.equal(clampThinkingLevelToAllowed("max", allowed), "high");
+	assert.equal(clampThinkingLevelToAllowed("xhigh", allowed), "high");
+	assert.equal(clampThinkingLevelToAllowed("medium", allowed), "medium");
+	assert.equal(clampThinkingLevelToAllowed("off", allowed), "low");
+	// 缺失 medium 且仅有 low/high 时，优先向上命中 high
+	assert.equal(clampThinkingLevelToAllowed("medium", ["low", "high"]), "high");
+	// 仅有低档时，向下就近命中 minimal
+	assert.equal(clampThinkingLevelToAllowed("medium", ["off", "minimal"]), "minimal");
+});
+
+test("resolveComposerThinkingLevel: 传入 allowedLevels 时自动 clamp", () => {
+	assert.equal(
+		resolveComposerThinkingLevel({
+			fallback: "max",
+			allowedLevels: [{ value: "low" }, { value: "medium" }, { value: "high" }],
+		}),
+		"high",
 	);
 });
 

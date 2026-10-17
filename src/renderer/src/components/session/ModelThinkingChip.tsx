@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
+import { clampThinkingLevelToAllowed } from "../../utils/thinkingDisplay";
 import { THINKING_LEVELS, type ThinkingPickerLevel } from "./sessionPickerOptions";
 
 /** 紧凑的模型/思考组合：模型直接打开完整选择器，思考保留独立的就地入口。 */
@@ -24,8 +25,9 @@ export function ModelThinkingChip(props: { modelLabel: string; modelPendingTo?: 
 export function ThinkingLevelDropdown(props: { current?: string; levels?: ThinkingPickerLevel[]; open: boolean; onOpenChange: (open: boolean) => void; disabled?: boolean; onPick: (level: string) => void }) {
 	// undefined 表示能力尚未知，沿用旧版全量回退；[] 则是后端明确表示不支持。
 	const levels = props.levels ?? THINKING_LEVELS;
-	const currentLevel = levels.find((level) => level.value === props.current) ?? THINKING_LEVELS.find((level) => level.value === props.current);
-	const thinkingText = currentLevel?.labelKey ? t(currentLevel.labelKey) : (currentLevel?.label ?? props.current ?? t("app.think"));
+	const effectiveLevel = levels.some((level) => level.value === props.current) ? props.current : clampThinkingLevelToAllowed(props.current, levels);
+	const currentLevel = levels.find((level) => level.value === (effectiveLevel ?? props.current));
+	const thinkingText = currentLevel?.labelKey ? t(currentLevel.labelKey) : (currentLevel?.label ?? effectiveLevel ?? props.current ?? t("app.think"));
 	return (
 		<DropdownMenu open={props.open} onOpenChange={props.onOpenChange}>
 			<DropdownMenuTrigger asChild>

@@ -12,6 +12,7 @@ import { showNotice } from "../utils/notice";
 import { t } from "../i18n";
 import { SessionCommandFailure, requireSessionCommand, sessionCommandFailureToast, toSessionRuntimeTarget } from "../utils/sessionCommands";
 import { resolveComposerLiveModel } from "../utils/modelPendingDisplay";
+import { clampThinkingLevelToAllowed } from "../utils/thinkingDisplay";
 import { modelKey, pickCycleModel, pickCycleThinkingLevel, resolveFavoriteCycleCandidates, type CycleDirection } from "../utils/preferenceCycle";
 import { WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, WELCOME_THINKING_KEY } from "../utils/chatSessionBootstrap";
 
@@ -177,8 +178,11 @@ export function useSessionPreferenceController(options: {
 	}
 
 	async function applyModelToRecord(model: AvailableModel, isCurrent: () => boolean) {
+		const modelLevels = model.thinkingLevels;
+		const nextThinking = modelLevels !== undefined ? clampThinkingLevelToAllowed(record?.thinkingLevel, modelLevels) : record?.thinkingLevel;
 		const updated = await desktopApi.sessions.updateRecord(sessionId, {
 			model: selectedModelPreference(model),
+			...(nextThinking !== record?.thinkingLevel ? { thinkingLevel: nextThinking } : {}),
 		});
 		if (isCurrent()) state.upsertSession(updated);
 	}
